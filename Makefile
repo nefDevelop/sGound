@@ -2,6 +2,13 @@
 
 BINARY_NAME=sgound-server
 
+# Puertos por defecto si no son pasados como comando (ej: make dev SGOUND_PORT=9000)
+VITE_PORT ?= 5177
+SGOUND_PORT ?= 8088
+
+export SGOUND_PORT
+export VITE_PORT
+
 all: test build
 
 build:
@@ -16,11 +23,11 @@ test:
 	go test -v ./...
 
 dev-front:
-	@echo "=> Servidor UI de desarrollo en caliente (Vite)..."
-	cd web && npm run dev
+	@echo "=> Servidor UI de desarrollo en caliente (Vite en puerto $(VITE_PORT))..."
+	cd web && npx vite --port $(VITE_PORT) --strictPort
 
 dev-back:
-	@echo "=> Ejecutando backend en modo desarrollo..."
+	@echo "=> Ejecutando backend en modo desarrollo (Puerto $(SGOUND_PORT))..."
 	go run ./cmd/sgound
 
 dev:

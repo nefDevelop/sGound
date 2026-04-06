@@ -60,23 +60,42 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	defer f.Close()
 
 	metadata, err := tag.ReadFrom(f)
-	if err != nil {
-		return fmt.Errorf("failed to read tags from %s: %w", path, err)
-	}
+	
+	var artistName, albumName, title string
+	var trackNum, year int
+	var genre string
 
-	artistName := metadata.Artist()
-	if artistName == "" {
+	if err != nil {
+		slog.Warn("Tag parsing failed (corrupt metadata), fallback to paths", "path", path, "err", err)
+		genre = "Subsonic Media"
 		artistName = "Unknown Artist"
+		baseDir := filepath.Base(filepath.Dir(path))
+		if baseDir == "." || baseDir == "/" {
+			albumName = "Unknown Album"
+		} else {
+			albumName = baseDir
+		}
+		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	} else {
+		artistName = metadata.Artist()
+		if artistName == "" {
+			artistName = "Unknown Artist"
+		}
+		albumName = metadata.Album()
+		if albumName == "" {
+			albumName = "Unknown Album"
+		}
+		title = metadata.Title()
+		if title == "" {
+			title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		}
+		trackNum, _ = metadata.Track()
+		year = metadata.Year()
+		genre = metadata.Genre()
+		if genre == "" {
+			genre = "Subsonic Media"
+		}
 	}
-	albumName := metadata.Album()
-	if albumName == "" {
-		albumName = "Unknown Album"
-	}
-	title := metadata.Title()
-	if title == "" {
-		title = filepath.Base(path)
-	}
-	trackNum, _ := metadata.Track()
 
 	// 1. Get or Create Artist
 	artistId := generateID(artistName)
@@ -87,7 +106,7 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 	// 2. Get or Create Album
 	albumId := generateID(artistName + albumName)
-	_, err = s.DB.Conn.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", albumId, artistId, albumName, metadata.Year())
+	_, err = s.DB.Conn.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", albumId, artistId, albumName, year)
 	if err != nil {
 		return err
 	}
@@ -95,8 +114,8 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	// 3. Create Track
 	trackId := generateID(path) // Unique identifier for the file
 	_, err = s.DB.Conn.Exec(
-		"INSERT OR REPLACE INTO tracks (id, album_id, title, track_num, path, duration) VALUES (?, ?, ?, ?, ?, ?)",
-		trackId, albumId, title, trackNum, path, 0, // 0 for duration until we parse headers deeper
+		"INSERT OR REPLACE INTO tracks (id, album_id, title, track_num, path, duration, genre) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		trackId, albumId, title, trackNum, path, 0, genre,
 	)
 	if err != nil {
 		return err

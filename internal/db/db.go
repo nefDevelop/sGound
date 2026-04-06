@@ -53,6 +53,7 @@ func (db *Database) initSchema() error {
 		track_num INTEGER,
 		path TEXT NOT NULL UNIQUE,
 		duration INTEGER,
+		genre TEXT,
 		FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE
 	);
 	`

@@ -2,28 +2,53 @@
   import { onMount } from 'svelte';
   import TagEditor from './lib/TagEditor.svelte';
   
-  let artists = [];
+  let tracks = [];
   let error = null;
 
   let isTagEditorOpen = false;
   let trackToEdit = { id: '', title: '', artist: '', album: '' };
 
+  let currentPlaying = null;
+  let audioRef = null;
+
   onMount(async () => {
+    fetchTracks();
+  });
+
+  async function fetchTracks() {
     try {
-      const res = await fetch('/api/artists');
-      if (!res.ok) throw new Error("Failed to fetch library");
-      artists = await res.json() || [];
+      const res = await fetch('/api/tracks');
+      if (!res.ok) throw new Error("Failed to fetch tracks");
+      tracks = await res.json() || [];
     } catch (e) {
       error = e.message;
     }
-  });
+  }
 
-  function openEditor(artist) {
-    trackToEdit = { id: 'mock-1', title: 'Sample Track', artist: artist.name, album: 'Sample Album' };
+  function openEditor(track) {
+    trackToEdit = { ...track };
     isTagEditorOpen = true;
   }
-</script>
 
+  async function deleteTrack(id) {
+    if (!confirm("Are you sure you want to delete this track from DB?")) return;
+    try {
+      const res = await fetch(`/api/tracks/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error("Error deleting record");
+      tracks = tracks.filter(t => t.id !== id);
+    } catch(e) {
+      alert(e);
+    }
+  }
+
+  function playTrack(track) {
+    currentPlaying = track;
+    if (audioRef) {
+      audioRef.src = `/api/stream/${track.id}`;
+      audioRef.play();
+    }
+  }
+</script>
 
 <main class="app-layout">
   <!-- Sidebar -->
@@ -43,26 +68,50 @@
   <!-- Main Content -->
   <section class="content">
     <header class="top-bar">
-      <h1>Your Library</h1>
+      <h1>Your Tracks</h1>
       <button class="primary-btn">Scan Library</button>
     </header>
 
     <div class="library-grid">
       {#if error}
         <p class="error">{error}</p>
-      {:else if artists.length === 0}
+      {:else if tracks.length === 0}
         <div class="empty-state">
-          <p>Your library is empty. Please run a scan.</p>
+          <p>Your library is empty. Add MP3/FLACs to ./music directory.</p>
         </div>
       {:else}
-        {#each artists as artist}
-          <!-- svelte-ignore a11y-click-events-have-key-events -->
-          <!-- svelte-ignore a11y-no-static-element-interactions -->
-          <div class="artist-card glass" on:click={() => openEditor(artist)}>
-            <div class="avatar"></div>
-            <h3>{artist.name}</h3>
-          </div>
-        {/each}
+        <table class="tracks-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Title</th>
+              <th>Artist</th>
+              <th>Album</th>
+              <th>Genre</th>
+              <th>Year</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each tracks as track}
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+              <tr class="glass-row" on:dblclick={() => playTrack(track)}>
+                <td>{track.trackNum || '-'}</td>
+                <td class="bold">{track.title}</td>
+                <td>{track.artist}</td>
+                <td>{track.album}</td>
+                <td style="color:var(--primary-color)">{track.genre || '-'}</td>
+                <td style="opacity: 0.6">{track.year || '-'}</td>
+                <td class="actions-cell">
+                  <button class="icon-btn-small" on:click={() => playTrack(track)}>▶</button>
+                  <button class="icon-btn-small" on:click={() => openEditor(track)}>✏️</button>
+                  <button class="icon-btn-small delete" on:click={() => deleteTrack(track.id)}>🗑️</button>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       {/if}
     </div>
   </section>
@@ -70,21 +119,24 @@
   <!-- Player Bar -->
   <footer class="player glass">
     <div class="now-playing">
-      <div class="cover"></div>
+      {#if currentPlaying}
+        <img class="cover" src={`/api/cover/${currentPlaying.id}`} alt="Artwork" />
+      {:else}
+        <div class="cover"></div>
+      {/if}
       <div class="track-info">
-        <span class="title">Unknown Track</span>
-        <span class="artist">Select a song to play</span>
+        <span class="title">{currentPlaying ? currentPlaying.title : 'No Track'}</span>
+        <span class="artist">{currentPlaying ? currentPlaying.artist : 'Select a song'}</span>
       </div>
     </div>
     
     <div class="controls">
-      <button class="icon-btn">⏪</button>
-      <button class="icon-btn play">▶</button>
-      <button class="icon-btn">⏩</button>
+      <!-- Reproductor HTML5 Nativo embebido -->
+      <audio bind:this={audioRef} controls class="native-audio"></audio>
     </div>
     
     <div class="extras">
-      <input type="range" min="0" max="100" value="50" class="volume-slider">
+      <!-- placeholder -->
     </div>
   </footer>
 </main>
@@ -92,7 +144,7 @@
 <TagEditor 
   bind:isOpen={isTagEditorOpen} 
   track={trackToEdit} 
-  on:close={() => { /* refresh logic here if needed */ }} 
+  on:close={() => { fetchTracks() }} 
 />
 
 <style>
@@ -178,95 +230,69 @@
   }
 
   .library-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 1.5rem;
+    width: 100%;
+    margin-top: 1rem;
   }
 
-  .artist-card {
-    padding: 1.5rem;
-    border-radius: 16px;
-    text-align: center;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  .tracks-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    background: rgba(26, 31, 53, 0.4);
+    border-radius: 12px;
+    overflow: hidden;
+    backdrop-filter: blur(8px);
+  }
+
+  .tracks-table th {
+    padding: 1rem 1.5rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .tracks-table td {
+    padding: 1rem 1.5rem;
+    color: var(--text-main);
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+
+  .glass-row {
+    transition: background 0.2s ease;
     cursor: pointer;
   }
 
-  .artist-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  .glass-row:hover {
+    background: rgba(255, 51, 102, 0.1);
   }
 
-  .avatar {
-    width: 120px;
-    height: 120px;
-    border-radius: 50%;
-    background: #334155;
-    margin: 0 auto 1rem;
-  }
+  .bold { font-weight: 600; }
 
-  .artist-card h3 {
-    margin: 0;
-    font-size: 1.1rem;
-  }
-
-  /* Player */
-  .player {
-    grid-area: player;
-    border-top: 1px solid var(--border-color);
+  .actions-cell {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 2rem;
-    z-index: 10;
+    gap: 0.8rem;
   }
 
-  .now-playing {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    width: 300px;
+  .icon-btn-small {
+    background: rgba(255,255,255,0.05);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font-size: 1rem;
   }
 
-  .cover {
-    width: 56px;
-    height: 56px;
-    background: #334155;
+  .icon-btn-small:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: white;
+  }
+  .icon-btn-small.delete:hover {
+    background: #ef4444;
+  }
+
+  .native-audio {
+    height: 40px;
     border-radius: 8px;
-  }
-
-  .track-info {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .title {
-    font-weight: 600;
-    font-size: 1.1rem;
-  }
-
-  .artist {
-    color: var(--text-muted);
-    font-size: 0.9rem;
-  }
-
-  .controls {
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-  }
-
-  .icon-btn {
-    font-size: 1.5rem;
-    color: var(--text-muted);
-  }
-
-  .icon-btn:hover {
-    color: var(--text-main);
-  }
-
-  .icon-btn.play {
-    font-size: 2rem;
-    color: var(--text-main);
+    outline: none;
+    filter: invert(0.9) hue-rotate(180deg);
   }
 
   .error { color: #ef4444; }

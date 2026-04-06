@@ -7,6 +7,8 @@ import (
 	"strings"
 	"io/fs"
 
+	"github.com/dhowden/tag"
+	
 	"sgound/internal/db"
 	"sgound/internal/gateway"
 	"sgound/internal/tags"
@@ -27,6 +29,8 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	// 1. REST Core API
 	mux.HandleFunc("/api/artists", s.handleGetArtists)
 	mux.HandleFunc("/api/stream/", s.handleStream) // /api/stream/{id}
+	mux.HandleFunc("/api/cover/", s.handleGetCover)
+	mux.HandleFunc("/api/tracks", s.handleGetTracks)
 	mux.HandleFunc("/api/tracks/", s.handleTrackActions)
 
 	// 2. Subsonic Adapter Layer (Retrocompatibilidad OpenSubsonic)
@@ -58,12 +62,20 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 }
 
 func (s *Server) handleTrackActions(w http.ResponseWriter, r *http.Request) {
-	// Simple router for /api/tracks/{id}/tags
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	
+	// PUT /api/tracks/{id}/tags
 	if len(pathParts) == 4 && pathParts[3] == "tags" && r.Method == http.MethodPut {
 		s.handleEditTags(pathParts[2], w, r)
 		return
 	}
+	
+	// DELETE /api/tracks/{id}
+	if len(pathParts) == 3 && r.Method == http.MethodDelete {
+		s.handleDeleteTrack(pathParts[2], w, r)
+		return
+	}
+
 	http.Error(w, "Not Found", http.StatusNotFound)
 }
 
@@ -141,6 +153,80 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// http.ServeContent handles HTTP Range requests for streaming automatically
 	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
+}
+
+func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	rows, err := s.DB.Conn.Query(`
+		SELECT t.id, t.title, t.track_num, t.duration, COALESCE(t.genre, ''), a.name as artist, al.title as album, al.year as year
+		FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists a ON al.artist_id = a.id
+	`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var tracks []map[string]interface{}
+	for rows.Next() {
+		var id, title, genre, artist, album string
+		var trackNum, duration, year int
+		if err := rows.Scan(&id, &title, &trackNum, &duration, &genre, &artist, &album, &year); err != nil {
+			continue
+		}
+		tracks = append(tracks, map[string]interface{}{
+			"id": id, "title": title, "trackNum": trackNum, "duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tracks)
+}
+
+func (s *Server) handleDeleteTrack(trackID string, w http.ResponseWriter, r *http.Request) {
+	_, err := s.DB.Conn.Exec("DELETE FROM tracks WHERE id = ?", trackID)
+	if err != nil {
+		http.Error(w, "Failed to delete track", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success"}`))
+}
+
+func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
+	trackID := r.URL.Path[len("/api/cover/"):]
+	if trackID == "" {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	var fpath string
+	if err := s.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath); err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	f, err := os.Open(fpath)
+	if err != nil {
+		http.Error(w, "File read error", http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
+	metadata, err := tag.ReadFrom(f)
+	if err != nil || metadata.Picture() == nil {
+		http.Error(w, "No cover found", http.StatusNotFound)
+		return
+	}
+
+	pic := metadata.Picture()
+	w.Header().Set("Content-Type", pic.MIMEType)
+	w.Write(pic.Data)
 }
