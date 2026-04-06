@@ -1,0 +1,42 @@
+# Binarios / Ejecutables Go
+sgound-server
+sgound-server.exe
+*.test
+*.out
+cover.out
+
+# Node.js y Svelte (Vite SPA)
+web/node_modules/
+web/dist/
+web/.temp/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Base de datos SQLite
+*.db
+*.db-journal
+*.sqlite
+sgound.db
+
+# Configuración de entorno y logs
+.env
+.env.local
+.env.*.local
+*.log
+
+# Archivos de SO y Editores
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
