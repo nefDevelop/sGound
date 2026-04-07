@@ -1,5 +1,5 @@
 /**
- * Material Design 3 Expressive Palette logic
+ * Material Design 3 Tonal Harmony logic
  */
 
 export function hexToHsl(hex) {
@@ -39,18 +39,28 @@ export function hslToHex(h, s, l) {
 export function generatePalette(seedHex) {
     const [h, s, l] = hexToHsl(seedHex);
 
-    // Expressive logic:
-    // Secondary: shift hue slightly, reduce saturation
-    const secondaryHex = hslToHex((h + 20) % 360, Math.max(s - 20, 20), Math.max(l - 5, 40));
+    // MD3 Tonal Harmony Logic
+    const primary = seedHex;
+    const secondary = hslToHex(h, Math.min(s * 0.4, 25), 60);
+    const tertiary = hslToHex((h + 60) % 360, Math.min(s + 10, 50), 65);
     
-    // Tertiary: shift hue significantly (vibrant contrast)
-    const tertiaryHex = hslToHex((h + 120) % 360, Math.min(s + 10, 90), Math.max(l + 5, 50));
+    // GNOME / MD3 Surfaces (Dark Mode by default)
+    const surface = hslToHex(h, 6, 8); // Fondo base ultra oscuro con tinte
+    const surfaceContainer = hslToHex(h, 8, 12); // Contenedores (estilo Adwaita)
+    const surfaceContainerHigh = hslToHex(h, 10, 18); // Tarjetas
+    const surfaceContainerHighest = hslToHex(h, 12, 24); // Tooltips, Popovers, Swatches
 
     return {
-        primary: seedHex,
-        secondary: secondaryHex,
-        tertiary: tertiaryHex,
-        primary10: `rgba(${parseInt(seedHex.slice(1, 3), 16)}, ${parseInt(seedHex.slice(3, 5), 16)}, ${parseInt(seedHex.slice(5, 7), 16)}, 0.1)`
+        primary,
+        secondary,
+        tertiary,
+        surface,
+        surfaceContainer,
+        surfaceContainerHigh,
+        surfaceContainerHighest,
+        primary10: `rgba(${parseInt(seedHex.slice(1, 3), 16)}, ${parseInt(seedHex.slice(3, 5), 16)}, ${parseInt(seedHex.slice(5, 7), 16)}, 0.1)`,
+        onSurface: '#ffffff',
+        onSurfaceVariant: 'rgba(255,255,255,0.7)'
     };
 }
 
@@ -60,4 +70,10 @@ export function applyTheme(palette) {
     root.style.setProperty('--primary-10', palette.primary10);
     root.style.setProperty('--secondary', palette.secondary);
     root.style.setProperty('--tertiary', palette.tertiary);
+    root.style.setProperty('--surface', palette.surface);
+    root.style.setProperty('--surface-container', palette.surfaceContainer);
+    root.style.setProperty('--surface-container-high', palette.surfaceContainerHigh);
+    root.style.setProperty('--surface-container-highest', palette.surfaceContainerHighest);
+    root.style.setProperty('--text-main', palette.onSurface);
+    root.style.setProperty('--text-muted', palette.onSurfaceVariant);
 }

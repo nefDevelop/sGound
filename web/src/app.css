@@ -1,93 +1,91 @@
-@import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;600;700;800&family=Outfit:wght@300;400;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Domine:wght@400;700;800;900&family=Manrope:wght@300;400;500;600;700;800&display=swap');
 
 :root {
-  /* New Theme Tokens */
-  --primary: #ff3366;
-  --primary-10: rgba(255, 51, 102, 0.1);
-  --secondary: #C27085;
-  --tertiary: #D6B85C;
-  --radius: 32px;
-  --font-headline: "Open Sans", sans-serif;
-  --font-body: "Outfit", sans-serif;
-  --font-size-h1: 50px;
-  --font-weight-h1: 900;
-  --letter-spacing-h1: -3px;
+  /* Default MD3 Tonal Palette */
+  --primary: #1c71d8;
+  --primary-10: rgba(28, 113, 216, 0.1);
+  --secondary: #5476A0;
+  --tertiary: #7F42B2;
+  --neutral: #6A727C;
+  --surface: #05070a;
+  --surface-container: #12141a;
+  --surface-container-high: #1e202a;
+  --surface-container-highest: #2a2c3a;
+  
+  --radius: 34px;
+  --font-headline: "Domine", serif;
+  --font-body: "Manrope", sans-serif;
+  --font-size-h1: 48px;
+  --font-weight-h1: 800;
+  --letter-spacing-h1: 0px;
 
-  /* Legacy / Utility Tokens */
-  --bg-color: #0b0f19;
-  --surface-color: #1a1f35;
-  --surface-hover: #252b48;
-  --accent-color: var(--primary);
-  --accent-glow: rgba(255, 51, 102, 0.4);
-  --text-main: #e2e8f0;
-  --text-muted: #94a3b8;
-  --border-color: rgba(255,255,255,0.08);
+  --text-main: #ffffff;
+  --text-muted: rgba(255,255,255,0.6);
+  --border-color: rgba(255,255,255,0.06);
   
   font-family: var(--font-body);
 }
 
-h1, h2, h3 {
-  font-family: var(--font-headline);
-}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+h1, h2, h3 { font-family: var(--font-headline); color: var(--text-main); }
 
 body {
   margin: 0;
-  background-color: var(--bg-color);
+  background-color: var(--surface);
   color: var(--text-main);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
-* {
-  box-sizing: border-box;
-}
-
-/* Glassmorphism utility */
+/* GNOME Style Surface Utility */
 .glass {
-  background: rgba(26, 31, 53, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--surface-container);
   border: 1px solid var(--border-color);
+  border-radius: var(--radius);
 }
 
-/* Smooth Buttons */
+/* Material Design 3 Buttons */
 button {
   background: transparent;
   color: var(--text-main);
   border: none;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
   font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: calc(var(--radius) / 2);
 }
-button:hover {
-  filter: brightness(1.2);
-}
+
+button:hover { background: var(--surface-container-high); }
+button:active { transform: scale(0.96); }
 
 .primary-btn {
-  background: var(--accent-color);
-  color: white;
-  padding: 0.75rem 1.5rem;
-  border-radius: 99px;
-  font-weight: 600;
-  box-shadow: 0 4px 15px var(--accent-glow);
+  background: var(--primary);
+  color: #ffffff;
+  padding: 0.8rem 1.8rem;
+  border-radius: 100px;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
 }
 .primary-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px var(--accent-glow);
+  background: var(--primary);
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.3);
 }
 
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-}
-::-webkit-scrollbar-track {
-  background: var(--bg-color);
-}
+/* Scrollbar Adwaita-style */
+::-webkit-scrollbar { width: 12px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--surface-hover);
-  border-radius: 4px;
+  background: rgba(255,255,255,0.1);
+  border: 4px solid transparent;
+  background-clip: padding-box;
+  border-radius: 10px;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
-}
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); border: 4px solid transparent; background-clip: padding-box; }

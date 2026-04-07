@@ -36,7 +36,7 @@
 
       // 2. Guardar Letras si existen
       if (track.lyrics) {
-        await fetch(`/api/lyrics?id=${encodeURIComponent(track.id)}`, {
+        await fetch(`/api/lyrics/${track.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ lyrics: track.lyrics })

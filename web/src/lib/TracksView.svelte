@@ -1,12 +1,41 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
+  import ContextMenu from './ContextMenu.svelte';
   
   export let tracks = [];
   export let currentPlaying = null;
   
   const dispatch = createEventDispatcher();
   let selectedIds = new Set();
+
+  let contextMenu = {
+    visible: false,
+    x: 0,
+    y: 0,
+    track: null,
+    items: []
+  };
+
+  function showContextMenu(track, e) {
+    e.preventDefault();
+    contextMenu = {
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      track,
+      items: [
+        { label: 'Reproducir', icon: 'play', action: () => dispatch('play', track) },
+        { label: 'Añadir a cola', icon: 'plus', action: () => dispatch('queue', track) },
+        { divider: true },
+        { label: 'Editar etiquetas', icon: 'edit', action: () => dispatch('edit', track) },
+        { label: 'Organizar archivo', icon: 'folder', action: () => handleOrganize(track.id) },
+        { divider: true },
+        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(track.title) },
+        { label: 'Eliminar de biblioteca', icon: 'xCircle', color: 'danger', action: () => dispatch('delete', track) }
+      ]
+    };
+  }
 
   function toggleSelect(id, event) {
     if (selectedIds.has(id)) {
@@ -61,6 +90,7 @@
           class:active={currentPlaying?.id === track.id}
           class:selected={selectedIds.has(track.id)}
           on:dblclick={() => dispatch('play', track)}
+          on:contextmenu={(e) => showContextMenu(track, e)}
         >
           <td class="checkbox-cell">
             <input type="checkbox" checked={selectedIds.has(track.id)} on:change={(e) => toggleSelect(track.id, e)} />
@@ -69,7 +99,7 @@
           <td class="title-cell">
             <div class="flex-align">
               <!-- svelte-ignore a11y-missing-attribute -->
-              <img class="mini-cover" src={`/api/cover?id=${encodeURIComponent(track.id)}`} on:error={(e) => (e.currentTarget.style.display='none')} />
+              <img class="mini-cover" src={`/api/cover/${track.id}`} on:error={(e) => (e.currentTarget.style.display='none')} />
               <span class="title-text">{track.title}</span>
             </div>
           </td>
@@ -85,6 +115,14 @@
       {/each}
     </tbody>
   </table>
+
+  <ContextMenu 
+    bind:visible={contextMenu.visible}
+    x={contextMenu.x}
+    y={contextMenu.y}
+    items={contextMenu.items}
+    on:close={() => contextMenu.visible = false}
+  />
 </div>
 
 <style>

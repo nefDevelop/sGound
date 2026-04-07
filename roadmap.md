@@ -33,10 +33,17 @@
 - [x] Embeber la UI (SPA) dentro del binario Go usando `//go:embed`.
 - [x] Single binary deployment (15MB aprox).
 
-## 🚀 Fase 7: Próximas Funcionalidades (Roadmap Actualizado)
+## ✅ Fase 7: Funcionalidades Avanzadas (Implementadas)
+- [x] **Smart Playlists**: Motor de filtrado dinámico por década, género, calidad y actividad reciente.
+- [x] **Letras Sincronizadas**: Integración con LRCLib y soporte para tags USLT/Lyrics.
+- [x] **Transcodificación al Vuelo**: Streaming adaptativo con FFmpeg para dispositivos móviles.
+- [x] **Motor de Temas Dinámico**: Personalización de la interfaz basada en Material Design 3 (Expressive).
+- [x] **Vista de Rejilla de Álbumes**: Navegación visual optimizada por carátulas.
+
+## 🚀 Fase 8: Próximas Funcionalidades
+- [ ] **Multi-usuario**: Sistema de autenticación y perfiles.
+- [ ] **App Móvil (PWA)**: Optimización para instalación como aplicación nativa en móviles.
+- [ ] **Mejoras de Escaneo**: Notificaciones en tiempo real vía WebSockets del progreso del escáner.
 - [ ] **Renombrado Físico de Archivos**: Opción para organizar archivos en carpetas basadas en Artist/Album (Ej: `Artist/Album/01 - Title.mp3`).
-- [ ] **Smart Playlists**: Implementar motor de reglas SQL para listas dinámicas (ej: "Añadidos recientemente", "Género: Rock").
-- [ ] **Metadatos Externos**: Integración con APIs para Biografías, Letras (lyrics.ovh) y Fotos de artistas.
-- [ ] **Gestión de Playlists en UI**: Crear, editar y borrar listas de reproducción desde la interfaz.
-- [ ] **Vista de Rejilla de Álbumes**: Navegación visual por carátulas grandes.
-- [ ] **Estado de Escaneo en Tiempo Real**: Notificaciones o barra de progreso durante el escaneo de biblioteca.
+- [ ] **Radio/Mezcla Automática**: Generación de colas de reproducción infinitas basadas en gustos.
+

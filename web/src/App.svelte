@@ -8,6 +8,7 @@
   import AlbumsGrid from "./lib/AlbumsGrid.svelte";
   import Playlists from "./lib/Playlists.svelte";
   import PlaylistsView from "./lib/PlaylistsView.svelte";
+  import SmartPlaylistView from "./lib/SmartPlaylistView.svelte";
   import Dashboard from "./lib/Dashboard.svelte";
   import Settings from "./lib/Settings.svelte";
   import Toast from "./lib/Toast.svelte";
@@ -20,6 +21,7 @@
   let tracks = $state([]);
   let playlists = $state([]);
   let selectedPlaylist = $state(null);
+  let selectedSmart = $state(null);
   let error = $state(null);
   let searchQuery = $state("");
 
@@ -42,6 +44,11 @@
     fetchPlaylists();
     loadTheme();
   });
+
+  function selectSmart(config) {
+    selectedSmart = config;
+    currentView = "smart-playlist";
+  }
 
   async function loadTheme() {
     try {
@@ -250,7 +257,17 @@
       {:else if currentView === "albums"}
         <AlbumsGrid on:selectAlbum={(e) => selectAlbum(e.detail)} />
       {:else if currentView === "playlists"}
-        <Playlists on:selectPlaylist={(e) => selectPlaylist(e.detail)} />
+        <Playlists 
+          on:selectPlaylist={(e) => selectPlaylist(e.detail)} 
+          on:selectSmart={(e) => selectSmart(e.detail)}
+        />
+      {:else if currentView === "smart-playlist"}
+        <SmartPlaylistView 
+          {...selectedSmart}
+          {currentPlaying}
+          on:back={() => currentView = "playlists"}
+          on:play={(e) => handlePlay(e.detail)}
+        />
       {:else if currentView === "playlist"}
         <PlaylistsView
           playlist={selectedPlaylist}
@@ -299,97 +316,73 @@
   .app-layout {
     display: grid;
     grid-template-areas: "sidebar content" "player player";
-    grid-template-columns: 240px 1fr;
-    grid-template-rows: 1fr 90px;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: 1fr 110px;
     height: 100vh;
-    background: #0f111a;
-    color: #cbd5e1;
+    background: var(--surface);
+    color: var(--text-main);
   }
 
   .sidebar {
     grid-area: sidebar;
-    background: #090a10;
-    padding: 2rem 1rem;
-    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    background: var(--surface);
+    padding: 2.5rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0 1rem;
+    margin-bottom: 2.5rem;
   }
 
   .logo {
     width: 32px;
     height: 32px;
-    background: #ff3366;
-    border-radius: 8px;
-    margin-bottom: 2rem;
+    background: var(--primary);
+    border-radius: 10px;
+    box-shadow: 0 4px 12px var(--primary-10);
   }
+
+  .brand h2 { font-size: 1.4rem; margin: 0; font-weight: 900; letter-spacing: -0.5px; }
+
+  nav { display: flex; flex-direction: column; gap: 0.3rem; }
 
   .nav-item {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
     width: 100%;
-    padding: 0.8rem 1rem;
+    padding: 0.8rem 1.2rem;
     background: transparent;
     border: none;
-    color: #64748b;
+    color: var(--text-muted);
     text-align: left;
-    border-radius: 8px;
+    border-radius: 14px;
     cursor: pointer;
-    font-weight: 600;
+    font-weight: 700;
     font-size: 0.95rem;
-    margin-bottom: 0.2rem;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
   }
 
-  .nav-header {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    color: #64748b;
-    letter-spacing: 1.5px;
-    font-weight: 800;
-    margin: 1.5rem 0 0.5rem 1rem;
-    opacity: 0.6;
-  }
-
-  .nav-divider {
-    height: 1px;
-    background: rgba(255, 255, 255, 0.05);
-    margin: 1rem 0;
-  }
-
-  .playlist-item {
-    display: flex !important;
-    align-items: center;
-    gap: 0.8rem;
-  }
-
-  .create-pl {
-    border: 1px dashed rgba(255, 255, 255, 0.1) !important;
-    margin-top: 1rem;
-    color: #64748b !important;
-    display: flex !important;
-    align-items: center;
-    gap: 0.8rem;
-  }
-  .create-pl:hover {
-    border-color: #ff3366 !important;
-    color: #ff3366 !important;
-  }
-
+  .nav-item:hover { background: var(--surface-container); color: var(--text-main); }
   .nav-item.active {
-    background: var(--primary-10);
-    color: var(--primary);
-  }
-
-  .nav-divider {
-    height: 1px;
-    background: rgba(255, 255, 255, 0.05);
-    margin: 1.5rem 0.5rem;
+    background: var(--primary);
+    color: #ffffff;
+    box-shadow: 0 4px 12px var(--primary-10);
   }
 
   .nav-label {
-    padding: 0 1rem;
+    padding: 1.5rem 1.2rem 0.8rem;
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 1.5px;
-    color: #475569;
+    color: var(--text-muted);
     font-weight: 800;
-    margin-bottom: 0.8rem;
+    opacity: 0.5;
   }
 
   .content {
@@ -397,58 +390,51 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    background: var(--surface-container);
+    margin: 1rem 1rem 0 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    border: 1px solid var(--border-color);
+    border-bottom: none;
   }
 
   .top-bar {
-    padding: 1.5rem 2rem;
+    padding: 1.5rem 2.5rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: rgba(15, 17, 26, 0.8);
-    backdrop-filter: blur(10px);
+    background: transparent;
   }
 
   .search-box input {
-    background: #1e293b;
-    border: none;
-    padding: 0.6rem 1.2rem;
-    border-radius: 20px;
+    background: var(--surface-container-high);
+    border: 1px solid var(--border-color);
+    padding: 0.8rem 1.5rem;
+    border-radius: 100px;
     color: white;
-    width: 300px;
-  }
-
-  .primary-btn {
-    background: var(--primary);
-    color: white;
-    border: none;
-    padding: 0.6rem 1.2rem;
-    border-radius: 8px;
-    cursor: pointer;
+    width: 350px;
+    outline: none;
     font-weight: 600;
+    transition: all 0.2s;
   }
+  .search-box input:focus { border-color: var(--primary); background: var(--surface); width: 400px; }
+
+  .actions { display: flex; gap: 1rem; }
+
   .bulk-btn {
-    background: #1e293b;
-    color: white;
+    background: var(--surface-container-high);
+    color: var(--primary);
     border: 1px solid var(--primary);
     padding: 0.6rem 1.2rem;
-    border-radius: 8px;
-    cursor: pointer;
-    margin-right: 1rem;
-    font-weight: 600;
+    border-radius: 100px;
+    font-weight: 700;
   }
 
   .scroll-view {
     flex: 1;
     overflow-y: auto;
-    padding: 1rem 2rem;
+    padding: 1rem 2.5rem 3rem;
   }
 
-  .error {
-    color: #f87171;
-  }
-  .empty-state {
-    text-align: center;
-    margin-top: 4rem;
-    color: #64748b;
-  }
+  .error { color: #f87171; background: rgba(248, 113, 113, 0.1); padding: 1rem; border-radius: 12px; margin: 1rem; }
+  .empty-state { text-align: center; margin-top: 6rem; color: var(--text-muted); }
 </style>

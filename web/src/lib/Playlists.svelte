@@ -42,6 +42,32 @@
     </button>
   </header>
 
+  <section class="smart-playlists">
+    <h2>Smart Playlists</h2>
+    <div class="smart-grid">
+      <button class="smart-card glass" on:click={() => dispatch('selectSmart', { type: 'recently-played', name: 'Recién escuchadas', icon: 'clock' })}>
+        <div class="smart-icon"><Icon name="clock" size={24} /></div>
+        <span>Recién escuchadas</span>
+      </button>
+      <button class="smart-card glass quality" on:click={() => dispatch('selectSmart', { type: 'high-quality', name: 'Pura Calidad', icon: 'award' })}>
+        <div class="smart-icon"><Icon name="award" size={24} /></div>
+        <span>Pura Calidad</span>
+      </button>
+      <button class="smart-card glass" on:click={() => dispatch('selectSmart', { type: 'recently-added', name: 'Recientes', icon: 'plus' })}>
+        <div class="smart-icon"><Icon name="plus" size={24} /></div>
+        <span>Recientes</span>
+      </button>
+      <button class="smart-card glass decades" on:click={() => dispatch('selectSmart', { type: 'decade', name: 'Décadas', icon: 'calendar' })}>
+        <div class="smart-icon"><Icon name="calendar" size={24} /></div>
+        <span>Décadas</span>
+      </button>
+      <button class="smart-card glass genres" on:click={() => dispatch('selectSmart', { type: 'genre', name: 'Géneros', icon: 'layers' })}>
+        <div class="smart-icon"><Icon name="layers" size={24} /></div>
+        <span>Géneros</span>
+      </button>
+    </div>
+  </section>
+
   {#if loading}
     <div class="loading">Cargando playlists...</div>
   {:else if playlists.length === 0}
@@ -86,6 +112,64 @@
     font-weight: var(--font-weight-h1);
     letter-spacing: var(--letter-spacing-h1);
     margin: 0;
+  }
+
+  .smart-playlists {
+    margin-bottom: 4rem;
+  }
+
+  .smart-playlists h2 {
+    font-size: 1.2rem;
+    color: var(--text-muted);
+    margin-bottom: 1.5rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  .smart-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .smart-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding: 2rem 1rem;
+    border-radius: var(--radius);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .smart-card:hover {
+    background: rgba(255,255,255,0.08);
+    transform: translateY(-5px);
+    border-color: var(--primary);
+  }
+
+  .smart-icon {
+    width: 56px;
+    height: 56px;
+    background: var(--primary-10);
+    color: var(--primary);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .smart-card.quality .smart-icon { background: rgba(214, 184, 92, 0.1); color: var(--tertiary); }
+  .smart-card.quality:hover { border-color: var(--tertiary); }
+
+  .smart-card.decades .smart-icon { background: rgba(194, 112, 133, 0.1); color: var(--secondary); }
+  .smart-card.decades:hover { border-color: var(--secondary); }
+
+  .smart-card span {
+    font-weight: 700;
+    font-size: 0.9rem;
+    text-align: center;
   }
 
   .create-btn {

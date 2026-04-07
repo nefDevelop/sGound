@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	_ "modernc.org/sqlite"
+	"strings"
 )
 
 type Database struct {
@@ -69,6 +70,8 @@ func (db *Database) initSchema() error {
 		comment TEXT,
 		bit_rate INTEGER,
 		sample_rate INTEGER,
+		last_played DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE
 	);
 
@@ -81,5 +84,29 @@ func (db *Database) initSchema() error {
 		FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
 	);`
 	_, err := db.Conn.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migraciones "en caliente" por si se añadieron columnas después
+	// Ignorar errores si las columnas ya existen (la mayoría de DBs no tienen IF NOT EXISTS para ADD COLUMN)
+	cols := []string{
+		"ALTER TABLE tracks ADD COLUMN last_played DATETIME",
+		"ALTER TABLE tracks ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
+		"ALTER TABLE tracks ADD COLUMN composer TEXT",
+		"ALTER TABLE tracks ADD COLUMN comment TEXT",
+	}
+
+	for _, sql := range cols {
+		if _, err := db.Conn.Exec(sql); err != nil {
+			// Ignoramos si es un error de "columna ya existe"
+			if !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
+				slog.Error("Migration error", "sql", sql, "error", err)
+			}
+		} else {
+			slog.Info("Migration success", "sql", sql)
+		}
+	}
+	
+	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"io/fs"
 	"log/slog"
@@ -51,6 +52,7 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/search", s.handleSearch)
 	mux.HandleFunc("/api/dashboard", s.handleDashboard)
 	mux.HandleFunc("/api/library/health", s.handleLibraryHealth)
+	mux.HandleFunc("/api/library/metadata", s.handleLibraryMetadata)
 	mux.HandleFunc("/api/lyrics/", s.handleLyrics) // /api/lyrics/{id} or /api/lyrics/search
 	mux.HandleFunc("/api/lyrics", s.handleLyrics)
 	mux.HandleFunc("/api/lyrics/search", s.handleLyricsSearch)
@@ -58,8 +60,7 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/autocomplete", s.handleAutocomplete)
 	mux.HandleFunc("/api/playlists", s.handlePlaylists)
 	mux.HandleFunc("/api/playlists/", s.handlePlaylistActions)
-
-
+	mux.HandleFunc("/api/smart-playlists/", s.handleSmartPlaylists)
 
 	// 2. Subsonic Adapter Layer (Retrocompatibilidad OpenSubsonic)
 	gw := gateway.NewSubsonicGateway(s.DB)
@@ -90,15 +91,22 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 }
 
 func (s *Server) extractID(r *http.Request, prefix string) string {
-	// 1. Intentar sacar de la ruta (después del prefijo)
-	id := r.URL.Path[len(prefix):]
-	
-	// 2. Si está vacío en la ruta, intentar sacar del parámetro ?id=
-	if id == "" || id == "/" {
-		id = r.URL.Query().Get("id")
+	// 1. Intentar sacar del query param ?id= (prioridad)
+	if qID := r.URL.Query().Get("id"); qID != "" {
+		return strings.Trim(qID, "/")
 	}
 
-	// Limpiar posibles barras sobrantes y sub-rutas
+	// 2. Intentar sacar de la ruta
+	path := r.URL.Path
+	// Normalizar prefijo para la comparación
+	cleanPrefix := strings.TrimSuffix(prefix, "/")
+	
+	var id string
+	if strings.HasPrefix(path, cleanPrefix) {
+		id = path[len(cleanPrefix):]
+	}
+
+	// Limpiar barras y sub-rutas
 	id = strings.Trim(id, "/")
 	id = strings.TrimSuffix(id, "/tags")
 	id = strings.TrimSuffix(id, "/organize")
@@ -316,6 +324,11 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Track not found", http.StatusNotFound)
 		return
 	}
+
+	// Registrar reproducción
+	go func() {
+		s.DB.Conn.Exec("UPDATE tracks SET last_played = CURRENT_TIMESTAMP WHERE id = ?", trackID)
+	}()
 
 	bitrate := r.URL.Query().Get("bitrate")
 	if bitrate != "" && bitrate != "original" {
@@ -537,6 +550,44 @@ func (s *Server) handleAutocomplete(w http.ResponseWriter, r *http.Request) {
 		results = append(results, val)
 	}
 	json.NewEncoder(w).Encode(results)
+}
+
+func (s *Server) handleLibraryMetadata(w http.ResponseWriter, r *http.Request) {
+	// Obtener décadas únicas
+	decadeRows, err := s.DB.Conn.Query("SELECT DISTINCT (year / 10) * 10 as decade FROM albums WHERE year > 0 ORDER BY decade DESC")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer decadeRows.Close()
+
+	var decades []int
+	for decadeRows.Next() {
+		var d int
+		decadeRows.Scan(&d)
+		decades = append(decades, d)
+	}
+
+	// Obtener géneros únicos
+	genreRows, err := s.DB.Conn.Query("SELECT DISTINCT genre FROM tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre ASC")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer genreRows.Close()
+
+	var genres []string
+	for genreRows.Next() {
+		var g string
+		genreRows.Scan(&g)
+		genres = append(genres, g)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"decades": decades,
+		"genres":  genres,
+	})
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -774,6 +825,78 @@ func (s *Server) handlePlaylists(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(list)
 }
 
+func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
+	typeStr := s.extractID(r, "/api/smart-playlists/")
+	
+	baseQuery := `
+		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''),
+		       a.name as artist, al.title as album, al.year as year,
+		       t.size, t.format, t.bit_rate, t.sample_rate,
+		       t.composer, t.comment
+		FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists a ON al.artist_id = a.id`
+	
+	var whereClause, orderClause string
+	var args []interface{}
+
+	switch typeStr {
+	case "recently-played":
+		whereClause = "WHERE t.last_played IS NOT NULL"
+		orderClause = "ORDER BY t.last_played DESC LIMIT 50"
+	case "high-quality":
+		whereClause = "WHERE t.bit_rate >= 320000 OR t.format = 'flac' OR t.format = 'wav'"
+		orderClause = "ORDER BY t.bit_rate DESC"
+	case "recently-added":
+		orderClause = "ORDER BY t.created_at DESC LIMIT 50"
+	case "decade":
+		decade := r.URL.Query().Get("value")
+		if decade != "" {
+			dInt, _ := strconv.Atoi(decade)
+			whereClause = "WHERE al.year >= ? AND al.year <= ?"
+			args = append(args, dInt, dInt+9)
+		}
+		orderClause = "ORDER BY al.year DESC, al.title, t.track_num"
+	case "genre":
+		genre := r.URL.Query().Get("value")
+		if genre != "" {
+			whereClause = "WHERE t.genre = ?"
+			args = append(args, genre)
+		}
+		orderClause = "ORDER BY a.name, al.title, t.track_num"
+	default:
+		http.Error(w, "Unknown smart playlist type", http.StatusBadRequest)
+		return
+	}
+
+	query := fmt.Sprintf("%s %s %s", baseQuery, whereClause, orderClause)
+	rows, err := s.DB.Conn.Query(query, args...)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var tracks []map[string]interface{}
+	for rows.Next() {
+		var id, title, genre, artist, album, format, composer, comment string
+		var trackNum, discNum, duration, year, bitRate, sampleRate int
+		var size int64
+		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment); err != nil {
+			continue
+		}
+		tracks = append(tracks, map[string]interface{}{
+			"id": id, "title": title, "trackNum": trackNum, "discNum": discNum, 
+			"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
+			"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
+			"composer": composer, "comment": comment,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tracks)
+}
+
 func (s *Server) handlePlaylistActions(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(r.URL.Path, "/tracks") {
 		s.handleGetPlaylistTracks(w, r)
@@ -816,20 +939,40 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
-	trackID := s.extractID(r, "/api/cover/")
+	// GIF transparente de 1x1 base
+	transparentPixel := []byte{
+		0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0xFF, 0xFF, 0xFF,
+		0x00, 0x00, 0x00, 0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2C, 0x00, 0x00, 0x00, 0x00,
+		0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3B,
+	}
+
+	trackID := s.extractID(r, "/api/cover") // Usar prefijo limpio
 	if trackID == "" {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "image/gif")
+		w.WriteHeader(http.StatusOK)
+		w.Write(transparentPixel)
 		return
 	}
 
 	var fpath string
-	if err := s.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath); err != nil {
-		slog.Error("Cover lookup: failed to find track path in DB", "trackID", trackID, "error", err)
-		http.Error(w, "Not found", http.StatusNotFound)
-		return
+	// Intentamos buscar por track ID primero
+	err := s.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath)
+	if err != nil {
+		slog.Debug("Cover lookup: ID not found in tracks, trying albums", "id", trackID)
+		// Si falla, quizás es un ID de álbum? Intentamos buscar el primer track del álbum
+		err = s.DB.Conn.QueryRow("SELECT path FROM tracks WHERE album_id = ? LIMIT 1", trackID).Scan(&fpath)
+		if err != nil {
+			slog.Warn("Cover lookup: ID not found in tracks or albums", "id", trackID)
+			w.Header().Set("Content-Type", "image/gif")
+			w.WriteHeader(http.StatusOK)
+			w.Write(transparentPixel)
+			return
+		}
 	}
 
-	// 1. Intentar extraer portada embebida
+	slog.Info("Requesting cover art", "id", trackID, "fpath", fpath)
+
+	// 1. Intentar extraer portada embebida usando dhowden/tag
 	f, err := os.Open(fpath)
 	if err == nil {
 		defer f.Close()
@@ -842,10 +985,26 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		} else {
-			slog.Warn("Cover lookup: failed to read tags from file", "path", fpath, "error", err)
+			slog.Warn("Cover lookup: tag reading failed (dhowden/tag)", "path", fpath, "error", err)
 		}
 	} else {
 		slog.Error("Cover lookup: failed to open file", "path", fpath, "error", err)
+	}
+
+	// 1.5 Fallback: Intentar con ffmpeg para extraer carátula embebida (muy robusto)
+	slog.Debug("Cover lookup: trying ffmpeg as fallback for embedded art", "path", fpath)
+	ffmpegMsg := exec.Command("ffmpeg", "-i", fpath, "-an", "-vcodec", "copy", "-f", "image2", "pipe:1")
+	ffmpegOutput, err := ffmpegMsg.Output()
+	if err == nil && len(ffmpegOutput) > 0 {
+		// Heurística básica de tipo: si empieza por \xFF\xD8 es JPEG
+		mime := "image/jpeg"
+		if strings.HasPrefix(string(ffmpegOutput), "\x89PNG") {
+			mime = "image/png"
+		}
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Content-Type", mime)
+		w.Write(ffmpegOutput)
+		return
 	}
 
 	// 2. Fallback: Buscar archivos de imagen en la misma carpeta (Case-insensitive)
@@ -895,6 +1054,12 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	slog.Warn("Cover lookup: no cover found", "path", fpath)
-	http.Error(w, "No cover found", http.StatusNotFound)
+	slog.Warn("Cover lookup: no cover found, returning default", "path", fpath)
+	
+	// En lugar de dar 404 (que ensucia la consola), devolvemos un GIF transparente de 1x1
+	// Esto hace que el navegador esté feliz y no marque error.
+	w.Header().Set("Content-Type", "image/gif")
+	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache breve para no re-escanear tanto
+	w.WriteHeader(http.StatusOK)
+	w.Write(transparentPixel)
 }

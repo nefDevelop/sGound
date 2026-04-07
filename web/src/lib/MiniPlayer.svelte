@@ -43,7 +43,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="now-playing" on:click={() => dispatch('openFull')}>
     {#if currentPlaying}
-      <img class="cover" src={`/api/cover?id=${encodeURIComponent(currentPlaying.id)}`} alt="Artwork" />
+      <img class="cover" src={`/api/cover/${currentPlaying.id}`} alt="Artwork" />
     {:else}
       <div class="cover-placeholder"></div>
     {/if}

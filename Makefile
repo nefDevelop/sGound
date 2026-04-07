@@ -1,4 +1,4 @@
-.PHONY: build test clean dev-front dev-back dev all
+.PHONY: build test clean dev-front dev-back dev all db-reset db-recreate dev-recreate
 
 BINARY_NAME=sgound-server
 
@@ -6,8 +6,11 @@ BINARY_NAME=sgound-server
 VITE_PORT ?= 5177
 SGOUND_PORT ?= 8088
 
+SGOUND_MUSIC_PATH ?= /home/nef734/Música/
+
 export SGOUND_PORT
 export VITE_PORT
+export SGOUND_MUSIC_PATH
 
 all: test build
 
@@ -43,3 +46,13 @@ clean:
 	go clean
 	rm -f $(BINARY_NAME)
 	rm -rf web/dist
+
+db-reset:
+	@echo "=> Borrando base de datos actual (sgound.db)..."
+	rm -f sgound.db
+	@echo "=> Base de datos borrada exitosamente."
+	@echo "=> Ejecuta 'make dev' para recrearla y re-escanear la música automáticamente."
+
+db-recreate: db-reset dev
+
+dev-recreate: db-recreate
