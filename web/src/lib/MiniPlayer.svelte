@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
+  import ContextMenu from './ContextMenu.svelte';
   
   export let currentPlaying = null;
   export let audioRef = null;
@@ -11,6 +12,29 @@
   const dispatch = createEventDispatcher();
   let volume = 1;
   let isMuted = false;
+
+  let contextMenu = {
+    visible: false,
+    x: 0,
+    y: 0,
+    items: []
+  };
+
+  function showContextMenu(e) {
+    if (!currentPlaying) return;
+    e.preventDefault();
+    contextMenu = {
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: 'Editar etiquetas', icon: 'edit', action: () => dispatch('edit', currentPlaying) },
+        { divider: true },
+        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(currentPlaying.title) },
+        { label: 'Eliminar de biblioteca', icon: 'xCircle', color: 'danger', action: () => dispatch('delete', currentPlaying) }
+      ]
+    };
+  }
 
   $: if (audioRef) {
     audioRef.ontimeupdate = () => {
@@ -41,7 +65,7 @@
 <footer class="player glass">
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="now-playing" on:click={() => dispatch('openFull')}>
+  <div class="now-playing" on:click={() => dispatch('openFull')} on:contextmenu={showContextMenu}>
     {#if currentPlaying}
       <img class="cover" src={`/api/cover/${currentPlaying.id}`} alt="Artwork" />
     {:else}
@@ -90,6 +114,14 @@
       <div class="tech-badge">{currentPlaying.format?.toUpperCase()}</div>
     {/if}
   </div>
+
+  <ContextMenu 
+    bind:visible={contextMenu.visible}
+    x={contextMenu.x}
+    y={contextMenu.y}
+    items={contextMenu.items}
+    on:close={() => contextMenu.visible = false}
+  />
 
   <!-- Hidden audio element managed by parent or here -->
   <audio bind:this={audioRef} style="display:none"></audio>

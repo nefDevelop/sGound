@@ -1,8 +1,9 @@
 <script>
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade, fly } from 'svelte/transition';
   import { audioQuality } from './stores.js';
+  import ContextMenu from './ContextMenu.svelte';
 
   export let currentPlaying = null;
   export let audioRef = null;
@@ -11,12 +12,36 @@
   export let duration = 0;
   export let currentTime = 0;
 
+  const dispatch = createEventDispatcher();
   let lyrics = "";
   let parsedLyrics = [];
   let currentLyricIndex = -1;
   let lyricContainer;
   let showLyrics = false; // Toggle for mobile
   let volume = 1;
+
+  let contextMenu = {
+    visible: false,
+    x: 0,
+    y: 0,
+    items: []
+  };
+
+  function showContextMenu(e) {
+    if (!currentPlaying) return;
+    e.preventDefault();
+    contextMenu = {
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: 'Editar etiquetas', icon: 'edit', action: () => dispatch('edit', currentPlaying) },
+        { divider: true },
+        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(currentPlaying.title) },
+        { label: 'Eliminar de biblioteca', icon: 'xCircle', color: 'danger', action: () => dispatch('delete', currentPlaying) }
+      ]
+    };
+  }
 
   // Sincronizar letras con el tiempo actual
   $: if (parsedLyrics.length > 0) {
@@ -125,7 +150,7 @@
           <img src="/api/cover/{currentPlaying.id}" alt="Cover" />
         </div>
         
-        <div class="track-meta">
+        <div class="track-meta" on:contextmenu={showContextMenu}>
           <div class="meta-texts">
             <div class="title-row">
               <h1>{currentPlaying.title}</h1>
@@ -204,6 +229,14 @@
       </div>
     </div>
   </div>
+
+  <ContextMenu 
+    bind:visible={contextMenu.visible}
+    x={contextMenu.x}
+    y={contextMenu.y}
+    items={contextMenu.items}
+    on:close={() => contextMenu.visible = false}
+  />
 </div>
 {/if}
 

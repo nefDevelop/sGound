@@ -8,6 +8,7 @@
   import AlbumsGrid from "./lib/AlbumsGrid.svelte";
   import Playlists from "./lib/Playlists.svelte";
   import PlaylistsView from "./lib/PlaylistsView.svelte";
+  import Maintenance from "./lib/Maintenance.svelte";
   import SmartPlaylistView from "./lib/SmartPlaylistView.svelte";
   import Dashboard from "./lib/Dashboard.svelte";
   import Settings from "./lib/Settings.svelte";
@@ -130,6 +131,24 @@
     selectedTracks = selected;
   }
 
+  async function handleDelete(track) {
+    if (!confirm(`Are you sure you want to delete "${track.title}" from library?`)) return;
+    try {
+      const res = await fetch(`/api/tracks/${track.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showToast("Track deleted", "success");
+        fetchTracks();
+      }
+    } catch (e) {
+      showToast("Failed to delete", "error");
+    }
+  }
+
+  function handleQueue(track) {
+     showToast("Added to queue: " + track.title, "success");
+     // Logic for adding to queue would go here
+  }
+
   async function selectAlbum(albumId) {
     try {
       const res = await fetch(`/api/albums/${albumId}/tracks`);
@@ -192,6 +211,14 @@
         Settings
       </button>
 
+      <button
+        class="nav-item"
+        class:active={currentView === "maintenance"}
+        on:click={() => (currentView = "maintenance")}
+      >
+        Maintenance
+      </button>
+
       <div class="nav-divider"></div>
       <div class="nav-label">Direct Access</div>
 
@@ -239,7 +266,12 @@
       {#if error}
         <p class="error">{error}</p>
       {:else if currentView === "dashboard"}
-        <Dashboard on:play={(e) => handlePlay(e.detail)} />
+        <Dashboard 
+          on:play={(e) => handlePlay(e.detail)} 
+          on:edit={(e) => openEditor(e.detail)}
+          on:queue={(e) => handleQueue(e.detail)}
+          on:delete={(e) => handleDelete(e.detail)}
+        />
       {:else if currentView === "library"}
         {#if tracks.length === 0}
           <div class="empty-state">
@@ -252,6 +284,8 @@
             on:play={(e) => handlePlay(e.detail)}
             on:edit={(e) => openEditor(e.detail)}
             on:selectionChange={(e) => handleSelectionChange(e.detail)}
+            on:queue={(e) => handleQueue(e.detail)}
+            on:delete={(e) => handleDelete(e.detail)}
           />
         {/if}
       {:else if currentView === "albums"}
@@ -267,14 +301,24 @@
           {currentPlaying}
           on:back={() => currentView = "playlists"}
           on:play={(e) => handlePlay(e.detail)}
+          on:edit={(e) => openEditor(e.detail)}
+          on:delete={(e) => handleDelete(e.detail)}
+          on:queue={(e) => handleQueue(e.detail)}
         />
       {:else if currentView === "playlist"}
         <PlaylistsView
           playlist={selectedPlaylist}
+          {currentPlaying}
           on:play={(e) => handlePlay(e.detail)}
+          on:edit={(e) => openEditor(e.detail)}
+          on:selectionChange={(e) => handleSelectionChange(e.detail)}
+          on:delete={(e) => handleDelete(e.detail)}
+          on:queue={(e) => handleQueue(e.detail)}
         />
       {:else if currentView === "settings"}
         <Settings />
+      {:else if currentView === "maintenance"}
+        <Maintenance on:fixTags={() => currentView = "library"} />
       {/if}
     </div>
   </section>
@@ -286,6 +330,8 @@
     bind:duration
     bind:currentTime
     on:openFull={() => (isFullPlayerOpen = true)}
+    on:edit={(e) => openEditor(e.detail)}
+    on:delete={(e) => handleDelete(e.detail)}
   />
 </main>
 
@@ -310,6 +356,8 @@
   bind:progress
   bind:duration
   bind:currentTime
+  on:edit={(e) => openEditor(e.detail)}
+  on:delete={(e) => handleDelete(e.detail)}
 />
 
 <style>

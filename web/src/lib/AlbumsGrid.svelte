@@ -1,10 +1,36 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte';
   import Icon from './Icon.svelte';
+  import ContextMenu from './ContextMenu.svelte';
   
   const dispatch = createEventDispatcher();
   let albums = [];
   let loading = true;
+
+  let contextMenu = {
+    visible: false,
+    x: 0,
+    y: 0,
+    album: null,
+    items: []
+  };
+
+  function showContextMenu(album, e) {
+    e.preventDefault();
+    contextMenu = {
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      album,
+      items: [
+        { label: 'Reproducir álbum', icon: 'play', action: () => dispatch('playAlbum', album.id) },
+        { label: 'Añadir álbum a cola', icon: 'plus', action: () => dispatch('queueAlbum', album.id) },
+        { divider: true },
+        { label: 'Editar metadatos', icon: 'edit', action: () => dispatch('editAlbum', album) },
+        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(album.title) }
+      ]
+    };
+  }
 
   onMount(async () => {
     try {
@@ -28,7 +54,11 @@
       {#each albums as album}
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <div class="album-card" on:click={() => dispatch('selectAlbum', album.id)}>
+        <div 
+          class="album-card" 
+          on:click={() => dispatch('selectAlbum', album.id)}
+          on:contextmenu={(e) => showContextMenu(album, e)}
+        >
           <div class="cover-wrapper">
             <img class="cover" src={`/api/cover/${album.coverId}`} alt={album.title} 
                  on:error={(e) => (e.currentTarget.src = 'https://placehold.co/300x300?text=Album')} />
@@ -47,6 +77,14 @@
       {/each}
     </div>
   {/if}
+
+  <ContextMenu 
+    bind:visible={contextMenu.visible}
+    x={contextMenu.x}
+    y={contextMenu.y}
+    items={contextMenu.items}
+    on:close={() => contextMenu.visible = false}
+  />
 </div>
 
 <style>

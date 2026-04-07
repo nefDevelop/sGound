@@ -1,10 +1,20 @@
 <script>
   import { onMount, createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
+  import ContextMenu from './ContextMenu.svelte';
+  import { showToast } from './stores.js';
   
   const dispatch = createEventDispatcher();
   let playlists = [];
   let loading = true;
+
+  let contextMenu = {
+    visible: false,
+    x: 0,
+    y: 0,
+    playlist: null,
+    items: []
+  };
 
   onMount(fetchPlaylists);
 
@@ -16,6 +26,34 @@
       console.error("Failed to fetch playlists", e);
     } finally {
       loading = false;
+    }
+  }
+
+  function showContextMenu(playlist, e) {
+    e.preventDefault();
+    contextMenu = {
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      playlist,
+      items: [
+        { label: 'Reproducir', icon: 'play', action: () => dispatch('selectPlaylist', playlist) },
+        { divider: true },
+        { label: 'Eliminar playlist', icon: 'trash', color: 'danger', action: () => deletePlaylist(playlist.id) }
+      ]
+    };
+  }
+
+  async function deletePlaylist(id) {
+    if (!confirm("¿Eliminar esta lista de reproducción?")) return;
+    try {
+      const res = await fetch(`/api/playlists/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showToast("Playlist eliminada", "success");
+        fetchPlaylists();
+      }
+    } catch (e) {
+      showToast("Error al eliminar", "error");
     }
   }
 
@@ -79,7 +117,11 @@
   {:else}
     <div class="playlists-grid">
       {#each playlists as playlist}
-        <button class="playlist-card glass" on:click={() => dispatch('selectPlaylist', playlist)}>
+        <button 
+          class="playlist-card glass" 
+          on:click={() => dispatch('selectPlaylist', playlist)}
+          on:contextmenu={(e) => showContextMenu(playlist, e)}
+        >
           <div class="playlist-art">
             <Icon name="music" size={40} />
           </div>
@@ -94,6 +136,14 @@
       {/each}
     </div>
   {/if}
+
+  <ContextMenu 
+    bind:visible={contextMenu.visible}
+    x={contextMenu.x}
+    y={contextMenu.y}
+    items={contextMenu.items}
+    on:close={() => contextMenu.visible = false}
+  />
 </div>
 
 <style>

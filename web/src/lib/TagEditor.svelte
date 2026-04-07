@@ -116,6 +116,32 @@
     }
   }
 
+  async function suggestMusicBrainz() {
+    loading = true;
+    try {
+      const res = await fetch(`/api/metadata/suggest?id=${encodeURIComponent(track.id)}`);
+      if (!res.ok) throw new Error("MusicBrainz suggestion failed");
+      const suggestions = await res.json();
+      if (suggestions && suggestions.length > 0) {
+        // Encontrar la mejor coincidencia por título
+        const bestMatch = suggestions.find(s => 
+          s.title.toLowerCase().includes(track.title.toLowerCase()) || 
+          track.title.toLowerCase().includes(s.title.toLowerCase())
+        ) || suggestions[0];
+        
+        applyMetadata(bestMatch);
+        showToast("Tags suggested from MusicBrainz", "success");
+      } else {
+        showToast("No matches in MusicBrainz", "info");
+      }
+    } catch (e) {
+      showToast("MB Suggestion failed", "error");
+    } finally {
+      loading = false;
+    }
+  }
+
+
   function applyMetadata(data) {
     track.artist = data.artist || track.artist;
     track.title = data.title || track.title;
@@ -141,7 +167,14 @@
     <div class="modal-header">
       <div class="title-with-btn">
         <h2>Edit Track Tags</h2>
-        <button type="button" class="auto-btn" on:click={autoSearchTags}><Icon name="zap" size={16} color="#1e293b" /> Auto Search</button>
+        <div class="header-actions">
+          <button type="button" class="auto-btn mb" on:click={suggestMusicBrainz} title="Auto-tag with MusicBrainz">
+            <Icon name="music" size={16} color="white" /> Auto-Tag MB
+          </button>
+          <button type="button" class="auto-btn" on:click={autoSearchTags} title="Search Metadata">
+            <Icon name="zap" size={16} color="#1e293b" /> Search
+          </button>
+        </div>
       </div>
       <button class="close-btn" on:click={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
     </div>
@@ -334,16 +367,22 @@
     gap: 0.5rem;
   }
 
+  .header-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
   .auto-btn {
     background: #ffcc00;
     color: #1e293b;
     border: none;
     padding: 0.6rem 1.2rem;
     border-radius: 20px;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     font-weight: 800;
     cursor: pointer;
-    box-shadow: 0 4px 15px rgba(255, 204, 0, 0.3);
+    box-shadow: 0 4px 15px rgba(255, 204, 0, 0.2);
     width: fit-content;
     display: flex;
     align-items: center;
@@ -351,9 +390,15 @@
     transition: all 0.2s;
   }
 
+  .auto-btn.mb {
+    background: var(--primary);
+    color: white;
+    box-shadow: 0 4px 15px var(--primary-10);
+  }
+
   .auto-btn:hover {
     transform: translateY(-2px);
-    background: #ffd633;
+    filter: brightness(1.1);
   }
 
   .modal-header h2 { margin: 0; color: white; }

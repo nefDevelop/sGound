@@ -1,10 +1,13 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade } from 'svelte/transition';
+  import TracksView from './TracksView.svelte';
 
   export let playlist = { id: '', name: '' };
+  export let currentPlaying = null;
   
+  const dispatch = createEventDispatcher();
   let tracks = [];
   let loading = true;
   let error = null;
@@ -28,7 +31,7 @@
 
   function handlePlayAll() {
     if (tracks.length > 0) {
-       // Dispatch event to parent to play first track and set queue
+       dispatch('play', tracks[0]);
     }
   }
 </script>
@@ -63,23 +66,15 @@
             <p>No tracks in this playlist.</p>
         </div>
       {:else}
-        <div class="track-grid-header">
-          <span>#</span>
-          <span>Title</span>
-          <span>Album</span>
-          <span>Duration</span>
-        </div>
-        {#each tracks as track, i}
-          <div class="track-row" on:dblclick={() => console.log("Play", track)} role="button" tabindex="0">
-            <span class="num">{i + 1}</span>
-            <div class="title-cell">
-              <span class="title">{track.title}</span>
-              <span class="artist">{track.artist}</span>
-            </div>
-            <span class="album">{track.album}</span>
-            <span class="dur">3:45</span>
-          </div>
-        {/each}
+        <TracksView 
+          {tracks} 
+          {currentPlaying} 
+          on:play 
+          on:edit 
+          on:selectionChange 
+          on:queue
+          on:delete
+        />
       {/if}
     </div>
   {/if}
@@ -87,7 +82,7 @@
 
 <style>
   .playlist-view {
-    padding: 2rem;
+    padding: 0;
   }
 
   .playlist-header {
@@ -104,7 +99,7 @@
     align-items: center;
     justify-content: center;
     background: linear-gradient(135deg, #333 0%, #111 100%);
-    border-radius: 12px;
+    border-radius: 24px;
     box-shadow: 0 20px 50px rgba(0,0,0,0.4);
   }
 
@@ -112,6 +107,8 @@
     font-size: 4rem;
     margin: 0.5rem 0;
     font-weight: 900;
+    font-family: var(--font-headline);
+    letter-spacing: -2px;
   }
 
   .type-label {
@@ -119,53 +116,42 @@
     font-size: 0.8rem;
     font-weight: 700;
     letter-spacing: 1px;
+    color: var(--primary);
   }
 
   .stats {
     color: var(--text-muted);
     margin-bottom: 1.5rem;
+    font-weight: 600;
   }
 
   .play-btn {
-    background: var(--accent);
-    color: #000;
+    background: var(--primary);
+    color: white;
     border: none;
-    padding: 0.8rem 2rem;
-    border-radius: 30px;
-    font-weight: 700;
+    padding: 0.8rem 2.5rem;
+    border-radius: 100px;
+    font-weight: 800;
     display: flex;
     align-items: center;
     gap: 0.5rem;
     cursor: pointer;
-    transition: transform 0.2s;
+    transition: transform 0.2s, background 0.2s;
+    box-shadow: 0 4px 15px var(--primary-10);
   }
-  .play-btn:hover { transform: scale(1.05); }
+  .play-btn:hover { transform: scale(1.05); background: var(--primary-80); }
 
-  .track-grid-header {
-    display: grid;
-    grid-template-columns: 40px 1fr 1fr 100px;
-    padding: 1rem;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+  .tracks-list {
+    margin-top: 1rem;
+  }
+
+  .empty {
+    text-align: center;
+    padding: 4rem;
     color: var(--text-muted);
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    background: rgba(255,255,255,0.02);
+    border-radius: var(--radius);
+    border: 1px dashed var(--border-color);
   }
-
-  .track-row {
-    display: grid;
-    grid-template-columns: 40px 1fr 1fr 100px;
-    padding: 0.8rem 1rem;
-    border-radius: 8px;
-    align-items: center;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-  .track-row:hover { background: rgba(255,255,255,0.05); }
-
-  .title-cell { display: flex; flex-direction: column; }
-  .title { font-weight: 600; }
-  .artist { font-size: 0.85rem; color: var(--text-muted); }
-  .album { color: var(--text-muted); }
-  .num { color: var(--text-muted); }
 </style>
+

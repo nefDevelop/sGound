@@ -1,6 +1,7 @@
 <script>
   import { onMount, createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
+  import ContextMenu from './ContextMenu.svelte';
   
   const dispatch = createEventDispatcher();
   let stats = {
@@ -12,6 +13,33 @@
   };
   let health = { missingTags: 0, missingLyrics: 0 };
   let loading = true;
+
+  let contextMenu = {
+    visible: false,
+    x: 0,
+    y: 0,
+    track: null,
+    items: []
+  };
+
+  function showContextMenu(track, e) {
+    e.preventDefault();
+    contextMenu = {
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      track,
+      items: [
+        { label: 'Reproducir', icon: 'play', action: () => dispatch('play', track) },
+        { label: 'Añadir a cola', icon: 'plus', action: () => dispatch('queue', track) },
+        { divider: true },
+        { label: 'Editar etiquetas', icon: 'edit', action: () => dispatch('edit', track) },
+        { divider: true },
+        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(track.title) },
+        { label: 'Eliminar de biblioteca', icon: 'xCircle', color: 'danger', action: () => dispatch('delete', track) }
+      ]
+    };
+  }
 
   onMount(async () => {
     try {
@@ -48,7 +76,11 @@
         {#each stats.forgottenGems as gem}
           <!-- svelte-ignore a11y-click-events-have-key-events -->
           <!-- svelte-ignore a11y-no-static-element-interactions -->
-          <div class="gem-item" on:click={() => dispatch('play', gem)}>
+          <div 
+            class="gem-item" 
+            on:click={() => dispatch('play', gem)}
+            on:contextmenu={(e) => showContextMenu(gem, e)}
+          >
             <img src={`/api/cover/${gem.id}`} alt="" on:error={(e) => (e.currentTarget.style.display='none')} />
             <div class="gem-info">
               <span class="title">{gem.title}</span>
@@ -90,6 +122,14 @@
       </div>
     </section>
   </div>
+
+  <ContextMenu 
+    bind:visible={contextMenu.visible}
+    x={contextMenu.x}
+    y={contextMenu.y}
+    items={contextMenu.items}
+    on:close={() => contextMenu.visible = false}
+  />
 </div>
 
 <style>

@@ -21,6 +21,7 @@ import (
 	"sgound/internal/tags"
 	"sgound/internal/config"
 	"sgound/internal/scanner"
+	"sgound/internal/metadata"
 	"sgound/web"
 )
 
@@ -52,11 +53,16 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/search", s.handleSearch)
 	mux.HandleFunc("/api/dashboard", s.handleDashboard)
 	mux.HandleFunc("/api/library/health", s.handleLibraryHealth)
+	mux.HandleFunc("/api/library/duplicates", s.handleLibraryDuplicates)
+	mux.HandleFunc("/api/library/orphans", s.handleLibraryOrphans)
+	mux.HandleFunc("/api/library/cleanup", s.handleLibraryCleanup)
+	mux.HandleFunc("/api/library/low-quality", s.handleLibraryLowQuality)
 	mux.HandleFunc("/api/library/metadata", s.handleLibraryMetadata)
 	mux.HandleFunc("/api/lyrics/", s.handleLyrics) // /api/lyrics/{id} or /api/lyrics/search
 	mux.HandleFunc("/api/lyrics", s.handleLyrics)
 	mux.HandleFunc("/api/lyrics/search", s.handleLyricsSearch)
 	mux.HandleFunc("/api/metadata/search", s.handleMetadataSearch)
+	mux.HandleFunc("/api/metadata/suggest", s.handleMetadataSuggest)
 	mux.HandleFunc("/api/autocomplete", s.handleAutocomplete)
 	mux.HandleFunc("/api/playlists", s.handlePlaylists)
 	mux.HandleFunc("/api/playlists/", s.handlePlaylistActions)
@@ -629,11 +635,138 @@ func (s *Server) handleLibraryHealth(w http.ResponseWriter, r *http.Request) {
 	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE genre IS NULL OR genre = ''").Scan(&incomplete)
 	health["missingTags"] = incomplete
 
-	// Pistas sin letras (campo comment o similar por ahora hasta que tengamos campo lyrics real en DB)
-	// Como no hay campo lyrics en DB todavía, buscamos en base a una heurística
-	health["missingLyrics"] = 0 
+	// Duplicados
+	dups, _ := s.DB.GetDuplicates()
+	health["duplicateCount"] = len(dups)
 
+	// Huérfanos
+	orphans, _ := s.DB.GetOrphanedTracks()
+	health["orphanCount"] = len(orphans)
+
+	// Baja calidad (< 128kbps)
+	lowQual, _ := s.DB.GetLowQualityTracks(128)
+	health["lowQualityCount"] = len(lowQual)
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health)
+}
+
+func (s *Server) handleLibraryDuplicates(w http.ResponseWriter, r *http.Request) {
+	dups, err := s.DB.GetDuplicates()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(dups)
+}
+
+func (s *Server) handleLibraryOrphans(w http.ResponseWriter, r *http.Request) {
+	orphans, err := s.DB.GetOrphanedTracks()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(orphans)
+}
+
+func (s *Server) handleLibraryCleanup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	orphans, err := s.DB.GetOrphanedTracks()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var ids []string
+	for _, o := range orphans {
+		ids = append(ids, o.ID)
+	}
+
+	if err := s.DB.DeleteTracks(ids); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(fmt.Sprintf(`{"status":"success", "removed": %d}`, len(ids))))
+}
+
+func (s *Server) handleLibraryLowQuality(w http.ResponseWriter, r *http.Request) {
+	thresholdStr := r.URL.Query().Get("bitrate")
+	threshold := 128
+	if thresholdStr != "" {
+		if val, err := strconv.Atoi(thresholdStr); err == nil {
+			threshold = val
+		}
+	}
+
+	tracks, err := s.DB.GetLowQualityTracks(threshold)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tracks)
+}
+
+
+func (s *Server) handleMetadataSuggest(w http.ResponseWriter, r *http.Request) {
+	trackID := r.URL.Query().Get("id")
+	if trackID == "" {
+		http.Error(w, "Missing id", http.StatusBadRequest)
+		return
+	}
+
+	var title, artist, album string
+	err := s.DB.Conn.QueryRow(`
+		SELECT t.title, ar.name, al.title
+		FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists ar ON al.artist_id = ar.id
+		WHERE t.id = ?`, trackID).Scan(&title, &artist, &album)
+
+	if err != nil {
+		http.Error(w, "Track not found", http.StatusNotFound)
+		return
+	}
+
+	mb := metadata.NewMBClient()
+	releases, err := mb.SearchRelease(artist, album)
+	if err != nil || len(releases) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
+		return
+	}
+
+	// Cogemos la primera por simplicidad para auto-tag
+	details, err := mb.GetReleaseDetails(releases[0].ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var suggestions []map[string]interface{}
+	for _, medium := range details.Media {
+		for _, track := range medium.Tracks {
+			suggestions = append(suggestions, map[string]interface{}{
+				"id":       track.ID,
+				"title":    track.Title,
+				"trackNum": track.Number,
+				"artist":   artist,
+				"album":    details.Title,
+				"year":     details.Date,
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(suggestions)
 }
 
 func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
@@ -898,10 +1031,30 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePlaylistActions(w http.ResponseWriter, r *http.Request) {
+	id := s.extractID(r, "/api/playlists/")
+
 	if strings.HasSuffix(r.URL.Path, "/tracks") {
-		s.handleGetPlaylistTracks(w, r)
+		if r.Method == http.MethodGet {
+			s.handleGetPlaylistTracks(w, r)
+		} else if r.Method == http.MethodPost {
+			var body struct {
+				TrackID string `json:"trackId"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				s.DB.AddToPlaylist(id, body.TrackID)
+			}
+			w.WriteHeader(http.StatusOK)
+		}
 		return
 	}
+
+	if r.Method == http.MethodDelete {
+		s.DB.DeletePlaylist(id)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success"}`))
+		return
+	}
+
 	http.Error(w, "Not implemented", http.StatusNotImplemented)
 }
 

@@ -4,6 +4,9 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
+
+	"sGound/internal/models"
 
 	_ "modernc.org/sqlite"
 	"strings"
@@ -89,7 +92,6 @@ func (db *Database) initSchema() error {
 	}
 
 	// Migraciones "en caliente" por si se añadieron columnas después
-	// Ignorar errores si las columnas ya existen (la mayoría de DBs no tienen IF NOT EXISTS para ADD COLUMN)
 	cols := []string{
 		"ALTER TABLE tracks ADD COLUMN last_played DATETIME",
 		"ALTER TABLE tracks ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
@@ -99,7 +101,6 @@ func (db *Database) initSchema() error {
 
 	for _, sql := range cols {
 		if _, err := db.Conn.Exec(sql); err != nil {
-			// Ignoramos si es un error de "columna ya existe"
 			if !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
 				slog.Error("Migration error", "sql", sql, "error", err)
 			}
@@ -109,4 +110,118 @@ func (db *Database) initSchema() error {
 	}
 	
 	return nil
+}
+
+func (db *Database) GetDuplicates() ([]models.Track, error) {
+	query := `
+	SELECT t.id, t.title, a.title as album, art.name as artist, t.path, t.bit_rate
+	FROM tracks t
+	JOIN albums a ON t.album_id = a.id
+	JOIN artists art ON a.artist_id = art.id
+	WHERE (art.id, a.id, t.title) IN (
+		SELECT a2.artist_id, t2.album_id, t2.title
+		FROM tracks t2
+		JOIN albums a2 ON t2.album_id = a2.id
+		GROUP BY a2.artist_id, t2.album_id, t2.title
+		HAVING COUNT(*) > 1
+	)
+	ORDER BY art.name, a.title, t.title`
+
+	rows, err := db.Conn.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tracks []models.Track
+	for rows.Next() {
+		var t models.Track
+		if err := rows.Scan(&t.ID, &t.Title, &t.Album, &t.Artist, &t.Path, &t.BitRate); err != nil {
+			return nil, err
+		}
+		tracks = append(tracks, t)
+	}
+	return tracks, nil
+}
+
+func (db *Database) GetOrphanedTracks() ([]models.Track, error) {
+	rows, err := db.Conn.Query("SELECT id, path, title FROM tracks")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orphans []models.Track
+	for rows.Next() {
+		var t models.Track
+		if err := rows.Scan(&t.ID, &t.Path, &t.Title); err != nil {
+			return nil, err
+		}
+		
+		if _, err := os.Stat(t.Path); os.IsNotExist(err) {
+			orphans = append(orphans, t)
+		}
+	}
+	return orphans, nil
+}
+
+func (db *Database) GetLowQualityTracks(threshold int) ([]models.Track, error) {
+	query := `
+	SELECT t.id, t.title, a.title as album, art.name as artist, t.path, t.bit_rate
+	FROM tracks t
+	JOIN albums a ON t.album_id = a.id
+	JOIN artists art ON a.artist_id = art.id
+	WHERE t.bit_rate > 0 AND t.bit_rate < ?
+	ORDER BY t.bit_rate ASC`
+
+	rows, err := db.Conn.Query(query, threshold*1000)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tracks []models.Track
+	for rows.Next() {
+		var t models.Track
+		if err := rows.Scan(&t.ID, &t.Title, &t.Album, &t.Artist, &t.Path, &t.BitRate); err != nil {
+			return nil, err
+		}
+		tracks = append(tracks, t)
+	}
+	return tracks, nil
+}
+
+func (db *Database) DeleteTracks(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf("DELETE FROM tracks WHERE id IN (%s)", strings.Join(placeholders, ","))
+	_, err := db.Conn.Exec(query, args...)
+	return err
+}
+
+func (db *Database) CreatePlaylist(id, name, description string) error {
+	_, err := db.Conn.Exec("INSERT INTO playlists (id, name, description) VALUES (?, ?, ?)", id, name, description)
+	return err
+}
+
+func (db *Database) DeletePlaylist(id string) error {
+	_, err := db.Conn.Exec("DELETE FROM playlists WHERE id = ?", id)
+	return err
+}
+
+func (db *Database) AddToPlaylist(playlistID, trackID string) error {
+	var count int
+	err := db.Conn.QueryRow("SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?", playlistID).Scan(&count)
+	if err != nil {
+		return err
+	}
+	_, err = db.Conn.Exec("INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)", playlistID, trackID, count)
+	return err
 }

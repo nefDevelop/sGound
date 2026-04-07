@@ -1,49 +1,49 @@
-# Roadmap: Sgound - Music Server (Golang + Svelte)
+# sGound Roadmap: Competitividad y Saneamiento Pro
 
-## ✅ Fase 1: Arquitectura y Configuración Inicial (Backend)
-- [x] Definir estructura del proyecto en Go.
-- [x] Configurar SQLite (modernc.org/sqlite - No CGO).
-- [x] Sistema de configuración (Variables de entorno).
-- [x] Logger estructurado (slog).
+Este documento detalla las carencias críticas de sGound frente a los estándares de la industria (Navidrome, Gonic, MusicBee) y el plan para superarlos, priorizando la **velocidad de ejecución** y la **ligereza del binario**.
 
-## ✅ Fase 2: Control de Biblioteca (Scanner & Extractor)
-- [x] Escaneo recursivo de directorios.
-- [x] Extracción de metadata extendida (bitrate, samplerate, format, size).
-- [x] Soporte para MP3, FLAC, OGG, M4A, MP4, OPUS, WAV.
-- [x] Lógica de sincronización en DB.
+## 1. Comparativa de Carencias Críticas
 
-## ✅ Fase 3: Transmisión y API RESTful
-- [x] Servidor HTTP con soporte para HTTP Range (Seek).
-- [x] Endpoints para Artistas, Álbumes y Canciones.
-- [x] Búsqueda Global (Like SQL en múltiples campos).
-- [x] Endpoint de Portadas (Embebidas + Archivos externos como cover.jpg).
+| Característica | Rival | Estado sGound | Coste Comp. | Tamaño | Prioridad |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Multi-usuario / Auth** | Navidrome | ❌ Inexistente | Bajo | Medio | Alta |
+| **Scrobbling (Last.fm)** | Gonic | ❌ Inexistente | Muy Bajo | Pequeño | Media |
+| **ReplayGain (Normalización)** | MusicBee | ❌ No se lee | Medio (Parsing) | Pequeño | Alta |
+| **Inbox (Bandeja de Entrada)** | MusicBee | ❌ Entrada directa | Bajo | Medio | Alta |
+| **Gapless Playback** | Navidrome | ⚠️ Parcial (Browser) | Medio (Buffer) | Medio | Media |
+| **Transcodificación Auto** | Gonic | ⚠️ Manual | Alto (FFmpeg) | Pequeño | Alta |
+| **Filtros Dinámicos** | MusicBee | ❌ Lineal | Bajo (SQL) | Grande (UI) | Media |
+| **Calificación (1-5 Stars)** | MusicBee | ⚠️ Solo Like | Bajo | Pequeño | Media |
 
-## ✅ Fase 4: Edición de Tags (Backend)
-- [x] Edición física de tags en archivos (id3v2 para MP3).
-- [x] Sincronización inmediata con la Base de Datos.
-- [x] Soporte para edición masiva (Bulk update).
+---
 
-## ✅ Fase 5: Interfaz Web (Frontend en Svelte)
-- [x] UI Moderna con Grid Layout y Glassmorphism.
-- [x] Componente de tabla de canciones con selección múltiple.
-- [x] MiniPlayer con barra de progreso, volumen y metadatos técnicos.
-- [x] Editores de Tags (Individual y Masivo) integrados.
+## 2. Plan de Implementación por Fases
 
-## ✅ Fase 6: Integración y Empaquetado
-- [x] Embeber la UI (SPA) dentro del binario Go usando `//go:embed`.
-- [x] Single binary deployment (15MB aprox).
+### Fase 1: Robustez de Gestión (The MusicBee Way)
+*   **Implementación del "Inbox":** Nuevos archivos escaneados entran en estado `pending`. No aparecen en la biblioteca principal hasta que el usuario valida etiquetas/carátula.
+    *   *Coste:* Bajo. Requiere columna `status` en tabla `tracks`.
+*   **Sistema de Rating Real:** Cambiar el "Like" por una escala de 0-5.
+    *   *Coste:* Muy Bajo. Cambio de `bool` a `int` en DB.
+*   **Lectura de ReplayGain:** El escáner debe extraer las etiquetas `REPLAYGAIN_TRACK_GAIN` para que el reproductor ajuste el volumen automáticamente.
+    *   *Coste:* Bajo en lectura, evita que el usuario toque el volumen constantemente.
 
-## ✅ Fase 7: Funcionalidades Avanzadas (Implementadas)
-- [x] **Smart Playlists**: Motor de filtrado dinámico por década, género, calidad y actividad reciente.
-- [x] **Letras Sincronizadas**: Integración con LRCLib y soporte para tags USLT/Lyrics.
-- [x] **Transcodificación al Vuelo**: Streaming adaptativo con FFmpeg para dispositivos móviles.
-- [x] **Motor de Temas Dinámico**: Personalización de la interfaz basada en Material Design 3 (Expressive).
-- [x] **Vista de Rejilla de Álbumes**: Navegación visual optimizada por carátulas.
+### Fase 2: Eficiencia de Servidor (The Navidrome/Gonic Way)
+*   **Autenticación Simple (JWT):** Soporte para múltiples usuarios con contraseñas seguras (bcrypt).
+    *   *Coste:* Medio en tamaño (dependencias de cifrado), bajo en CPU.
+*   **Transcodificación Inteligente:** Detectar si el cliente está en móvil/web y ofrecer 128k MP3 automáticamente si el original es FLAC/WAV pesado.
+    *   *Coste:* **Alto en CPU** durante el streaming, pero ahorra ancho de banda crítico.
+*   **API de Scrobbling:** Enviar datos a Last.fm/ListenBrainz al terminar una canción (50% de progreso).
+    *   *Coste:* Insignificante.
 
-## 🚀 Fase 8: Próximas Funcionalidades
-- [ ] **Multi-usuario**: Sistema de autenticación y perfiles.
-- [ ] **App Móvil (PWA)**: Optimización para instalación como aplicación nativa en móviles.
-- [ ] **Mejoras de Escaneo**: Notificaciones en tiempo real vía WebSockets del progreso del escáner.
-- [ ] **Renombrado Físico de Archivos**: Opción para organizar archivos en carpetas basadas en Artist/Album (Ej: `Artist/Album/01 - Title.mp3`).
-- [ ] **Radio/Mezcla Automática**: Generación de colas de reproducción infinitas basadas en gustos.
+### Fase 3: Experiencia de Audio Avanzada
+*   **Pre-buffering para Gapless:** Implementar una cola en el frontend que empiece a descargar la siguiente canción 10 segundos antes de que termine la actual.
+    *   *Coste:* Medio en memoria RAM del navegador.
+*   **Smart Playlists con SQL Real:** Permitir al usuario escribir sus propias reglas SQL para listas dinámicas (ej: "Top Rock de los 90 con > 4 estrellas").
+    *   *Coste:* Bajo (ya tenemos la base en la tabla `playlists`).
 
+---
+
+## 3. Notas sobre Velocidad y Tamaño
+*   **FFmpeg:** sGound seguirá dependiendo de FFmpeg externo para transcodificar, manteniendo el binario de Go por debajo de los 20MB.
+*   **SQLite:** Se mantendrá como motor único. No se migrará a PostgreSQL para evitar complejidad de despliegue, usando índices optimizados para los nuevos filtros.
+*   **Svelte:** Se evitarán librerías pesadas de componentes. El CSS seguirá siendo Vanilla para garantizar tiempos de carga < 1s en móviles antiguos.
