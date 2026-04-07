@@ -34,6 +34,10 @@ dev:
 	@echo "=> Iniciando frontend y backend en paralelo..."
 	@make -j2 dev-front dev-back
 
+bench:
+	@echo "=> Ejecutando benchmark de API (50 usuarios simultáneos)..."
+	go run ./cmd/bench/main.go
+
 clean:
 	@echo "=> Limpiando archivos de build previos..."
 	go clean

@@ -6,9 +6,11 @@ import (
 )
 
 type Config struct {
-	DBPath    string
-	MusicPath string
-	Port      string
+	DBPath        string
+	MusicPath     string
+	Port          string
+	AutoRename    bool
+	RenamePattern string
 }
 
 func LoadConfig() *Config {
@@ -27,11 +29,19 @@ func LoadConfig() *Config {
 		port = "8080"
 	}
 
-	slog.Info("Configuration loaded", "dbPath", dbPath, "musicPath", musicPath, "port", port)
+	autoRename := os.Getenv("SGOUND_AUTO_RENAME") == "true"
+	renamePattern := os.Getenv("SGOUND_RENAME_PATTERN")
+	if renamePattern == "" {
+		renamePattern = "{artist}/{album}/{track} - {title}"
+	}
+
+	slog.Info("Configuration loaded", "dbPath", dbPath, "musicPath", musicPath, "port", port, "autoRename", autoRename)
 
 	return &Config{
-		DBPath:    dbPath,
-		MusicPath: musicPath,
-		Port:      port,
+		DBPath:        dbPath,
+		MusicPath:     musicPath,
+		Port:          port,
+		AutoRename:    autoRename,
+		RenamePattern: renamePattern,
 	}
 }

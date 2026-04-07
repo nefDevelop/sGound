@@ -45,22 +45,119 @@ Inicia el streaming HTTP del binario del audio local. Este endpoint está config
 
 ---
 
-## 🏷️ 3. Edición Física de Tags
-**Método:** `PUT`  
-**Ruta:** `/api/tracks/{track_id}/tags`
+## 📂 4. Listar Álbumes
+**Método:** `GET`  
+**Ruta:** `/api/albums`
 
-Modifica permanentemente los `Metadatos ID3v2` escribiendo la carga entrante en el archivo acústico (.mp3) original usando `bogem/id3v2/v2`. Inmediatamente después, sincroniza el título editado a la base de datos SQLite como un espejo persistente.
+Devuelve todos los álbumes indexados, incluyendo el nombre del artista y el año.
 
-**Body (`application/json`)**:
+**Respuesta**:
+```json
+[
+  {
+    "id": "daft-punk-discovery",
+    "title": "Discovery",
+    "artist": "Daft Punk",
+    "year": 2001
+  }
+]
+```
+
+---
+
+## 🗂️ 5. Álbumes por Artista
+**Método:** `GET`  
+**Ruta:** `/api/artists/{artist_id}/albums`
+
+**Respuesta**: Lista de álbumes pertenecientes a ese artista específico.
+
+---
+
+## 🎵 6. Canciones por Álbum
+**Método:** `GET`  
+**Ruta:** `/api/albums/{album_id}/tracks`
+
+**Respuesta**: Lista de canciones ordenadas por `track_num`.
+
+---
+
+## 🔍 7. Escaneo de Biblioteca (Trigger)
+**Método:** `POST`  
+**Ruta:** `/api/scan`
+
+Dispara un escaneo asíncrono en el servidor. El servidor recorrerá la `MusicPath` configurada y actualizará la base de datos con los nuevos archivos encontrados o cambios en los existentes.
+
+---
+
+## ⚙️ 8. Configuración de Ruta
+**Método:** `GET` | `PUT`  
+**Ruta:** `/api/config`
+
+Permite consultar o cambiar la ruta física donde Sgound busca la música (equivalente a la librería en MusicBee).
+
+**Carga PUT**: 
 ```json
 {
-  "title": "Starboy (Edit)",
-  "artist": "The Weeknd",
-  "album": "Starboy"
+  "musicPath": "/storage/emulated/0/Music",
+  "autoRename": true,
+  "renamePattern": "{artist}/{year} - {album}/{track} - {title}"
 }
 ```
 
-**Respuestas Posibles**:
-- `200 OK`: `{"status":"success"}` indicando cambio y escritura correcta.
-- `400 Bad Request`: Estructura JSON no parseable.
-- `500 Internal Server Error`: Ojos fallos de I/O en disco (Ej: archivo sin permiso de escritura o no es formato .mp3).
+---
+
+## 🔎 9. Búsqueda Global
+**Método:** `GET`  
+**Ruta:** `/api/search?q={query}`
+
+Realiza una búsqueda parcial en Títulos, Artistas, Álbumes y Géneros.
+
+---
+
+## ⚡ 10. Búsqueda de Metadatos (Externa)
+**Método:** `GET`  
+**Ruta:** `/api/metadata/search?artist={artist}&title={title}`
+
+Consulta la API de iTunes para sugerir etiquetas correctas. Devuelve hasta 5 resultados con carátulas.
+
+---
+
+## 📝 11. Autocompletado Local
+**Método:** `GET`  
+**Ruta:** `/api/autocomplete?field={field}&q={query}`
+
+Sugiere valores existentes en tu DB.  
+**Campos:** `artist`, `album`, `genre`, `composer`.
+
+---
+
+## 📊 12. Dashboard y Estadísticas
+**Método:** `GET`  
+**Ruta:** `/api/dashboard`
+
+Devuelve contadores totales y una lista de "Joyas Olvidadas" (10 canciones aleatorias).
+
+---
+
+## 🛡️ 13. Salud de la Biblioteca
+**Método:** `GET`  
+**Ruta:** `/api/library/health`
+
+Detecta inconsistencias: canciones sin género, sin año o sin letras incrustadas.
+
+---
+
+## 📁 14. Organización Física
+**Método:** `POST`  
+**Ruta:** `/api/tracks/{track_id}/organize`
+
+Mueve manualmente un archivo según el patrón configurado en Settings.
+
+---
+
+## 📜 15. Gestión de Letras (Lyrics)
+**Método:** `GET` | `PUT`  
+**Ruta:** `/api/lyrics/{track_id}`
+
+- **GET:** Descarga letras de la nube (lyrics.ovh).
+- **PUT:** Guarda letras permanentemente en el archivo físico (tag USLT).

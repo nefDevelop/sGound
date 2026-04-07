@@ -46,17 +46,23 @@ func (db *Database) initSchema() error {
 		FOREIGN KEY (artist_id) REFERENCES artists(id) ON DELETE CASCADE
 	);
 	
-	CREATE TABLE IF NOT EXISTS tracks (
+	CREATE TABLE IF NOT EXISTS playlists (
 		id TEXT PRIMARY KEY,
-		album_id TEXT NOT NULL,
-		title TEXT NOT NULL,
-		track_num INTEGER,
-		path TEXT NOT NULL UNIQUE,
-		duration INTEGER,
-		genre TEXT,
-		FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE
+		name TEXT NOT NULL,
+		description TEXT,
+		is_smart INTEGER DEFAULT 0,
+		rule_sql TEXT, -- Para listas inteligentes
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
-	`
+
+	CREATE TABLE IF NOT EXISTS playlist_tracks (
+		playlist_id TEXT,
+		track_id TEXT,
+		position INTEGER,
+		PRIMARY KEY (playlist_id, track_id),
+		FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+		FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+	);
 	_, err := db.Conn.Exec(schema)
 	return err
 }

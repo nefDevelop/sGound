@@ -31,9 +31,11 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			return nil // Skip this path and continue
 		}
 
-		if !d.IsDir() && isAudioFile(d.Name()) {
-			if parseErr := s.ParseAndSaveFile(path); parseErr != nil {
-				slog.Error("Failed to parse file", "path", path, "error", parseErr)
+		if !d.IsDir() {
+			if err := isAudioFile(d.Name()); err == nil {
+				if parseErr := s.ParseAndSaveFile(path); parseErr != nil {
+					slog.Error("Failed to parse file", "path", path, "error", parseErr)
+				}
 			}
 		}
 		return nil
@@ -47,9 +49,21 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	return nil
 }
 
-func isAudioFile(filename string) bool {
+func isAudioFile(filename string) error {
 	ext := strings.ToLower(filepath.Ext(filename))
-	return ext == ".mp3" || ext == ".flac" || ext == ".ogg" || ext == ".m4a"
+	supported := map[string]bool{
+		".mp3":  true,
+		".flac": true,
+		".ogg":  true,
+		".m4a":  true,
+		".mp4":  true,
+		".opus": true,
+		".wav":  true,
+	}
+	if !supported[ext] {
+		return fmt.Errorf("unsupported extension: %s", ext)
+	}
+	return nil
 }
 
 func (s *Scanner) ParseAndSaveFile(path string) error {
@@ -59,11 +73,15 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	}
 	defer f.Close()
 
+	fileStat, _ := f.Stat()
+	fileSize := fileStat.Size()
+	fileExt := strings.TrimPrefix(filepath.Ext(path), ".")
+
 	metadata, err := tag.ReadFrom(f)
 	
 	var artistName, albumName, title string
-	var trackNum, year int
-	var genre string
+	var trackNum, year, discNum int
+	var genre, composer, comment string
 
 	if err != nil {
 		slog.Warn("Tag parsing failed (corrupt metadata), fallback to paths", "path", path, "err", err)
@@ -90,11 +108,14 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 			title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		}
 		trackNum, _ = metadata.Track()
+		discNum, _ = metadata.Disc()
 		year = metadata.Year()
 		genre = metadata.Genre()
 		if genre == "" {
 			genre = "Subsonic Media"
 		}
+		composer = metadata.Composer()
+		comment = metadata.Comment()
 	}
 
 	// 1. Get or Create Artist
@@ -113,9 +134,18 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 	// 3. Create Track
 	trackId := generateID(path) // Unique identifier for the file
+	
+	// Por ahora dejamos bitrate y samplerate en 0 o valores por defecto 
+	// hasta que tengamos los decodificadores funcionando al 100% en este env
+	bitrate := 0
+	samplerate := 44100 
+	duration := 0 // En segundos
+
 	_, err = s.DB.Conn.Exec(
-		"INSERT OR REPLACE INTO tracks (id, album_id, title, track_num, path, duration, genre) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		trackId, albumId, title, trackNum, path, 0, genre,
+		`INSERT OR REPLACE INTO tracks 
+		(id, album_id, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		trackId, albumId, title, trackNum, discNum, path, duration, genre, fileSize, fileExt, composer, comment, bitrate, samplerate,
 	)
 	if err != nil {
 		return err

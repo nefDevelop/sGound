@@ -31,7 +31,7 @@ func main() {
 
 	slog.Info("Database connected and schema initialized")
 
-	apiServer := api.NewServer(database)
+	apiServer := api.NewServer(database, cfg)
 	mux := apiServer.SetupRoutes()
 
 	// Iniciar el escaner de musica en background

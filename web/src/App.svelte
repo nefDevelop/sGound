@@ -1,12 +1,22 @@
 <script>
   import { onMount } from 'svelte';
   import TagEditor from './lib/TagEditor.svelte';
+  import MassiveTagEditor from './lib/MassiveTagEditor.svelte';
+  import MiniPlayer from './lib/MiniPlayer.svelte';
+  import TracksView from './lib/TracksView.svelte';
+  import AlbumsGrid from './lib/AlbumsGrid.svelte';
+  import Dashboard from './lib/Dashboard.svelte';
+  import Settings from './lib/Settings.svelte';
   
+  let currentView = "dashboard"; 
   let tracks = [];
   let error = null;
+  let searchQuery = "";
 
   let isTagEditorOpen = false;
+  let isMassiveEditorOpen = false;
   let trackToEdit = { id: '', title: '', artist: '', album: '' };
+  let selectedTracks = [];
 
   let currentPlaying = null;
   let audioRef = null;
@@ -25,276 +35,202 @@
     }
   }
 
+  async function handleSearch() {
+    if (!searchQuery) {
+      fetchTracks();
+      return;
+    }
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+      const data = await res.json();
+      tracks = data.tracks || [];
+    } catch (e) {
+      console.error("Search failed", e);
+    }
+  }
+
+  async function triggerScan() {
+    try {
+      const res = await fetch('/api/scan', { method: 'POST' });
+      if (res.ok) {
+        alert("Library scan started!");
+        setTimeout(fetchTracks, 2000);
+      }
+    } catch (e) {
+      alert("Scan failed");
+    }
+  }
+
   function openEditor(track) {
     trackToEdit = { ...track };
     isTagEditorOpen = true;
   }
 
-  async function deleteTrack(id) {
-    if (!confirm("Are you sure you want to delete this track from DB?")) return;
-    try {
-      const res = await fetch(`/api/tracks/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error("Error deleting record");
-      tracks = tracks.filter(t => t.id !== id);
-    } catch(e) {
-      alert(e);
-    }
-  }
-
-  function playTrack(track) {
+  function handlePlay(track) {
     currentPlaying = track;
     if (audioRef) {
       audioRef.src = `/api/stream/${track.id}`;
       audioRef.play();
     }
   }
+
+  function handleSelectionChange(selected) {
+    selectedTracks = selected;
+  }
+
+  async function selectAlbum(albumId) {
+    try {
+      const res = await fetch(`/api/albums/${albumId}/tracks`);
+      tracks = await res.json() || [];
+      currentView = "library";
+    } catch (e) {
+      console.error(e);
+    }
+  }
 </script>
 
 <main class="app-layout">
-  <!-- Sidebar -->
-  <aside class="sidebar glass">
+  <aside class="sidebar">
     <div class="brand">
       <div class="logo"></div>
       <h2>Sgound</h2>
     </div>
     
     <nav>
-      <button class="nav-item active">Library</button>
-      <button class="nav-item">Playlists</button>
-      <button class="nav-item">Settings</button>
+      <button class="nav-item" class:active={currentView === 'dashboard'} on:click={() => currentView = 'dashboard'}>
+        Dashboard
+      </button>
+      <button class="nav-item" class:active={currentView === 'library'} on:click={() => currentView = 'library'}>
+        Library
+      </button>
+      <button class="nav-item" class:active={currentView === 'albums'} on:click={() => currentView = 'albums'}>
+        Albums
+      </button>
+      <button class="nav-item" class:active={currentView === 'settings'} on:click={() => currentView = 'settings'}>
+        Settings
+      </button>
     </nav>
   </aside>
 
-  <!-- Main Content -->
   <section class="content">
     <header class="top-bar">
-      <h1>Your Tracks</h1>
-      <button class="primary-btn">Scan Library</button>
+      <div class="search-box">
+        <input type="text" placeholder="Search music..." bind:value={searchQuery} on:input={handleSearch} />
+      </div>
+      <div class="actions">
+        {#if selectedTracks.length > 1}
+          <button class="bulk-btn" on:click={() => isMassiveEditorOpen = true}>
+            Edit ({selectedTracks.length})
+          </button>
+        {/if}
+        <button class="primary-btn" on:click={triggerScan}>Scan Library</button>
+      </div>
     </header>
 
-    <div class="library-grid">
+    <div class="scroll-view">
       {#if error}
         <p class="error">{error}</p>
-      {:else if tracks.length === 0}
-        <div class="empty-state">
-          <p>Your library is empty. Add MP3/FLACs to ./music directory.</p>
-        </div>
-      {:else}
-        <table class="tracks-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Title</th>
-              <th>Artist</th>
-              <th>Album</th>
-              <th>Genre</th>
-              <th>Year</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each tracks as track}
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-              <tr class="glass-row" on:dblclick={() => playTrack(track)}>
-                <td>{track.trackNum || '-'}</td>
-                <td class="bold">{track.title}</td>
-                <td>{track.artist}</td>
-                <td>{track.album}</td>
-                <td style="color:var(--primary-color)">{track.genre || '-'}</td>
-                <td style="opacity: 0.6">{track.year || '-'}</td>
-                <td class="actions-cell">
-                  <button class="icon-btn-small" on:click={() => playTrack(track)}>▶</button>
-                  <button class="icon-btn-small" on:click={() => openEditor(track)}>✏️</button>
-                  <button class="icon-btn-small delete" on:click={() => deleteTrack(track.id)}>🗑️</button>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+      {:else if currentView === 'dashboard'}
+        <Dashboard on:play={(e) => handlePlay(e.detail)} />
+      {:else if currentView === 'library'}
+        {#if tracks.length === 0}
+          <div class="empty-state">
+            <p>No tracks found. Click Scan Library to index your music.</p>
+          </div>
+        {:else}
+          <TracksView 
+            {tracks} 
+            {currentPlaying} 
+            on:play={(e) => handlePlay(e.detail)} 
+            on:edit={(e) => openEditor(e.detail)}
+            on:selectionChange={(e) => handleSelectionChange(e.detail)}
+          />
+        {/if}
+      {:else if currentView === 'albums'}
+        <AlbumsGrid on:selectAlbum={(e) => selectAlbum(e.detail)} />
+      {:else if currentView === 'settings'}
+        <Settings />
       {/if}
     </div>
   </section>
 
-  <!-- Player Bar -->
-  <footer class="player glass">
-    <div class="now-playing">
-      {#if currentPlaying}
-        <img class="cover" src={`/api/cover/${currentPlaying.id}`} alt="Artwork" />
-      {:else}
-        <div class="cover"></div>
-      {/if}
-      <div class="track-info">
-        <span class="title">{currentPlaying ? currentPlaying.title : 'No Track'}</span>
-        <span class="artist">{currentPlaying ? currentPlaying.artist : 'Select a song'}</span>
-      </div>
-    </div>
-    
-    <div class="controls">
-      <!-- Reproductor HTML5 Nativo embebido -->
-      <audio bind:this={audioRef} controls class="native-audio"></audio>
-    </div>
-    
-    <div class="extras">
-      <!-- placeholder -->
-    </div>
-  </footer>
+  <MiniPlayer {currentPlaying} bind:audioRef />
 </main>
 
 <TagEditor 
   bind:isOpen={isTagEditorOpen} 
   track={trackToEdit} 
-  on:close={() => { fetchTracks() }} 
+  on:close={fetchTracks} 
+/>
+
+<MassiveTagEditor 
+  bind:isOpen={isMassiveEditorOpen} 
+  {selectedTracks} 
+  on:close={fetchTracks} 
 />
 
 <style>
   .app-layout {
     display: grid;
-    grid-template-areas: 
-      "sidebar content"
-      "player player";
+    grid-template-areas: "sidebar content" "player player";
     grid-template-columns: 240px 1fr;
     grid-template-rows: 1fr 90px;
     height: 100vh;
-    overflow: hidden;
+    background: #0f111a;
+    color: #cbd5e1;
   }
 
-  /* Sidebar */
   .sidebar {
     grid-area: sidebar;
-    border-right: 1px solid var(--border-color);
+    background: #090a10;
     padding: 2rem 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 2rem;
+    border-right: 1px solid rgba(255,255,255,0.05);
   }
 
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 0 1rem;
-  }
-
-  .logo {
-    width: 32px;
-    height: 32px;
-    background: linear-gradient(135deg, var(--accent-color), #ff6b6b);
-    border-radius: 8px;
-  }
-
-  .brand h2 {
-    margin: 0;
-    font-size: 1.5rem;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-  }
+  .logo { width: 32px; height: 32px; background: #ff3366; border-radius: 8px; margin-bottom: 2rem; }
 
   .nav-item {
+    display: block;
     width: 100%;
+    padding: 0.8rem 1rem;
+    background: transparent;
+    border: none;
+    color: #64748b;
     text-align: left;
-    padding: 1rem 1.5rem;
-    border-radius: 12px;
-    font-size: 1.1rem;
-    color: var(--text-muted);
-    margin-bottom: 0.5rem;
-  }
-
-  .nav-item:hover, .nav-item.active {
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text-main);
-  }
-
-  .nav-item.active {
+    border-radius: 8px;
+    cursor: pointer;
     font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 0.2rem;
   }
 
-  /* Main Content */
-  .content {
-    grid-area: content;
-    padding: 2rem 3rem;
-    overflow-y: auto;
-  }
+  .nav-item.active { background: rgba(255, 51, 102, 0.1); color: #ff3366; }
+
+  .content { grid-area: content; display: flex; flex-direction: column; overflow: hidden; }
 
   .top-bar {
+    padding: 1.5rem 2rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 3rem;
+    background: rgba(15, 17, 26, 0.8);
+    backdrop-filter: blur(10px);
   }
 
-  .top-bar h1 {
-    font-size: 2.5rem;
-    margin: 0;
-    font-weight: 700;
-  }
-
-  .library-grid {
-    width: 100%;
-    margin-top: 1rem;
-  }
-
-  .tracks-table {
-    width: 100%;
-    border-collapse: collapse;
-    text-align: left;
-    background: rgba(26, 31, 53, 0.4);
-    border-radius: 12px;
-    overflow: hidden;
-    backdrop-filter: blur(8px);
-  }
-
-  .tracks-table th {
-    padding: 1rem 1.5rem;
-    color: var(--text-muted);
-    font-weight: 600;
-    border-bottom: 1px solid var(--border-color);
-  }
-
-  .tracks-table td {
-    padding: 1rem 1.5rem;
-    color: var(--text-main);
-    border-bottom: 1px solid rgba(255,255,255,0.03);
-  }
-
-  .glass-row {
-    transition: background 0.2s ease;
-    cursor: pointer;
-  }
-
-  .glass-row:hover {
-    background: rgba(255, 51, 102, 0.1);
-  }
-
-  .bold { font-weight: 600; }
-
-  .actions-cell {
-    display: flex;
-    gap: 0.8rem;
-  }
-
-  .icon-btn-small {
-    background: rgba(255,255,255,0.05);
-    border-radius: 6px;
-    padding: 0.4rem 0.6rem;
-    font-size: 1rem;
-  }
-
-  .icon-btn-small:hover {
-    background: rgba(255, 255, 255, 0.15);
+  .search-box input {
+    background: #1e293b;
+    border: none;
+    padding: 0.6rem 1.2rem;
+    border-radius: 20px;
     color: white;
-  }
-  .icon-btn-small.delete:hover {
-    background: #ef4444;
+    width: 300px;
   }
 
-  .native-audio {
-    height: 40px;
-    border-radius: 8px;
-    outline: none;
-    filter: invert(0.9) hue-rotate(180deg);
-  }
+  .primary-btn { background: #ff3366; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 8px; cursor: pointer; font-weight: 600;}
+  .bulk-btn { background: #1e293b; color: white; border: 1px solid #ff3366; padding: 0.6rem 1.2rem; border-radius: 8px; cursor: pointer; margin-right: 1rem; font-weight: 600;}
 
-  .error { color: #ef4444; }
-  .empty-state { color: var(--text-muted); text-align: center; grid-column: 1/-1; padding: 4rem 0;}
+  .scroll-view { flex: 1; overflow-y: auto; padding: 1rem 2rem; }
+
+  .error { color: #f87171; }
+  .empty-state { text-align: center; margin-top: 4rem; color: #64748b; }
 </style>
