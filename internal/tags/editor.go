@@ -46,7 +46,7 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) error {
 	// Sincronizar cambios en la BD
 	query := `UPDATE tracks SET 
 		title = ?, genre = ?, track_num = ?, disc_num = ?, 
-		composer = ?, comment = ?, rating = ?
+		composer = ?, comment = ?, rating = ?, instrumental = ?
 		WHERE id = ?`
 	
 	getString := func(k string) string {
@@ -58,11 +58,15 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) error {
 		if v, ok := data[k].(int); ok { return v }
 		return 0
 	}
+	getBoolInt := func(k string) int {
+		if v, ok := data[k].(bool); ok && v { return 1 }
+		return 0
+	}
 
 	_, err = e.DB.Conn.Exec(query, 
 		getString("title"), getString("genre"), getInt("trackNum"), 
 		getInt("discNum"), getString("composer"), getString("comment"), 
-		getInt("rating"), trackID)
+		getInt("rating"), getBoolInt("instrumental"), trackID)
 	
 	if err != nil {
 		return err
@@ -336,6 +340,15 @@ func updateMP3(path string, data map[string]interface{}) error {
 		tag.AddFrame("POPM", id3v2.UnknownFrame{Body: body})
 	}
 
+	// Instrumental tag (TXXX:INSTRUMENTAL)
+	instrumental := "0"
+	if v, ok := data["instrumental"].(bool); ok && v { instrumental = "1" }
+	tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
+		Encoding:    id3v2.EncodingUTF8,
+		Description: "INSTRUMENTAL",
+		Value:       instrumental,
+	})
+
 	err = tag.Save()
 	if err == nil {
 		fmt.Printf("✓ Etiquetas guardadas correctamente en MP3: %s\n", path)
@@ -404,6 +417,10 @@ func updateFLAC(path string, data map[string]interface{}) error {
 	if rating > 0 {
 		setField("RATING", fmt.Sprintf("%d", rating))
 	}
+
+	instrumental := "0"
+	if v, ok := data["instrumental"].(bool); ok && v { instrumental = "1" }
+	setField("INSTRUMENTAL", instrumental)
 
 	block := cm.Marshal()
 	if cmIdx != -1 {

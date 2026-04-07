@@ -28,6 +28,7 @@ func NewScanner(database *db.Database) *Scanner {
 func (s *Scanner) ScanDirectory(rootPath string) error {
 	slog.Info("Starting library scan", "path", rootPath)
 
+	// Step 1: Walk and update/add
 	count := 0
 	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -37,7 +38,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 		if !d.IsDir() {
 			if err := isAudioFile(d.Name()); err == nil {
-				slog.Info("Audio file found", "path", path)
 				if parseErr := s.ParseAndSaveFile(path); parseErr != nil {
 					slog.Error("Failed to parse file", "path", path, "error", parseErr)
 				} else {
@@ -53,6 +53,21 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 	if err != nil {
 		return fmt.Errorf("scan failed: %w", err)
+	}
+
+	// Step 2: Prune missing files
+	slog.Info("Pruning library: checking for missing files")
+	orphans, err := s.DB.GetOrphanedTracks()
+	if err == nil && len(orphans) > 0 {
+		var ids []string
+		for _, o := range orphans {
+			ids = append(ids, o.ID)
+		}
+		if deleteErr := s.DB.DeleteTracks(ids); deleteErr != nil {
+			slog.Error("Failed to delete orphaned tracks", "error", deleteErr)
+		} else {
+			slog.Info("Pruned missing tracks", "count", len(ids))
+		}
 	}
 
 	slog.Info("Completed library scan")
@@ -77,14 +92,30 @@ func isAudioFile(filename string) error {
 }
 
 func (s *Scanner) ParseAndSaveFile(path string) error {
+	fileStat, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	fileSize := fileStat.Size()
+	fileMtime := fileStat.ModTime().Unix()
+
+	trackId := generateID(path)
+	
+	// Check if already in DB and unchanged
+	var dbMtime int64
+	var dbSize int64
+	err = s.DB.Conn.QueryRow("SELECT file_mtime, size FROM tracks WHERE id = ?", trackId).Scan(&dbMtime, &dbSize)
+	if err == nil && dbMtime == fileMtime && dbSize == fileSize {
+		// slog.Debug("File unchanged, skipping", "path", path)
+		return nil
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	fileStat, _ := f.Stat()
-	fileSize := fileStat.Size()
 	fileExt := strings.TrimPrefix(filepath.Ext(path), ".")
 
 	metadata, err := tag.ReadFrom(f)
@@ -93,6 +124,7 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	var trackNum, year, discNum int
 	var genre, composer, comment string
 	var replayGain float64
+	var instrumental bool
 
 	if err != nil {
 		slog.Warn("Tag parsing failed (corrupt metadata), fallback to paths", "path", path, "err", err)
@@ -128,8 +160,18 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		composer = metadata.Composer()
 		comment = metadata.Comment()
 		
-		// ReplayGain extraction
+		// Metadata extraction (Instrumental & ReplayGain)
 		if raw := metadata.Raw(); raw != nil {
+			// Instrumental detection
+			for _, key := range []string{"INSTRUMENTAL", "instrumental"} {
+				if val, ok := raw[key].(string); ok && (val == "1" || strings.ToLower(val) == "true") {
+					instrumental = true
+				} else if valArr, ok := raw[key].([]string); ok && len(valArr) > 0 && (valArr[0] == "1" || strings.ToLower(valArr[0]) == "true") {
+					instrumental = true
+				}
+			}
+
+			// ReplayGain
 			if rg, ok := raw["REPLAYGAIN_TRACK_GAIN"].(string); ok {
 				fmt.Sscanf(rg, "%f", &replayGain)
 			} else if rgArr, ok := raw["REPLAYGAIN_TRACK_GAIN"].([]string); ok && len(rgArr) > 0 {
@@ -153,8 +195,6 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	}
 
 	// 3. Create Track
-	trackId := generateID(path) // Unique identifier for the file
-	
 	// Por ahora dejamos bitrate y samplerate en 0 o valores por defecto 
 	// hasta que tengamos los decodificadores funcionando al 100% en este env
 	bitrate := 0
@@ -177,9 +217,9 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 	_, err = s.DB.Conn.Exec(
 		`INSERT OR REPLACE INTO tracks 
-		(id, album_id, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, rating, replay_gain) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		trackId, albumId, title, trackNum, discNum, path, duration, genre, fileSize, fileExt, composer, comment, bitrate, samplerate, status, rating, replayGain,
+		(id, album_id, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, rating, instrumental, replay_gain, file_mtime) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		trackId, albumId, title, trackNum, discNum, path, duration, genre, fileSize, fileExt, composer, comment, bitrate, samplerate, status, rating, instrumental, replayGain, fileMtime,
 	)
 	if err != nil {
 		return err

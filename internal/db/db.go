@@ -76,7 +76,10 @@ func (db *Database) initSchema() error {
 		last_played DATETIME,
 		status TEXT DEFAULT 'active',
 		rating INTEGER DEFAULT 0,
+		instrumental INTEGER DEFAULT 0,
 		replay_gain REAL DEFAULT 0.0,
+		play_count INTEGER DEFAULT 0,
+		file_mtime INTEGER,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE
 	);
@@ -104,7 +107,10 @@ func (db *Database) initSchema() error {
 		"ALTER TABLE tracks ADD COLUMN comment TEXT",
 		"ALTER TABLE tracks ADD COLUMN status TEXT DEFAULT 'active'",
 		"ALTER TABLE tracks ADD COLUMN rating INTEGER DEFAULT 0",
+		"ALTER TABLE tracks ADD COLUMN instrumental INTEGER DEFAULT 0",
 		"ALTER TABLE tracks ADD COLUMN replay_gain REAL DEFAULT 0.0",
+		"ALTER TABLE tracks ADD COLUMN play_count INTEGER DEFAULT 0",
+		"ALTER TABLE tracks ADD COLUMN file_mtime INTEGER",
 	}
 
 	for _, sql := range cols {

@@ -96,6 +96,7 @@
         type="range" 
         class="progress-bar" 
         min="0" max="100" 
+        style="--progress: {progress}%"
         bind:value={progress} 
         on:input={handleSeek} 
       />
@@ -119,7 +120,7 @@
         audioRef.volume = Math.min(1.0, volume * linearGain);
       }}
     />
-    {#if currentPlaying?.format}
+    {#if currentPlaying && currentPlaying.format}
       <div class="tech-badge">{currentPlaying.format.toUpperCase()}</div>
     {/if}
   </div>
@@ -139,13 +140,16 @@
 <style>
   .player {
     grid-area: player;
-    background: var(--surface);
-    border-top: 1px solid var(--border-color);
+    background: var(--surface-container);
     display: grid;
     grid-template-columns: 300px 1fr 300px;
     align-items: center;
     padding: 0 2rem;
-    height: 110px;
+    height: 100px;
+    margin: 0.5rem 1rem 10px 1rem;
+    border-radius: 28px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
   }
 
   .now-playing {
@@ -221,17 +225,26 @@
     flex: 1;
     height: 4px;
     appearance: none;
-    background: rgba(255,255,255,0.1);
-    border-radius: 2px;
+    background: var(--surface-container-highest);
+    border-radius: 10px;
     cursor: pointer;
+    accent-color: var(--primary);
+  }
+
+  .progress-bar::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, var(--primary) var(--progress, 0%), var(--surface-container-highest) var(--progress, 0%));
+    height: 4px;
+    border-radius: 10px;
   }
 
   .progress-bar::-webkit-slider-thumb {
     appearance: none;
     width: 12px;
     height: 12px;
-    background: white;
+    background: var(--text-main);
     border-radius: 50%;
+    margin-top: -4px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
   }
 
   .volume-container {
@@ -244,25 +257,30 @@
   .volume-bar {
     width: 100px;
     height: 4px;
+    accent-color: var(--primary);
   }
 
   .icon-btn {
     background: transparent;
     border: none;
-    color: #94a3b8;
+    color: var(--text-muted);
     font-size: 1.2rem;
     cursor: pointer;
-    transition: color 0.2s;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
-  .icon-btn:hover { color: white; }
+  .icon-btn:hover { color: var(--text-main); transform: scale(1.1); }
 
   .tech-badge {
-    background: rgba(255,255,255,0.05);
+    background: var(--primary-10);
     padding: 0.2rem 0.5rem;
     border-radius: 4px;
     font-size: 0.7rem;
-    font-weight: 700;
-    color: #64748b;
+    font-weight: 800;
+    color: var(--primary);
+    border: 1px solid var(--primary-20);
   }
 </style>

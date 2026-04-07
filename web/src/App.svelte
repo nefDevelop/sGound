@@ -58,8 +58,9 @@
   let duration = $state(0);
   let currentTime = $state(0);
 
-  let scanStatus = $state({ scanning: false, processed: 0 });
+  let scanStatus = $state({ scanning: false, processed: 0, inboxCount: 0 });
   let pollingInterval = null;
+  let dashRef = $state(null);
 
   async function checkScanStatus() {
     if (!isLoggedIn) return;
@@ -69,11 +70,22 @@
       const data = await res.json();
       
       const wasScanning = scanStatus.scanning;
+      const prevProcessed = scanStatus.processed;
       scanStatus = data;
+
+      // If progress increased significantly, refresh views
+      if (data.scanning && data.processed > prevProcessed) {
+        // Only refresh every 10 new tracks to avoid overloading
+        if (data.processed % 10 === 0 || data.processed < 10) {
+           if (currentView === 'library') fetchTracks();
+           if (currentView === 'dashboard' && dashRef) dashRef.refresh();
+        }
+      }
 
       if (wasScanning && !data.scanning) {
         fetchTracks();
         fetchPlaylists();
+        if (dashRef) dashRef.refresh();
         showToast("Biblioteca actualizada: <b>" + data.processed + "</b> canciones", "success");
       }
 
@@ -106,10 +118,12 @@
       console.error("Auth status check failed");
     }
 
+    // Cargar tema siempre al inicio
+    loadTheme();
+
     if (!setupRequired) {
       fetchTracks();
       fetchPlaylists();
-      loadTheme();
       checkScanStatus();
     }
   });
@@ -281,21 +295,29 @@
     {/if}
 
     <nav>
+      <div class="nav-label">General</div>
       <button
         class="nav-item"
         class:active={currentView === "dashboard"}
         onclick={() => (currentView = "dashboard")}
       >
-        <Icon name="award" size={18} />
+        <div class="nav-icon-wrap">
+          <Icon name="grid" size={18} />
+        </div>
         <span>Dashboard</span>
+        {#if scanStatus.inboxCount > 0}
+          <span class="nav-badge">{scanStatus.inboxCount}</span>
+        {/if}
       </button>
+
+      <div class="nav-label">Library</div>
       <button
         class="nav-item"
         class:active={currentView === "library"}
         onclick={() => (currentView = "library")}
       >
         <Icon name="music" size={18} />
-        <span>Library</span>
+        <span>Tracks</span>
       </button>
       <button
         class="nav-item"
@@ -305,7 +327,14 @@
         <Icon name="disc" size={18} />
         <span>Albums</span>
       </button>
-
+      <button
+        class="nav-item"
+        class:active={currentView === "artists"}
+        onclick={() => (currentView = "artists")}
+      >
+        <Icon name="users" size={18} />
+        <span>Artists</span>
+      </button>
       <button
         class="nav-item"
         class:active={currentView === "playlists"}
@@ -315,22 +344,7 @@
         <span>Playlists</span>
       </button>
 
-      <button
-        class="nav-item"
-        class:active={currentView === "settings"}
-        onclick={() => (currentView = "settings")}
-      >
-        <Icon name="zap" size={18} />
-        <span>Settings</span>
-      </button>
-      <button
-        class="nav-item"
-        onclick={handleLogout}
-      >
-        <Icon name="logOut" size={18} />
-        <span>Cerrar Sesión</span>
-      </button>
-
+      <div class="nav-label">Tools</div>
       <button
         class="nav-item"
         class:active={currentView === "maintenance"}
@@ -339,33 +353,43 @@
         <Icon name="shield" size={18} />
         <span>Maintenance</span>
       </button>
-
       <button
         class="nav-item"
-        class:active={currentView === "inbox"}
-        onclick={() => (currentView = "inbox")}
+        class:active={currentView === "settings"}
+        onclick={() => (currentView = "settings")}
       >
-        <Icon name="zap" size={18} />
-        <span>Inbox / Pendientes</span>
+        <Icon name="settings" size={18} />
+        <span>Settings</span>
       </button>
 
       <div class="nav-divider"></div>
-      <div class="nav-label">Direct Access</div>
+      <div class="nav-label">Your Playlists</div>
 
-      {#each playlists as pl}
-        <button
-          class="nav-item playlist-item"
-          class:active={currentView === "playlist" &&
-            selectedPlaylist?.id === pl.id}
-          onclick={() => {
-            selectedPlaylist = pl;
-            currentView = "playlist";
-          }}
-        >
-          <Icon name="list" size={18} />
-          <span>{pl.name}</span>
-        </button>
-      {/each}
+      <div class="playlists-scroll">
+        {#each playlists as pl}
+          <button
+            class="nav-item playlist-item"
+            class:active={currentView === "playlist" &&
+              selectedPlaylist?.id === pl.id}
+            onclick={() => {
+              selectedPlaylist = pl;
+              currentView = "playlist";
+            }}
+          >
+            <Icon name="list" size={18} />
+            <span>{pl.name}</span>
+          </button>
+        {/each}
+      </div>
+
+      <div class="nav-divider"></div>
+      <button
+        class="nav-item logout-btn"
+        onclick={handleLogout}
+      >
+        <Icon name="logOut" size={18} />
+        <span>Cerrar Sesión</span>
+      </button>
     </nav>
   </aside>
 
@@ -397,10 +421,13 @@
         <p class="error">{error}</p>
       {:else if currentView === "dashboard"}
         <Dashboard 
+          bind:this={dashRef}
           on:play={(e) => handlePlay(e.detail)} 
           on:edit={(e) => openEditor(e.detail)}
           on:queue={(e) => handleQueue(e.detail)}
           on:delete={(e) => handleDelete(e.detail)}
+          on:selectInbox={() => currentView = "inbox"}
+          on:selectMaintenance={() => currentView = "maintenance"}
         />
       {:else if currentView === "library"}
         {#if tracks.length === 0}
@@ -500,56 +527,81 @@
 <style>
   .app-layout {
     display: grid;
-    grid-template-areas: "sidebar content" "player player";
+    grid-template-areas: 
+      "sidebar content"
+      "sidebar player";
     grid-template-columns: 280px 1fr;
-    grid-template-rows: 1fr 110px;
+    grid-template-rows: 1fr auto;
     height: 100vh;
     background: var(--surface);
     color: var(--text-main);
+    overflow: hidden;
   }
 
   .sidebar {
     grid-area: sidebar;
     background: var(--surface);
-    padding: 2.5rem 1.2rem;
+    padding: 2rem 1.2rem;
     display: flex;
     flex-direction: column;
+    align-items: flex-start; /* Fuerza alineación izquierda */
+    z-index: 100;
   }
 
   .brand {
     display: flex;
     align-items: center;
     gap: 1rem;
-    padding: 0 1rem;
-    margin-bottom: 2.5rem;
+    padding: 0.5rem 0.8rem;
+    margin-bottom: 2rem;
   }
 
   .logo {
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     background: var(--primary);
-    border-radius: 10px;
-    box-shadow: 0 4px 12px var(--primary-10);
+    border-radius: 12px;
+    box-shadow: 0 4px 15px var(--primary-20);
   }
 
-  .brand h2 { font-size: 1.4rem; margin: 0; font-weight: 900; letter-spacing: -0.5px; }
+  .brand h2 { font-size: 1.5rem; margin: 0; font-weight: 900; letter-spacing: -0.8px; }
 
-  nav { display: flex; flex-direction: column; gap: 0.3rem; }
+  nav { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 0.2rem; 
+    flex: 1; 
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  nav::-webkit-scrollbar { display: none; }
+
+  .nav-label {
+    padding: 1.5rem 0.8rem 0.5rem;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--text-muted);
+    font-weight: 800;
+    opacity: 0.6;
+  }
 
   .nav-item {
+    position: relative;
     display: flex;
     align-items: center;
+    justify-content: flex-start; /* Contenido a la izq */
     gap: 1rem;
     width: 100%;
-    padding: 0.8rem 1.2rem;
+    padding: 0.75rem 1rem;
     background: transparent;
     border: none;
     color: var(--text-muted);
     text-align: left;
-    border-radius: 14px;
+    border-radius: 12px;
     cursor: pointer;
     font-weight: 700;
-    font-size: 0.95rem;
+    font-size: 0.92rem;
     transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
   }
 
@@ -557,18 +609,41 @@
   .nav-item.active {
     background: var(--primary);
     color: #ffffff;
-    box-shadow: 0 4px 12px var(--primary-10);
+    box-shadow: 0 4px 15px var(--primary-20);
   }
 
-  .nav-label {
-    padding: 1.5rem 1.2rem 0.8rem;
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    color: var(--text-muted);
-    font-weight: 800;
-    opacity: 0.5;
+  .nav-icon-wrap { position: relative; display: flex; align-items: center; justify-content: center; }
+  .nav-badge {
+    position: absolute;
+    top: 3px;
+    right: 5px;
+    background: var(--tertiary);
+    color: black;
+    font-size: 0.8rem;
+    font-weight: 950;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    border: none;
+    z-index: 10;
   }
+
+  .playlists-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .logout-btn { 
+    margin-top: auto;
+    color: #f87171 !important; 
+  }
+  .logout-btn:hover { background: rgba(248, 113, 113, 0.1) !important; }
 
   .content {
     grid-area: content;
@@ -576,18 +651,20 @@
     flex-direction: column;
     overflow: hidden;
     background: var(--surface-container);
-    margin: 1rem 1rem 0 0;
-    border-radius: var(--radius) var(--radius) 0 0;
+    margin: 1rem 1rem 0.5rem 1rem;
+    border-radius: 28px;
     border: 1px solid var(--border-color);
-    border-bottom: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
   }
 
   .top-bar {
-    padding: 1.5rem 2.5rem;
+    padding: 1.2rem 2rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: transparent;
+    background: var(--surface-container);
+    border-bottom: 1px solid var(--border-color);
+    z-index: 10;
   }
 
   .search-box input {
@@ -596,44 +673,50 @@
     padding: 0.8rem 1.5rem;
     border-radius: 100px;
     color: white;
-    width: 350px;
+    width: 300px;
     outline: none;
     font-weight: 600;
-    transition: all 0.2s;
+    transition: all 0.4s cubic-bezier(0.2, 0, 0, 1);
   }
-  .search-box input:focus { border-color: var(--primary); background: var(--surface); width: 400px; }
+  .search-box input:focus { border-color: var(--primary); background: var(--surface-container-highest); width: 420px; }
 
-  .actions { display: flex; gap: 1rem; }
+  .actions { display: flex; gap: 0.8rem; }
 
   .bulk-btn {
     background: var(--surface-container-high);
     color: var(--primary);
-    border: 1px solid var(--primary);
+    border: 1px solid var(--primary-30);
     padding: 0.6rem 1.2rem;
     border-radius: 100px;
     font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
   }
+  .bulk-btn:hover { background: var(--primary-10); }
 
   .scroll-view {
     flex: 1;
     overflow-y: auto;
-    padding: 1rem 2.5rem 3rem;
+    padding: 2rem;
   }
+  .scroll-view::-webkit-scrollbar { width: 6px; }
+  .scroll-view::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 10px; }
+  .scroll-view::-webkit-scrollbar-track { background: transparent; }
 
   .error { color: #f87171; background: rgba(248, 113, 113, 0.1); padding: 1rem; border-radius: 12px; margin: 1rem; }
   .empty-state { text-align: center; margin-top: 6rem; color: var(--text-muted); }
 
   .scan-status-item {
-    margin: 1.5rem;
-    padding: 1.2rem;
+    margin: 0.5rem 0 1.5rem 0;
+    padding: 0.8rem 1rem;
     background: var(--primary-10);
-    border-radius: 20px;
+    border-radius: 14px;
     display: flex;
     align-items: center;
-    gap: 1.2rem;
+    gap: 0.8rem;
     border: 1px solid var(--primary-20);
-    animation: fadeIn 0.4s cubic-bezier(0.2, 0, 0, 1);
   }
+
   .scan-status-item .spinner {
     width: 22px;
     height: 22px;
@@ -661,4 +744,35 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Responsive Adjustments */
+  @media (max-width: 1100px) {
+    .app-layout { grid-template-columns: 80px 1fr; }
+    .nav-label, .brand h2, .nav-item span, .scan-status-item .info { display: none; }
+    .sidebar { align-items: center; padding: 2rem 0.5rem; }
+    .nav-item { justify-content: center; padding: 1rem; }
+    .search-box input { width: 200px; }
+    .search-box input:focus { width: 250px; }
+  }
+
+  @media (max-width: 768px) {
+    .app-layout {
+      grid-template-areas: "content" "player" "sidebar";
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr auto auto;
+    }
+    .sidebar {
+      height: auto;
+      flex-direction: row;
+      justify-content: space-around;
+      border-right: none;
+      border-top: 1px solid var(--border-color);
+      padding: 0.6rem;
+      border-radius: 20px 20px 0 0;
+    }
+    .nav-label, .nav-divider, .playlists-scroll, .logout-btn { display: none; }
+    .content { margin: 0.5rem; border-radius: 20px; }
+    .top-bar { padding: 1rem; }
+    .search-box input { width: 100% !important; }
+  }
 </style>

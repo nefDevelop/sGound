@@ -81,7 +81,7 @@
 
       <button type="submit" class="login-btn" disabled={loading}>
         {loading ? 'Entrando...' : 'Acceder'}
-        {#if !loading}<Icon name="arrowRight" size={18} />{/if}
+        {#if !loading}<Icon name="logIn" size={18} />{/if}
       </button>
     </form>
 

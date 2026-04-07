@@ -659,7 +659,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	// Registrar reproducción
 	go func() {
-		s.getDB(r).Conn.Exec("UPDATE tracks SET last_played = CURRENT_TIMESTAMP WHERE id = ?", trackID)
+		s.getDB(r).Conn.Exec("UPDATE tracks SET last_played = CURRENT_TIMESTAMP, play_count = play_count + 1 WHERE id = ?", trackID)
 	}()
 
 	bitrate := r.URL.Query().Get("bitrate")
@@ -744,7 +744,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
 		       a.name as artist, al.title as album, al.year as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
-		       t.composer, t.comment, t.status, t.rating
+		       t.composer, t.comment, t.status, t.rating, t.instrumental
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
@@ -761,9 +761,9 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	tracks := make([]map[string]interface{}, 0)
 	for rows.Next() {
 		var id, title, genre, artist, album, format, composer, comment, tStatus string
-		var trackNum, discNum, duration, year, bitRate, sampleRate, rating int
+		var trackNum, discNum, duration, year, bitRate, sampleRate, rating, instrumental int
 		var size int64
-		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating); err != nil {
+		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating, &instrumental); err != nil {
 			slog.Error("Scan error", "err", err)
 			continue
 		}
@@ -772,6 +772,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 			"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
 			"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
 			"composer": composer, "comment": comment, "status": tStatus, "rating": rating,
+			"instrumental": instrumental == 1,
 		})
 	}
 
@@ -1022,9 +1023,14 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	stats["totalArtists"] = tArtists
 	stats["totalPlaylists"] = tPlaylists
 
-	// Joyas olvidadas (10 canciones aleatorias para redescubrir)
-	rows, err := s.getDB(r).Conn.Query("SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist FROM tracks ORDER BY RANDOM() LIMIT 10")
-	var gems []map[string]interface{}
+	// Inbox count (pendientes de aprobar)
+	var pendingCount int
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&pendingCount)
+	stats["inboxCount"] = pendingCount
+
+	// Joyas olvidadas (9 canciones aleatorias para redescubrir)
+	gems := make([]map[string]interface{}, 0)
+	rows, err := s.getDB(r).Conn.Query("SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist FROM tracks ORDER BY RANDOM() LIMIT 9")
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -1034,6 +1040,20 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	stats["forgottenGems"] = gems
+
+	// Lo más escuchado (Top 10)
+	topPlays := make([]map[string]interface{}, 0)
+	rows2, err := s.getDB(r).Conn.Query("SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist, play_count FROM tracks WHERE play_count > 0 ORDER BY play_count DESC LIMIT 10")
+	if err == nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var id, title, artist string
+			var count int
+			rows2.Scan(&id, &title, &artist, &count)
+			topPlays = append(topPlays, map[string]interface{}{"id": id, "title": title, "artist": artist, "playCount": count})
+		}
+	}
+	stats["mostPlayed"] = topPlays
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
@@ -1046,14 +1066,24 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	val, ok := s.scanStatuses.Load(user.Username)
-	if !ok {
-		// No scan ever happened, return idle
-		json.NewEncoder(w).Encode(ScanStatus{Scanning: false, Processed: 0})
-		return
+	// Obtener estado del escaneo
+	scanning := false
+	processed := 0
+	if val, ok := s.scanStatuses.Load(user.Username); ok {
+		sStatus := val.(*ScanStatus)
+		scanning = sStatus.Scanning
+		processed = sStatus.Processed
 	}
 
-	json.NewEncoder(w).Encode(val.(*ScanStatus))
+	// Obtener contador de inbox (pendientes)
+	var inboxCount int
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&inboxCount)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"scanning":   scanning,
+		"processed":  processed,
+		"inboxCount": inboxCount,
+	})
 }
 
 func (s *Server) handleLibraryHealth(w http.ResponseWriter, r *http.Request) {
@@ -1394,7 +1424,7 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''),
 		       a.name as artist, al.title as album, al.year as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
-		       t.composer, t.comment
+		       t.composer, t.comment, t.instrumental
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id`
@@ -1442,16 +1472,16 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 	var tracks []map[string]interface{}
 	for rows.Next() {
 		var id, title, genre, artist, album, format, composer, comment string
-		var trackNum, discNum, duration, year, bitRate, sampleRate int
+		var trackNum, discNum, duration, year, bitRate, sampleRate, instrumental int
 		var size int64
-		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment); err != nil {
+		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &instrumental); err != nil {
 			continue
 		}
 		tracks = append(tracks, map[string]interface{}{
 			"id": id, "title": title, "trackNum": trackNum, "discNum": discNum, 
 			"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
 			"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
-			"composer": composer, "comment": comment,
+			"composer": composer, "comment": comment, "instrumental": instrumental == 1,
 		})
 	}
 

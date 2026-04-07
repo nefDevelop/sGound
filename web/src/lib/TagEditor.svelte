@@ -30,7 +30,8 @@
           trackNum: parseInt(track.trackNum) || 0,
           discNum: parseInt(track.discNum) || 0,
           composer: track.composer,
-          comment: track.comment
+          comment: track.comment,
+          instrumental: track.instrumental
         })
       });
 
@@ -283,6 +284,11 @@
           <input type="text" bind:value={track.comment} placeholder="Your notes..." />
         </label>
 
+        <label class="checkbox-row">
+          <input type="checkbox" bind:checked={track.instrumental} />
+          <span>Instrumental</span>
+        </label>
+
         <label class="lyrics-label">
           <div class="label-header">
             <span>Lyrics</span>
@@ -486,6 +492,30 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
+  }
+
+  .checkbox-row {
+    flex-direction: row !important;
+    align-items: center;
+    gap: 0.8rem !important;
+    cursor: pointer;
+    background: var(--surface-container);
+    padding: 0.8rem 1.2rem;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+  }
+
+  .checkbox-row input {
+    width: 20px !important;
+    height: 20px !important;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .checkbox-row span {
+    margin-top: 0 !important;
+    color: var(--text-main) !important;
+    font-weight: 600;
   }
 
   .tag-form label {

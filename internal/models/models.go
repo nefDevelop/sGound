@@ -31,8 +31,9 @@ type Track struct {
 	Format     string `json:"format"`
 	BitRate    int    `json:"bit_rate"`
 	SampleRate int    `json:"sample_rate"`
-	Status     string `json:"status"`
-	Rating     int    `json:"rating"`
+	Status     string  `json:"status"`
+	Rating     int     `json:"rating"`
+	Instrumental bool  `json:"instrumental"`
 	ReplayGain float64 `json:"replayGain"`
 	CreatedAt  string `json:"createdAt"`
 }
