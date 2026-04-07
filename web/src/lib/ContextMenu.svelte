@@ -81,15 +81,13 @@
   .context-menu {
     position: fixed;
     z-index: 10000;
-    min-width: 220px;
-    background: rgba(30, 41, 59, 0.8);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+    min-width: 240px;
+    background: var(--surface-container-highest);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
     overflow: hidden;
-    padding: 6px;
+    padding: 8px;
   }
 
   .menu-list {
@@ -98,26 +96,26 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
   }
 
   .menu-item {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
-    color: #e2e8f0;
-    font-size: 0.9rem;
-    border-radius: 8px;
+    gap: 14px;
+    padding: 10px 16px;
+    color: var(--text-main);
+    font-size: 0.95rem;
+    border-radius: 10px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
     user-select: none;
+    font-weight: 600;
   }
 
   .menu-item:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
-    transform: translateX(4px);
+    background: var(--primary);
+    color: #ffffff;
   }
 
   .menu-item.danger {
@@ -125,30 +123,30 @@
   }
 
   .menu-item.danger:hover {
-    background: rgba(239, 68, 68, 0.2);
-    color: #fca5a5;
+    background: #ef4444;
+    color: white;
   }
 
   .icon {
     display: flex;
     align-items: center;
     justify-content: center;
-    opacity: 0.7;
+    opacity: 0.8;
     width: 20px;
   }
 
   .menu-item:hover .icon {
     opacity: 1;
+    color: white;
   }
 
   .label {
     flex: 1;
-    font-weight: 500;
   }
 
   .divider {
     height: 1px;
-    background: rgba(255, 255, 255, 0.05);
-    margin: 4px 6px;
+    background: var(--border-color);
+    margin: 6px 8px;
   }
 </style>

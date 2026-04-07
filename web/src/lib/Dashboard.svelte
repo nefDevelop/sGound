@@ -142,17 +142,22 @@
 
   .gems-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1.2rem; }
   .gem-item {
-    background: var(--surface); 
-    padding: 1.2rem; 
-    border-radius: calc(var(--radius) / 1.5);
+    background: var(--surface-container-highest); 
+    padding: 1rem 1.2rem; 
+    border-radius: 20px;
     display: flex; 
     align-items: center; 
     gap: 1.2rem; 
     cursor: pointer; 
-    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+    transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
     border: 1px solid var(--border-color);
   }
-  .gem-item:hover { border-color: var(--primary); transform: scale(1.03); box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+  .gem-item:hover { 
+    background: var(--surface-container-highest);
+    border-color: var(--primary); 
+    transform: scale(1.02); 
+    box-shadow: 0 8px 20px rgba(0,0,0,0.3); 
+  }
   
   .gem-item img { 
     width: 56px; 
@@ -168,16 +173,18 @@
 
   .health-stats { display: flex; flex-direction: column; gap: 1.5rem; }
   .health-item {
-    background: var(--surface); 
+    background: var(--surface-container-highest); 
     padding: 1.8rem; 
-    border-radius: calc(var(--radius) / 1.5);
+    border-radius: 24px;
     display: flex; 
     flex-direction: column; 
     align-items: center; 
     text-align: center; 
     gap: 0.8rem;
     border: 1px solid var(--border-color);
+    transition: transform 0.2s;
   }
+  .health-item:hover { transform: translateY(-2px); border-color: var(--primary); }
   .health-item.warning { border-color: var(--secondary); }
   .health-item .val { font-size: 2.5rem; font-weight: 900; color: var(--primary); font-family: var(--font-headline); }
   .health-item .lbl { font-size: 0.9rem; color: var(--text-muted); font-weight: 700; }
