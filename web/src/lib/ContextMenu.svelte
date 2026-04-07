@@ -59,17 +59,21 @@
     <ul class="menu-list">
       {#each items as item}
         {#if item.divider}
-          <li class="divider"></li>
+          <li class="divider" role="separator"></li>
         {:else}
-          <li 
-            class="menu-item" 
-            class:danger={item.color === 'danger'}
-            on:click|stopPropagation={() => handleItemClick(item)}
-          >
-            <div class="icon">
-              <Icon name={item.icon} size={18} />
-            </div>
-            <span class="label">{item.label}</span>
+          <li role="none">
+            <button 
+              type="button"
+              class="menu-item" 
+              class:danger={item.color === 'danger'}
+              on:click|stopPropagation={() => handleItemClick(item)}
+              role="menuitem"
+            >
+              <div class="icon">
+                <Icon name={item.icon} size={18} />
+              </div>
+              <span class="label">{item.label}</span>
+            </button>
           </li>
         {/if}
       {/each}
@@ -111,6 +115,10 @@
     transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
     user-select: none;
     font-weight: 600;
+    width: 100%;
+    border: none;
+    background: transparent;
+    text-align: left;
   }
 
   .menu-item:hover {

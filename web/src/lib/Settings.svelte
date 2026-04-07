@@ -4,7 +4,7 @@
   import { audioQuality } from './stores.js';
   import { generatePalette, applyTheme } from './theme.js';
   
-  let config = $state({ musicPath: '', autoRename: false, renamePattern: '', themeColor: '#ff3366' });
+  let config = $state({ musicPath: '', autoRename: false, renamePattern: '', themeColor: '#ff3366', replayGainEnabled: false });
   let loading = $state(false);
   let saveSuccess = $state(false);
 
@@ -16,10 +16,39 @@
     const data = await res.json();
     config.musicPath = data.musicPath;
     config.autoRename = data.autoRename;
-    config.renamePattern = data.renamePattern;
     config.themeColor = data.themeColor || '#ff3366';
+    config.replayGainEnabled = data.replayGainEnabled;
     applyTheme(palette);
+    fetchAPIKeys();
   });
+
+  let apiKeys = $state([]);
+  let newKeyLabel = $state('');
+  let newKeyPerms = $state('r');
+  let myPerms = $derived(localStorage.getItem('permissions') || 'r');
+
+  async function fetchAPIKeys() {
+    const res = await fetch('/api/auth/apikeys');
+    if (res.ok) apiKeys = await res.json();
+  }
+
+  async function createAPIKey() {
+    if (!newKeyLabel) return;
+    const res = await fetch('/api/auth/apikeys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: newKeyLabel, permissions: newKeyPerms })
+    });
+    if (res.ok) {
+      newKeyLabel = '';
+      fetchAPIKeys();
+    }
+  }
+
+  async function deleteAPIKey(key) {
+    await fetch(`/api/auth/apikeys?key=${key}`, { method: 'DELETE' });
+    fetchAPIKeys();
+  }
 
   // Efecto para aplicar el tema cuando cambia la paleta (Svelte 5)
   $effect(() => {
@@ -136,6 +165,23 @@
     <section class="setting-item">
       <div class="info">
         <div class="title-with-help">
+          <h3>ReplayGain (Beta)</h3>
+          <div class="tooltip-wrap">
+            <Icon name="info" size={14} color="var(--text-muted)" />
+            <span class="tooltip">Si se activa, el servidor procesará las etiquetas de ganancia para normalizar el volumen.</span>
+          </div>
+        </div>
+        <p>Normalize loudness levels across different tracks automatically.</p>
+      </div>
+      <label class="switch">
+        <input type="checkbox" bind:checked={config.replayGainEnabled}>
+        <span class="slider"></span>
+      </label>
+    </section>
+
+    <section class="setting-item">
+      <div class="info">
+        <div class="title-with-help">
           <h3>Audio Quality</h3>
           <div class="tooltip-wrap">
             <Icon name="info" size={14} color="var(--text-muted)" />
@@ -154,10 +200,49 @@
     </section>
 
     <div class="actions">
-      <button class="save-btn" on:click={saveConfig} disabled={loading}>
+      <button class="save-btn" onclick={saveConfig} disabled={loading}>
         {loading ? 'Saving...' : saveSuccess ? 'Saved' : 'Save Configuration'}
         {#if saveSuccess}<Icon name="check" size={16} color="#10b981" />{/if}
       </button>
+    </div>
+  </div>
+
+  <div class="settings-card" style="margin-top: 2rem;">
+    <h2>My API Keys</h2>
+    <p class="section-desc">Utiliza estas llaves para conectar aplicaciones externas como Dsub, Ample o Symfonium.</p>
+    
+    <div class="api-keys-list">
+      {#each apiKeys as key}
+        <div class="key-item">
+          <div class="key-info">
+            <span class="key-label">{key.Label}</span>
+            <span class="badge {key.Permissions}">{key.Permissions}</span>
+          </div>
+          <div class="key-actions">
+            <code>{key.Key}</code>
+            <button class="icon-btn" onclick={() => navigator.clipboard.writeText(key.Key)} title="Copy Key">
+              <Icon name="copy" size={16} />
+            </button>
+            <button class="icon-btn delete" onclick={() => deleteAPIKey(key.Key)} title="Revoke Key">
+              <Icon name="trash" size={16} />
+            </button>
+          </div>
+        </div>
+      {/each}
+    </div>
+
+    <div class="add-key-form">
+      <h3>Add New API Key</h3>
+      <div class="form-row">
+        <input type="text" placeholder="Device Label (e.g. My Phone)" bind:value={newKeyLabel} />
+        <select bind:value={newKeyPerms} class="small-select">
+          <option value="r">Read Only</option>
+          {#if myPerms === 'rw'}
+            <option value="rw">Read & Write</option>
+          {/if}
+        </select>
+        <button class="add-btn" onclick={createAPIKey}>Generate</button>
+      </div>
     </div>
   </div>
 </div>
@@ -324,4 +409,28 @@
   }
   .save-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 25px var(--primary-10); filter: brightness(1.1); }
   .save-btn:active { transform: scale(0.98); }
+  /* API Key Styles */
+  .section-desc { color: var(--text-muted); margin-bottom: 2rem; font-size: 0.95rem; }
+  .api-keys-list { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 3rem; }
+  .key-item { 
+    display: flex; justify-content: space-between; align-items: center; 
+    padding: 1.2rem 2rem; background: rgba(255,255,255,0.02); 
+    border-radius: 20px; border: 1px solid var(--border-color);
+  }
+  .key-info { display: flex; align-items: center; gap: 1.5rem; }
+  .key-label { font-weight: 800; color: var(--text-main); font-size: 1rem; }
+  .key-actions { display: flex; align-items: center; gap: 1rem; }
+  .key-actions code { background: rgba(0,0,0,0.3); padding: 0.4rem 1rem; border-radius: 8px; font-family: monospace; color: var(--primary); }
+  
+  .badge { padding: 0.2rem 0.6rem; border-radius: 6px; font-size: 0.7rem; font-weight: 950; text-transform: uppercase; }
+  .badge.rw { background: var(--primary-10); color: var(--primary); border: 1px solid var(--primary); }
+  .badge.r { background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid var(--border-color); }
+
+  .icon-btn.delete:hover { background: rgba(239, 68, 68, 0.1); color: #f87171; }
+
+  .add-key-form { background: var(--surface-container-highest); padding: 2rem; border-radius: 24px; border: 1px solid var(--border-color); }
+  .small-select { 
+    background: var(--surface-container-high); border: 1px solid var(--border-color); 
+    color: var(--text-main); padding: 0.8rem 1.2rem; border-radius: 12px; outline: none; font-weight: 700;
+  }
 </style>

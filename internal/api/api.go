@@ -13,64 +13,99 @@ import (
 	"strings"
 	"io/fs"
 	"log/slog"
+	"context"
 
 	"github.com/dhowden/tag"
 	
 	"sgound/internal/db"
-	"sgound/internal/gateway"
 	"sgound/internal/tags"
 	"sgound/internal/config"
 	"sgound/internal/scanner"
 	"sgound/internal/metadata"
+	"sgound/internal/auth"
 	"sgound/web"
+	"sync"
 )
 
-type Server struct {
-	DB     *db.Database
-	Config *config.Config
+type ScanStatus struct {
+	Scanning  bool `json:"scanning"`
+	Processed int  `json:"processed"`
 }
 
-func NewServer(database *db.Database, cfg *config.Config) *Server {
-	return &Server{DB: database, Config: cfg}
+type Server struct {
+	MasterDB *db.MasterDatabase
+	Config   *config.Config
+
+	activeDBs    map[string]*db.Database
+	dbMutex      sync.RWMutex
+	jwtSecret    []byte
+	scanStatuses sync.Map // [string]*ScanStatus
 }
+
+func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
+	secret, err := masterDB.GetJWTSecret()
+	if err != nil {
+		// Generate random secret on first run
+		secret = auth.GenerateAPIKey() // Use same generator for simplicity
+		masterDB.SetJWTSecret(secret)
+	}
+
+	return &Server{
+		MasterDB:     masterDB,
+		Config:       cfg,
+		activeDBs:    make(map[string]*db.Database),
+		jwtSecret:    []byte(secret),
+		scanStatuses: sync.Map{},
+	}
+}
+
+type contextKey string
+const userKey contextKey = "user"
 
 func (s *Server) SetupRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 
-	// 1. REST Core API
-	mux.HandleFunc("/api/artists", s.handleGetArtists)
-	mux.HandleFunc("/api/artists/", s.handleArtistActions)
-	mux.HandleFunc("/api/albums", s.handleGetAlbums)
-	mux.HandleFunc("/api/albums/", s.handleAlbumActions)
-	mux.HandleFunc("/api/stream/", s.handleStream) // /api/stream/{id}
-	mux.HandleFunc("/api/stream", s.handleStream)
-	mux.HandleFunc("/api/cover/", s.handleGetCover)
-	mux.HandleFunc("/api/cover", s.handleGetCover)
-	mux.HandleFunc("/api/tracks", s.handleGetTracks)
-	mux.HandleFunc("/api/tracks/", s.handleTrackActions)
-	mux.HandleFunc("/api/scan", s.handleScan)
-	mux.HandleFunc("/api/config", s.handleConfig)
-	mux.HandleFunc("/api/search", s.handleSearch)
-	mux.HandleFunc("/api/dashboard", s.handleDashboard)
-	mux.HandleFunc("/api/library/health", s.handleLibraryHealth)
-	mux.HandleFunc("/api/library/duplicates", s.handleLibraryDuplicates)
-	mux.HandleFunc("/api/library/orphans", s.handleLibraryOrphans)
-	mux.HandleFunc("/api/library/cleanup", s.handleLibraryCleanup)
-	mux.HandleFunc("/api/library/low-quality", s.handleLibraryLowQuality)
-	mux.HandleFunc("/api/library/metadata", s.handleLibraryMetadata)
-	mux.HandleFunc("/api/lyrics/", s.handleLyrics) // /api/lyrics/{id} or /api/lyrics/search
-	mux.HandleFunc("/api/lyrics", s.handleLyrics)
-	mux.HandleFunc("/api/lyrics/search", s.handleLyricsSearch)
-	mux.HandleFunc("/api/metadata/search", s.handleMetadataSearch)
-	mux.HandleFunc("/api/metadata/suggest", s.handleMetadataSuggest)
-	mux.HandleFunc("/api/autocomplete", s.handleAutocomplete)
-	mux.HandleFunc("/api/playlists", s.handlePlaylists)
-	mux.HandleFunc("/api/playlists/", s.handlePlaylistActions)
-	mux.HandleFunc("/api/smart-playlists/", s.handleSmartPlaylists)
+	// Helper to wrap with auth
+	auth := func(h http.HandlerFunc) http.HandlerFunc {
+		return s.authMiddleware(h)
+	}
 
-	// 2. Subsonic Adapter Layer (Retrocompatibilidad OpenSubsonic)
-	gw := gateway.NewSubsonicGateway(s.DB)
-	gw.RegisterRoutes(mux)
+	// 1. REST Core API
+	mux.HandleFunc("/api/artists", auth(s.handleGetArtists))
+	mux.HandleFunc("/api/artists/", auth(s.handleArtistActions))
+	mux.HandleFunc("/api/albums", auth(s.handleGetAlbums))
+	mux.HandleFunc("/api/albums/", auth(s.handleAlbumActions))
+	mux.HandleFunc("/api/stream", auth(s.handleStream))
+	mux.HandleFunc("/api/stream/", auth(s.handleStream))
+	mux.HandleFunc("/api/cover", auth(s.handleGetCover))
+	mux.HandleFunc("/api/cover/", auth(s.handleGetCover))
+	mux.HandleFunc("/api/tracks", auth(s.handleGetTracks))
+	mux.HandleFunc("/api/tracks/", auth(s.handleTrackActions))
+	mux.HandleFunc("/api/scan", auth(s.handleScan))
+	mux.HandleFunc("/api/config", auth(s.handleConfig))
+	mux.HandleFunc("/api/search", auth(s.handleSearch))
+	mux.HandleFunc("/api/dashboard", auth(s.handleDashboard))
+	mux.HandleFunc("/api/library/health", auth(s.handleLibraryHealth))
+	mux.HandleFunc("/api/library/status", auth(s.handleScanStatus))
+	mux.HandleFunc("/api/library/inbox", auth(s.handleGetInbox))
+	mux.HandleFunc("/api/tracks/approve", auth(s.handleApproveTracks))
+	mux.HandleFunc("/api/tracks/rate", auth(s.handleRateTrack))
+	mux.HandleFunc("/api/lyrics", auth(s.handleLyrics))
+	mux.HandleFunc("/api/lyrics/", auth(s.handleLyrics))
+	mux.HandleFunc("/api/playlists", auth(s.handlePlaylists))
+	mux.HandleFunc("/api/playlists/", auth(s.handlePlaylistActions))
+
+	// 2. Auth Actions
+	mux.HandleFunc("/api/auth/login", s.handleLogin)
+	mux.HandleFunc("/api/auth/status", s.handleAuthStatus)
+	mux.HandleFunc("/api/auth/setup", s.handleSetup)
+
+	// 2.5 API Key Management (Self-service)
+	mux.HandleFunc("/api/auth/apikeys", s.authMiddleware(s.handleAPIKeys))
+
+	// 3. Subsonic Adapter Layer (Needs refactoring for multi-user)
+	// gw := gateway.NewSubsonicGateway(...)
+	// gw.RegisterRoutes(mux)
 
 	// 3. Frontend SPA handler Embedded
 	if frontendFS, err := web.GetFrontendAssets(); err == nil {
@@ -94,6 +129,280 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	}
 
 	return mux
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var creds struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	user, err := s.MasterDB.GetUserByUsername(creds.Username)
+	if err != nil {
+		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	match, err := auth.VerifyPassword(creds.Password, user.PasswordHash)
+	if err != nil || !match {
+		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	token, err := auth.GenerateJWT(user.Username, s.jwtSecret)
+	if err != nil {
+		http.Error(w, "Token generation failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Set as cookie for web sessions
+	http.SetCookie(w, &http.Cookie{
+		Name:     "sgound_token",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   86400,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"token":       token,
+		"username":    user.Username,
+		"permissions": user.Permissions,
+	})
+}
+
+func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
+	username := r.URL.Query().Get("username")
+	if username == "" {
+		http.Error(w, "Username required", http.StatusBadRequest)
+		return
+	}
+
+	// Check if user is in AllowedUsers in config
+	perms, allowed := s.Config.AllowedUsers[username]
+	if !allowed {
+		http.Error(w, "User not authorized in server config", http.StatusForbidden)
+		return
+	}
+
+	user, _ := s.MasterDB.GetUserByUsername(username)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"allowed":       true,
+		"setupRequired": user == nil,
+		"permissions":   perms,
+	})
+}
+
+func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	// Check if allowed
+	perms, allowed := s.Config.AllowedUsers[body.Username]
+	if !allowed {
+		http.Error(w, "User not authorized in server config", http.StatusForbidden)
+		return
+	}
+
+	user, _ := s.MasterDB.GetUserByUsername(body.Username)
+	if user != nil {
+		http.Error(w, "User already exists", http.StatusForbidden)
+		return
+	}
+
+	hash, _ := auth.HashPassword(body.Password)
+	// Create user with perms from config
+	err := s.MasterDB.CreateUser(body.Username, hash, perms, s.Config.DBPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Trigger initial scan in background for the new user
+	userDBPath := filepath.Join(filepath.Dir(s.Config.DBPath), "library_"+body.Username+".db")
+	go func() {
+		slog.Info("Starting initial background scan for auto-configuration", "user", body.Username, "path", s.Config.MusicPath)
+		uDB, err := db.Connect(userDBPath)
+		if err == nil {
+			status := &ScanStatus{Scanning: true, Processed: 0}
+			s.scanStatuses.Store(body.Username, status)
+
+			sc := scanner.NewScanner(uDB)
+			sc.OnProgress = func(path string, count int) {
+				status.Processed = count
+				s.scanStatuses.Store(body.Username, status)
+			}
+			
+			defer func() {
+				status.Scanning = false
+				s.scanStatuses.Store(body.Username, status)
+			}()
+
+			sc.ScanDirectory(s.Config.MusicPath)
+		} else {
+			slog.Error("Auto-scan failed: could not connect to user DB", "user", body.Username, "error", err)
+		}
+	}()
+
+	// Automatic Session: Set JWT cookie so user lands directly in dashboard
+	token, err := auth.GenerateJWT(body.Username, s.jwtSecret)
+	if err == nil {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "sgound_token",
+			Value:    token,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   false,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   86400 * 30,
+		})
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "success",
+		"username":    body.Username,
+		"permissions": perms,
+	})
+}
+
+func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
+	user, _ := r.Context().Value(userKey).(*db.User)
+	if user == nil { return }
+
+	if r.Method == http.MethodGet {
+		keys, _ := s.MasterDB.GetAPIKeys(user.Username)
+		json.NewEncoder(w).Encode(keys)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var body struct {
+			Label       string `json:"label"`
+			Permissions string `json:"permissions"` // "r" or "rw"
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+
+		// Guard: Cannot grant more than you have
+		if user.Permissions == "r" && body.Permissions == "rw" {
+			http.Error(w, "Cannot create RW key with R user account", http.StatusForbidden)
+			return
+		}
+
+		key := auth.GenerateAPIKey()
+		err := s.MasterDB.CreateAPIKey(key, user.Username, body.Permissions, body.Label)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"key": key, "label": body.Label, "permissions": body.Permissions})
+		return
+	}
+
+	if r.Method == http.MethodDelete {
+		key := r.URL.Query().Get("key")
+		s.MasterDB.DeleteAPIKey(key, user.Username)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+}
+
+func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var user *db.User
+		var effectivePerms string
+
+		// 1. Check JWT Cookie (Web Session)
+		if cookie, err := r.Cookie("sgound_token"); err == nil {
+			claims, err := auth.VerifyJWT(cookie.Value, s.jwtSecret)
+			if err == nil {
+				user, _ = s.MasterDB.GetUserByUsername(claims.Username)
+				if user != nil {
+					effectivePerms = user.Permissions
+				}
+			}
+		}
+
+		// 2. Check API Key (External clients)
+		if user == nil {
+			apiKey := r.Header.Get("X-API-Key")
+			if apiKey == "" {
+				apiKey = r.URL.Query().Get("apiKey")
+			}
+			if apiKey != "" {
+				keyInfo, err := s.MasterDB.GetAPIKeyInfo(apiKey)
+				if err == nil {
+					user, _ = s.MasterDB.GetUserByUsername(keyInfo.Username)
+					if user != nil {
+						effectivePerms = keyInfo.Permissions
+					}
+				}
+			}
+		}
+
+		if user == nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// 3. Permission Guard for Mutation Methods
+		if r.Method != http.MethodGet && effectivePerms == "r" {
+			// Special case: we allow OPTIONS for CORS
+			if r.Method != http.MethodOptions {
+				http.Error(w, "Forbidden: Read-only access", http.StatusForbidden)
+				return
+			}
+		}
+
+		ctx := context.WithValue(r.Context(), userKey, user)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	}
+}
+
+func (s *Server) getDB(r *http.Request) *db.Database {
+	user, ok := r.Context().Value(userKey).(*db.User)
+	if !ok {
+		return nil
+	}
+	s.dbMutex.RLock()
+	d, ok := s.activeDBs[user.DBPath]
+	s.dbMutex.RUnlock()
+	if ok {
+		return d
+	}
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
+	if d, ok := s.activeDBs[user.DBPath]; ok {
+		return d
+	}
+	newDB, err := db.Connect(user.DBPath)
+	if err != nil {
+		slog.Error("Failed to connect user DB", "path", user.DBPath, "err", err)
+		return nil
+	}
+	s.activeDBs[user.DBPath] = newDB
+	return newDB
 }
 
 func (s *Server) extractID(r *http.Request, prefix string) string {
@@ -132,8 +441,23 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sc := scanner.NewScanner(s.DB)
+	user, _ := r.Context().Value(userKey).(*db.User)
+	
+	// Reset status
+	status := &ScanStatus{Scanning: true, Processed: 0}
+	s.scanStatuses.Store(user.Username, status)
+
+	sc := scanner.NewScanner(s.getDB(r))
+	sc.OnProgress = func(path string, count int) {
+		status.Processed = count
+		s.scanStatuses.Store(user.Username, status)
+	}
+
 	go func() {
+		defer func() {
+			status.Scanning = false
+			s.scanStatuses.Store(user.Username, status)
+		}()
 		if err := sc.ScanDirectory(s.Config.MusicPath); err != nil {
 			slog.Error("Manual scan failed", "error", err)
 		}
@@ -152,10 +476,11 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodPut {
 		var newCfg struct {
-			MusicPath     string `json:"musicPath"`
-			ThemeColor    string `json:"themeColor"`
-			AutoRename    bool   `json:"autoRename"`
-			RenamePattern string `json:"renamePattern"`
+			MusicPath         string `json:"musicPath"`
+			ThemeColor        string `json:"themeColor"`
+			AutoRename        bool   `json:"autoRename"`
+			RenamePattern     string `json:"renamePattern"`
+			ReplayGainEnabled bool   `json:"replayGainEnabled"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
 			http.Error(w, "Invalid payload", http.StatusBadRequest)
@@ -165,6 +490,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		s.Config.ThemeColor = newCfg.ThemeColor
 		s.Config.AutoRename = newCfg.AutoRename
 		s.Config.RenamePattern = newCfg.RenamePattern
+		s.Config.ReplayGainEnabled = newCfg.ReplayGainEnabled
 
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"updated"}`))
@@ -180,7 +506,7 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.DB.Conn.Query("SELECT id, name FROM artists ORDER BY name")
+	rows, err := s.getDB(r).Conn.Query("SELECT id, name FROM artists ORDER BY name")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -210,7 +536,7 @@ func (s *Server) handleArtistActions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r *http.Request) {
-	rows, err := s.DB.Conn.Query("SELECT id, title, year FROM albums WHERE artist_id = ? ORDER BY year DESC", artistID)
+	rows, err := s.getDB(r).Conn.Query("SELECT id, title, year FROM albums WHERE artist_id = ? ORDER BY year DESC", artistID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -232,7 +558,7 @@ func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r
 }
 
 func (s *Server) handleGetAlbums(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.DB.Conn.Query(`
+	rows, err := s.getDB(r).Conn.Query(`
 		SELECT al.id, al.title, al.year, ar.name as artist, 
 		       (SELECT t.id FROM tracks t WHERE t.album_id = al.id LIMIT 1) as sample_track_id
 		FROM albums al
@@ -271,7 +597,7 @@ func (s *Server) handleAlbumActions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetAlbumTracks(albumID string, w http.ResponseWriter, r *http.Request) {
-	rows, err := s.DB.Conn.Query(`
+	rows, err := s.getDB(r).Conn.Query(`
 		SELECT id, title, track_num, duration, genre 
 		FROM tracks 
 		WHERE album_id = ? 
@@ -325,7 +651,7 @@ func (s *Server) handleTrackActions(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	trackID := s.extractID(r, "/api/stream/")
 	var fpath string
-	err := s.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath)
+	err := s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath)
 	if err != nil {
 		http.Error(w, "Track not found", http.StatusNotFound)
 		return
@@ -333,7 +659,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	// Registrar reproducción
 	go func() {
-		s.DB.Conn.Exec("UPDATE tracks SET last_played = CURRENT_TIMESTAMP WHERE id = ?", trackID)
+		s.getDB(r).Conn.Exec("UPDATE tracks SET last_played = CURRENT_TIMESTAMP WHERE id = ?", trackID)
 	}()
 
 	bitrate := r.URL.Query().Get("bitrate")
@@ -370,7 +696,7 @@ func (s *Server) handleEditTags(trackID string, w http.ResponseWriter, r *http.R
 		return
 	}
 
-	editor := tags.NewEditor(s.DB)
+	editor := tags.NewEditor(s.getDB(r))
 	if err := editor.UpdateTags(trackID, body); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -386,7 +712,7 @@ func (s *Server) handleEditTags(trackID string, w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) handleManualOrganize(trackID string, w http.ResponseWriter, r *http.Request) {
-	editor := tags.NewEditor(s.DB)
+	editor := tags.NewEditor(s.getDB(r))
 	newPath, err := editor.OrganizeFile(trackID, s.Config.MusicPath, s.Config.RenamePattern)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -402,35 +728,50 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.DB.Conn.Query(`
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "active"
+	}
+	
+	whereClause := "WHERE t.status = ?"
+	args := []interface{}{status}
+	if status == "all" {
+		whereClause = "WHERE 1=1"
+		args = []interface{}{}
+	}
+
+	query := fmt.Sprintf(`
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
 		       a.name as artist, al.title as album, al.year as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
-		       t.composer, t.comment
+		       t.composer, t.comment, t.status, t.rating
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
-		ORDER BY a.name, al.year, t.track_num
-	`)
+		%s
+		ORDER BY a.name, al.year, t.track_num`, whereClause)
+
+	rows, err := s.getDB(r).Conn.Query(query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
-	var tracks []map[string]interface{}
+	tracks := make([]map[string]interface{}, 0)
 	for rows.Next() {
-		var id, title, genre, artist, album, format, composer, comment string
-		var trackNum, discNum, duration, year, bitRate, sampleRate int
+		var id, title, genre, artist, album, format, composer, comment, tStatus string
+		var trackNum, discNum, duration, year, bitRate, sampleRate, rating int
 		var size int64
-		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment); err != nil {
+		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating); err != nil {
+			slog.Error("Scan error", "err", err)
 			continue
 		}
 		tracks = append(tracks, map[string]interface{}{
 			"id": id, "title": title, "trackNum": trackNum, "discNum": discNum, 
 			"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
 			"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
-			"composer": composer, "comment": comment,
+			"composer": composer, "comment": comment, "status": tStatus, "rating": rating,
 		})
 	}
 
@@ -438,8 +779,79 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(tracks)
 }
 
+func (s *Server) handleGetInbox(w http.ResponseWriter, r *http.Request) {
+	// Forzar filtro por status=pending
+	q := r.URL.Query()
+	q.Set("status", "pending")
+	r.URL.RawQuery = q.Encode()
+	s.handleGetTracks(w, r)
+}
+
+func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var data struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	for _, id := range data.IDs {
+		_, err := s.getDB(r).Conn.Exec("UPDATE tracks SET status = 'active' WHERE id = ?", id)
+		if err != nil {
+			slog.Error("Failed to approve track", "id", id, "error", err)
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success"}`))
+}
+
+func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var data struct {
+		ID     string `json:"id"`
+		Rating int    `json:"rating"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	// 1. Actualizar DB
+	_, err := s.getDB(r).Conn.Exec("UPDATE tracks SET rating = ? WHERE id = ?", data.Rating, data.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 2. Sincronizar con Tags del archivo
+	editor := tags.NewEditor(s.getDB(r))
+	// Usamos un mapa para UpdateTags que ya maneja la lógica de escritura física
+	tagData := map[string]interface{}{
+		"rating": float64(data.Rating), // El editor espera float64 de los JSON decoders genéricos aveces
+	}
+	
+	if err := editor.UpdateTags(data.ID, tagData); err != nil {
+		slog.Error("Failed to sync rating to tags", "id", data.ID, "error", err)
+		// No fallamos la petición completa si solo falla el tag físico
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success"}`))
+}
+
 func (s *Server) handleDeleteTrack(trackID string, w http.ResponseWriter, r *http.Request) {
-	_, err := s.DB.Conn.Exec("DELETE FROM tracks WHERE id = ?", trackID)
+	_, err := s.getDB(r).Conn.Exec("DELETE FROM tracks WHERE id = ?", trackID)
 	if err != nil {
 		http.Error(w, "Failed to delete track", http.StatusInternalServerError)
 		return
@@ -460,7 +872,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	results := make(map[string]interface{})
 
 	// 1. Search Tracks (por título o género)
-	tracksRows, err := s.DB.Conn.Query(`
+	tracksRows, err := s.getDB(r).Conn.Query(`
 		SELECT t.id, t.title, a.name as artist 
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
@@ -481,7 +893,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	results["tracks"] = tracks
 
 	// 2. Search Artists
-	artistRows, err := s.DB.Conn.Query("SELECT id, name FROM artists WHERE name LIKE ?", searchTerm)
+	artistRows, err := s.getDB(r).Conn.Query("SELECT id, name FROM artists WHERE name LIKE ?", searchTerm)
 	
 	var artists []map[string]interface{}
 	if err == nil {
@@ -495,7 +907,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	results["artists"] = artists
 
 	// 3. Search Albums
-	albumRows, err := s.DB.Conn.Query(`
+	albumRows, err := s.getDB(r).Conn.Query(`
 		SELECT al.id, al.title, ar.name as artist 
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
@@ -542,7 +954,7 @@ func (s *Server) handleAutocomplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.DB.Conn.Query(query, q+"%")
+	rows, err := s.getDB(r).Conn.Query(query, q+"%")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -560,7 +972,7 @@ func (s *Server) handleAutocomplete(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLibraryMetadata(w http.ResponseWriter, r *http.Request) {
 	// Obtener décadas únicas
-	decadeRows, err := s.DB.Conn.Query("SELECT DISTINCT (year / 10) * 10 as decade FROM albums WHERE year > 0 ORDER BY decade DESC")
+	decadeRows, err := s.getDB(r).Conn.Query("SELECT DISTINCT (year / 10) * 10 as decade FROM albums WHERE year > 0 ORDER BY decade DESC")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -575,7 +987,7 @@ func (s *Server) handleLibraryMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Obtener géneros únicos
-	genreRows, err := s.DB.Conn.Query("SELECT DISTINCT genre FROM tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre ASC")
+	genreRows, err := s.getDB(r).Conn.Query("SELECT DISTINCT genre FROM tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre ASC")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -601,17 +1013,17 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	
 	// Contadores básicos
 	var tTracks, tAlbums, tArtists, tPlaylists int
-	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM tracks").Scan(&tTracks)
-	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM albums").Scan(&tAlbums)
-	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM artists").Scan(&tArtists)
-	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM playlists").Scan(&tPlaylists)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks").Scan(&tTracks)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM albums").Scan(&tAlbums)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM artists").Scan(&tArtists)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM playlists").Scan(&tPlaylists)
 	stats["totalTracks"] = tTracks
 	stats["totalAlbums"] = tAlbums
 	stats["totalArtists"] = tArtists
 	stats["totalPlaylists"] = tPlaylists
 
 	// Joyas olvidadas (10 canciones aleatorias para redescubrir)
-	rows, err := s.DB.Conn.Query("SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist FROM tracks ORDER BY RANDOM() LIMIT 10")
+	rows, err := s.getDB(r).Conn.Query("SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist FROM tracks ORDER BY RANDOM() LIMIT 10")
 	var gems []map[string]interface{}
 	if err == nil {
 		defer rows.Close()
@@ -627,24 +1039,41 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(stats)
 }
 
+func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
+	user, _ := r.Context().Value(userKey).(*db.User)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	val, ok := s.scanStatuses.Load(user.Username)
+	if !ok {
+		// No scan ever happened, return idle
+		json.NewEncoder(w).Encode(ScanStatus{Scanning: false, Processed: 0})
+		return
+	}
+
+	json.NewEncoder(w).Encode(val.(*ScanStatus))
+}
+
 func (s *Server) handleLibraryHealth(w http.ResponseWriter, r *http.Request) {
 	health := make(map[string]interface{})
 
 	// Pistas sin género o año
 	var incomplete int
-	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE genre IS NULL OR genre = ''").Scan(&incomplete)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE genre IS NULL OR genre = ''").Scan(&incomplete)
 	health["missingTags"] = incomplete
 
 	// Duplicados
-	dups, _ := s.DB.GetDuplicates()
+	dups, _ := s.getDB(r).GetDuplicates()
 	health["duplicateCount"] = len(dups)
 
 	// Huérfanos
-	orphans, _ := s.DB.GetOrphanedTracks()
+	orphans, _ := s.getDB(r).GetOrphanedTracks()
 	health["orphanCount"] = len(orphans)
 
 	// Baja calidad (< 128kbps)
-	lowQual, _ := s.DB.GetLowQualityTracks(128)
+	lowQual, _ := s.getDB(r).GetLowQualityTracks(128)
 	health["lowQualityCount"] = len(lowQual)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -652,7 +1081,7 @@ func (s *Server) handleLibraryHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLibraryDuplicates(w http.ResponseWriter, r *http.Request) {
-	dups, err := s.DB.GetDuplicates()
+	dups, err := s.getDB(r).GetDuplicates()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -662,7 +1091,7 @@ func (s *Server) handleLibraryDuplicates(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleLibraryOrphans(w http.ResponseWriter, r *http.Request) {
-	orphans, err := s.DB.GetOrphanedTracks()
+	orphans, err := s.getDB(r).GetOrphanedTracks()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -677,7 +1106,7 @@ func (s *Server) handleLibraryCleanup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orphans, err := s.DB.GetOrphanedTracks()
+	orphans, err := s.getDB(r).GetOrphanedTracks()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -688,7 +1117,7 @@ func (s *Server) handleLibraryCleanup(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, o.ID)
 	}
 
-	if err := s.DB.DeleteTracks(ids); err != nil {
+	if err := s.getDB(r).DeleteTracks(ids); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -706,7 +1135,7 @@ func (s *Server) handleLibraryLowQuality(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	tracks, err := s.DB.GetLowQualityTracks(threshold)
+	tracks, err := s.getDB(r).GetLowQualityTracks(threshold)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -724,7 +1153,7 @@ func (s *Server) handleMetadataSuggest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var title, artist, album string
-	err := s.DB.Conn.QueryRow(`
+	err := s.getDB(r).Conn.QueryRow(`
 		SELECT t.title, ar.name, al.title
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
@@ -841,7 +1270,7 @@ func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		editor := tags.NewEditor(s.DB)
+		editor := tags.NewEditor(s.getDB(r))
 		if err := editor.UpdateLyrics(trackID, body.Lyrics); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -857,7 +1286,7 @@ func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.Request) {
 	var title, artist string
-	err := s.DB.Conn.QueryRow(`
+	err := s.getDB(r).Conn.QueryRow(`
 		SELECT t.title, a.name 
 		FROM tracks t 
 		JOIN albums al ON t.album_id = al.id 
@@ -869,7 +1298,7 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 		return
 	}
 	
-	editor := tags.NewEditor(s.DB)
+	editor := tags.NewEditor(s.getDB(r))
 
 	// 1. Intentar leer de archivo local primero (verdad absoluta del usuario)
 	localLyrics, _ := editor.ReadLyrics(trackID)
@@ -931,7 +1360,7 @@ func (s *Server) handlePlaylists(w http.ResponseWriter, r *http.Request) {
 		}
 
 		id := strings.ToLower(strings.ReplaceAll(body.Name, " ", "-")) + "-" + fmt.Sprintf("%d", os.Getpid())
-		_, err := s.DB.Conn.Exec("INSERT INTO playlists (id, name, is_smart) VALUES (?, ?, ?)", id, body.Name, 0)
+		_, err := s.getDB(r).Conn.Exec("INSERT INTO playlists (id, name, is_smart) VALUES (?, ?, ?)", id, body.Name, 0)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -941,7 +1370,7 @@ func (s *Server) handlePlaylists(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Simple list for now
-	rows, err := s.DB.Conn.Query("SELECT id, name, is_smart FROM playlists")
+	rows, err := s.getDB(r).Conn.Query("SELECT id, name, is_smart FROM playlists")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1003,7 +1432,7 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := fmt.Sprintf("%s %s %s", baseQuery, whereClause, orderClause)
-	rows, err := s.DB.Conn.Query(query, args...)
+	rows, err := s.getDB(r).Conn.Query(query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1041,7 +1470,7 @@ func (s *Server) handlePlaylistActions(w http.ResponseWriter, r *http.Request) {
 				TrackID string `json:"trackId"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
-				s.DB.AddToPlaylist(id, body.TrackID)
+				s.getDB(r).AddToPlaylist(id, body.TrackID)
 			}
 			w.WriteHeader(http.StatusOK)
 		}
@@ -1049,7 +1478,7 @@ func (s *Server) handlePlaylistActions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodDelete {
-		s.DB.DeletePlaylist(id)
+		s.getDB(r).DeletePlaylist(id)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"success"}`))
 		return
@@ -1062,7 +1491,7 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 	id := strings.TrimPrefix(r.URL.Path, "/api/playlists/")
 	id = strings.TrimSuffix(id, "/tracks")
 
-	rows, err := s.DB.Conn.Query(`
+	rows, err := s.getDB(r).Conn.Query(`
 		SELECT t.id, t.title, a.name, al.title, t.duration
 		FROM tracks t
 		JOIN playlist_tracks pt ON t.id = pt.track_id
@@ -1109,11 +1538,11 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 
 	var fpath string
 	// Intentamos buscar por track ID primero
-	err := s.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath)
+	err := s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath)
 	if err != nil {
 		slog.Debug("Cover lookup: ID not found in tracks, trying albums", "id", trackID)
 		// Si falla, quizás es un ID de álbum? Intentamos buscar el primer track del álbum
-		err = s.DB.Conn.QueryRow("SELECT path FROM tracks WHERE album_id = ? LIMIT 1", trackID).Scan(&fpath)
+		err = s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE album_id = ? LIMIT 1", trackID).Scan(&fpath)
 		if err != nil {
 			slog.Warn("Cover lookup: ID not found in tracks or albums", "id", trackID)
 			w.Header().Set("Content-Type", "image/gif")

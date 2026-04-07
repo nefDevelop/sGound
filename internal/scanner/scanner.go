@@ -16,7 +16,8 @@ import (
 )
 
 type Scanner struct {
-	DB *db.Database
+	DB         *db.Database
+	OnProgress func(path string, count int)
 }
 
 func NewScanner(database *db.Database) *Scanner {
@@ -27,6 +28,7 @@ func NewScanner(database *db.Database) *Scanner {
 func (s *Scanner) ScanDirectory(rootPath string) error {
 	slog.Info("Starting library scan", "path", rootPath)
 
+	count := 0
 	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			slog.Error("Error walking path", "path", path, "error", err)
@@ -35,8 +37,14 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 		if !d.IsDir() {
 			if err := isAudioFile(d.Name()); err == nil {
+				slog.Info("Audio file found", "path", path)
 				if parseErr := s.ParseAndSaveFile(path); parseErr != nil {
 					slog.Error("Failed to parse file", "path", path, "error", parseErr)
+				} else {
+					count++
+					if s.OnProgress != nil {
+						s.OnProgress(path, count)
+					}
 				}
 			}
 		}
@@ -84,6 +92,7 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	var artistName, albumName, title string
 	var trackNum, year, discNum int
 	var genre, composer, comment string
+	var replayGain float64
 
 	if err != nil {
 		slog.Warn("Tag parsing failed (corrupt metadata), fallback to paths", "path", path, "err", err)
@@ -118,6 +127,15 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		}
 		composer = metadata.Composer()
 		comment = metadata.Comment()
+		
+		// ReplayGain extraction
+		if raw := metadata.Raw(); raw != nil {
+			if rg, ok := raw["REPLAYGAIN_TRACK_GAIN"].(string); ok {
+				fmt.Sscanf(rg, "%f", &replayGain)
+			} else if rgArr, ok := raw["REPLAYGAIN_TRACK_GAIN"].([]string); ok && len(rgArr) > 0 {
+				fmt.Sscanf(rgArr[0], "%f", &replayGain)
+			}
+		}
 	}
 
 	// 1. Get or Create Artist
@@ -143,11 +161,25 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	samplerate := 44100 
 	duration := 0 // En segundos
 
+	// Determinar el status inicial
+	status := "active"
+	var existingStatus string
+	err = s.DB.Conn.QueryRow("SELECT status FROM tracks WHERE id = ?", trackId).Scan(&existingStatus)
+	if err != nil {
+		// Si no existe, es nueva -> "pending"
+		status = "pending"
+	} else {
+		// Si ya existe, preservamos su status
+		status = existingStatus
+	}
+
+	rating := 0 // Por ahora 0, luego implementaremos lectura de RATING tag
+
 	_, err = s.DB.Conn.Exec(
 		`INSERT OR REPLACE INTO tracks 
-		(id, album_id, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		trackId, albumId, title, trackNum, discNum, path, duration, genre, fileSize, fileExt, composer, comment, bitrate, samplerate,
+		(id, album_id, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, rating, replay_gain) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		trackId, albumId, title, trackNum, discNum, path, duration, genre, fileSize, fileExt, composer, comment, bitrate, samplerate, status, rating, replayGain,
 	)
 	if err != nil {
 		return err

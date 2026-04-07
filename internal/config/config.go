@@ -3,15 +3,18 @@ package config
 import (
 	"log/slog"
 	"os"
+	"strings"
 )
 
 type Config struct {
 	DBPath        string
 	MusicPath     string
 	Port          string
-	AutoRename    bool
-	RenamePattern string
-	ThemeColor    string
+	AutoRename        bool
+	RenamePattern     string
+	ThemeColor        string
+	ReplayGainEnabled bool
+	AllowedUsers      map[string]string // username -> permissions (r/rw)
 }
 
 func LoadConfig() *Config {
@@ -41,14 +44,32 @@ func LoadConfig() *Config {
 		renamePattern = "{artist}/{album}/{track} - {title}"
 	}
 
-	slog.Info("Configuration loaded", "dbPath", dbPath, "musicPath", musicPath, "port", port, "autoRename", autoRename, "themeColor", themeColor)
+	replayGain := os.Getenv("SGOUND_REPLAYGAIN") == "true"
+
+	allowedUsersRaw := os.Getenv("SGOUND_USERS")
+	allowedUsers := make(map[string]string)
+	if allowedUsersRaw != "" {
+		parts := strings.Split(allowedUsersRaw, ",")
+		for _, p := range parts {
+			kv := strings.Split(p, ":")
+			if len(kv) == 2 {
+				allowedUsers[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
+			} else if len(kv) == 1 {
+				allowedUsers[strings.TrimSpace(kv[0])] = "r" // default to read-only
+			}
+		}
+	}
+
+	slog.Info("Configuration loaded", "dbPath", dbPath, "musicPath", musicPath, "port", port, "users", len(allowedUsers))
 
 	return &Config{
 		DBPath:        dbPath,
 		MusicPath:     musicPath,
 		Port:          port,
-		AutoRename:    autoRename,
-		RenamePattern: renamePattern,
-		ThemeColor:    themeColor,
+		AutoRename:        autoRename,
+		RenamePattern:     renamePattern,
+		ThemeColor:        themeColor,
+		ReplayGainEnabled: replayGain,
+		AllowedUsers:      allowedUsers,
 	}
 }

@@ -68,13 +68,17 @@
   <div class="now-playing" on:click={() => dispatch('openFull')} on:contextmenu={showContextMenu}>
     {#if currentPlaying}
       <img class="cover" src={`/api/cover/${currentPlaying.id}`} alt="Artwork" />
+      <div class="track-info">
+        <span class="title">{currentPlaying.title}</span>
+        <span class="artist">{currentPlaying.artist}</span>
+      </div>
     {:else}
       <div class="cover-placeholder"></div>
+      <div class="track-info">
+        <span class="title">No Track</span>
+        <span class="artist">Select a song</span>
+      </div>
     {/if}
-    <div class="track-info">
-      <span class="title">{currentPlaying ? currentPlaying.title : 'No Track'}</span>
-      <span class="artist">{currentPlaying ? currentPlaying.artist : 'Select a song'}</span>
-    </div>
   </div>
   
   <div class="controls-container">
@@ -106,12 +110,17 @@
     <input 
       type="range" 
       class="volume-bar" 
-      min="0" max="1" step="0.1" 
+      min="0" max="1" step="0.01" 
       bind:value={volume} 
-      on:input={() => audioRef.volume = volume}
+      on:input={() => {
+        if (!audioRef) return;
+        const gain = currentPlaying?.replay_gain || 0;
+        const linearGain = Math.pow(10, gain / 20);
+        audioRef.volume = Math.min(1.0, volume * linearGain);
+      }}
     />
-    {#if currentPlaying}
-      <div class="tech-badge">{currentPlaying.format?.toUpperCase()}</div>
+    {#if currentPlaying?.format}
+      <div class="tech-badge">{currentPlaying.format.toUpperCase()}</div>
     {/if}
   </div>
 
@@ -130,13 +139,13 @@
 <style>
   .player {
     grid-area: player;
-    background: #0f111a;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--surface);
+    border-top: 1px solid var(--border-color);
     display: grid;
     grid-template-columns: 300px 1fr 300px;
     align-items: center;
     padding: 0 2rem;
-    height: 90px;
+    height: 110px;
   }
 
   .now-playing {
@@ -161,13 +170,14 @@
   }
 
   .track-info .title { 
-    font-weight: 600; 
-    color: white;
+    font-weight: 700; 
+    color: var(--text-main);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    font-size: 1.05rem;
   }
-  .track-info .artist { font-size: 0.85rem; color: #94a3b8; }
+  .track-info .artist { font-size: 0.85rem; color: var(--text-muted); font-weight: 500; }
 
   .controls-container {
     display: flex;
@@ -183,16 +193,19 @@
   }
 
   .play-btn {
-    background: white !important;
-    color: black !important;
-    width: 36px;
-    height: 36px;
+    background: var(--primary) !important;
+    color: white !important;
+    width: 48px;
+    height: 48px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 1.2rem;
+    box-shadow: 0 4px 12px var(--primary-10);
+    transition: transform 0.2s;
   }
+  .play-btn:hover { transform: scale(1.05); }
 
   .progress-area {
     width: 100%;

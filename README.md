@@ -46,7 +46,9 @@ Sgound se puede configurar mediante variables de entorno:
 | `SGOUND_PORT` | Puerto del servidor HTTP | `8080` |
 | `SGOUND_MUSIC_PATH` | Ruta a tu biblioteca de música | `./music` |
 | `SGOUND_DB_PATH` | Ruta al archivo de base de datos | `sgound.db` |
+| `SGOUND_USERS` | Lista de usuarios autorizados (`user:rw,amigo:r`) | (Vacío) |
 | `SGOUND_THEME_COLOR` | Color semilla para el tema (Hex) | `#ff3366` |
+| `SGOUND_REPLAYGAIN` | Activar normalización de volumen (`true`/`false`) | `false` |
 
 ## 📖 Documentación de API
 

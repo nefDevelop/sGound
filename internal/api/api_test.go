@@ -18,14 +18,19 @@ func TestGetArtistsEmpty(t *testing.T) {
 	f.Close()
 	defer os.Remove(dbPath)
 
-	database, _ := db.Connect(dbPath)
-	defer database.Conn.Close()
+	mDB, _ := db.ConnectMaster(dbPath)
+	defer mDB.Conn.Close()
+
+	// Mock user for test
+	mDB.CreateUser("admin", "hash", "rw", dbPath)
+	mDB.CreateAPIKey("test-key", "admin", "rw", "test")
 
 	cfg := &config.Config{MusicPath: "/tmp", Port: "8088"}
-	server := NewServer(database, cfg)
+	server := NewServer(mDB, cfg)
 	mux := server.SetupRoutes()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/artists", nil)
+	req.Header.Set("X-API-Key", "test-key")
 	rr := httptest.NewRecorder()
 
 	mux.ServeHTTP(rr, req)
@@ -48,14 +53,18 @@ func TestStreamNotFound(t *testing.T) {
 	f.Close()
 	defer os.Remove(dbPath)
 
-	database, _ := db.Connect(dbPath)
-	defer database.Conn.Close()
+	mDB, _ := db.ConnectMaster(dbPath)
+	defer mDB.Conn.Close()
+
+	mDB.CreateUser("admin", "hash", "rw", dbPath)
+	mDB.CreateAPIKey("test-key", "admin", "rw", "test")
 
 	cfg := &config.Config{MusicPath: "/tmp", Port: "8088"}
-	server := NewServer(database, cfg)
+	server := NewServer(mDB, cfg)
 	mux := server.SetupRoutes()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stream/notfound", nil)
+	req.Header.Set("X-API-Key", "test-key")
 	rr := httptest.NewRecorder()
 
 	mux.ServeHTTP(rr, req)
@@ -77,23 +86,28 @@ func TestStreamTranscoding(t *testing.T) {
 	f.Close()
 	defer os.Remove(dbPath)
 
-	database, _ := db.Connect(dbPath)
-	defer database.Conn.Close()
+	mDB, _ := db.ConnectMaster(dbPath)
+	defer mDB.Conn.Close()
 
+	mDB.CreateUser("admin", "hash", "rw", dbPath)
+	mDB.CreateAPIKey("test-key", "admin", "rw", "test")
+	userDB, _ := db.Connect(dbPath) // Same path for test simplicity
+	
 	// Insert a dummy track
 	tempMusic, _ := os.CreateTemp("", "test-*.mp3")
 	tempMusicPath := tempMusic.Name()
 	tempMusic.Close()
 	defer os.Remove(tempMusicPath)
 
-	database.Conn.Exec("INSERT INTO tracks (id, album_id, title, track_num, disc_num, path, duration, genre, size, format, bit_rate, sample_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		"/test-track", "album-1", "Test Track", 1, 1, tempMusicPath, 10, "Genre", 100, "mp3", 128000, 44100)
+	userDB.Conn.Exec("INSERT INTO tracks (id, album_id, title, track_num, disc_num, path, duration, genre, size, format, bit_rate, sample_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"test-track", "album-1", "Test Track", 1, 1, tempMusicPath, 10, "Genre", 100, "mp3", 128000, 44100)
 
 	cfg := &config.Config{MusicPath: "/tmp", Port: "8088"}
-	server := NewServer(database, cfg)
+	server := NewServer(mDB, cfg)
 	mux := server.SetupRoutes()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stream/test-track?bitrate=64k", nil)
+	req.Header.Set("X-API-Key", "test-key")
 	rr := httptest.NewRecorder()
 
 	mux.ServeHTTP(rr, req)

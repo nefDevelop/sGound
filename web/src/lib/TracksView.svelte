@@ -2,8 +2,10 @@
   import { createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
+  import StarRating from './StarRating.svelte';
   
   export let tracks = [];
+  /** @type {any} */
   export let currentPlaying = null;
   
   const dispatch = createEventDispatcher();
@@ -66,6 +68,20 @@
       }
     } catch (e) { alert("Failed to organize"); }
   }
+
+  async function handleRate(track, rating) {
+    try {
+      const res = await fetch('/api/tracks/rate', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: track.id, rating })
+      });
+      if (res.ok) {
+        track.rating = rating;
+        tracks = tracks; // trigger reactivity
+      }
+    } catch (e) { console.error(e); }
+  }
 </script>
 
 <div class="tracks-view">
@@ -73,11 +89,12 @@
     <thead>
       <tr>
         <th class="checkbox-cell">
-          <input type="checkbox" on:change={toggleAll} checked={selectedIds.size === tracks.length && tracks.length > 0} />
+          <input type="checkbox" onchange={toggleAll} checked={selectedIds.size === tracks.length && tracks.length > 0} />
         </th>
         <th>#</th>
         <th>Title</th>
         <th>Artist</th>
+        <th>Rating</th>
         <th>Album</th>
         <th>Genre</th>
         <th>Actions</th>
@@ -87,29 +104,32 @@
       {#each tracks as track}
         <tr 
           class="track-row" 
-          class:active={currentPlaying?.id === track.id}
+          class:active={currentPlaying && currentPlaying.id === track.id}
           class:selected={selectedIds.has(track.id)}
-          on:dblclick={() => dispatch('play', track)}
-          on:contextmenu={(e) => showContextMenu(track, e)}
+          ondblclick={() => dispatch('play', track)}
+          oncontextmenu={(e) => showContextMenu(track, e)}
         >
           <td class="checkbox-cell">
-            <input type="checkbox" checked={selectedIds.has(track.id)} on:change={(e) => toggleSelect(track.id, e)} />
+            <input type="checkbox" checked={selectedIds.has(track.id)} onchange={(e) => toggleSelect(track.id, e)} />
           </td>
           <td class="num">{track.trackNum || '-'}</td>
           <td class="title-cell">
             <div class="flex-align">
               <!-- svelte-ignore a11y-missing-attribute -->
-              <img class="mini-cover" src={`/api/cover/${track.id}`} on:error={(e) => (e.currentTarget.style.display='none')} />
+              <img class="mini-cover" src={`/api/cover/${track.id}`} onerror={(e) => { if (e.currentTarget instanceof HTMLImageElement) e.currentTarget.style.display='none'; }} />
               <span class="title-text">{track.title}</span>
             </div>
           </td>
           <td>{track.artist}</td>
+          <td>
+            <StarRating rating={track.rating || 0} on:change={(e) => handleRate(track, e.detail)} />
+          </td>
           <td>{track.album}</td>
           <td><span class="genre-tag">{track.genre || '-'}</span></td>
           <td class="actions">
-            <button class="btn-icon" on:click={() => dispatch('play', track)} title="Play"><Icon name="play" size={14} /></button>
-            <button class="btn-icon" on:click={() => dispatch('edit', track)} title="Edit Tags"><Icon name="edit" size={14} /></button>
-            <button class="btn-icon" on:click={() => handleOrganize(track.id)} title="Organize File"><Icon name="folder" size={14} /></button>
+            <button class="btn-icon" onclick={() => dispatch('play', track)} title="Play"><Icon name="play" size={14} /></button>
+            <button class="btn-icon" onclick={() => dispatch('edit', track)} title="Edit Tags"><Icon name="edit" size={14} /></button>
+            <button class="btn-icon" onclick={() => handleOrganize(track.id)} title="Organize File"><Icon name="folder" size={14} /></button>
           </td>
         </tr>
       {/each}

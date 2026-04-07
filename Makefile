@@ -7,10 +7,12 @@ VITE_PORT ?= 5177
 SGOUND_PORT ?= 8088
 
 SGOUND_MUSIC_PATH ?= /home/nef734/Música/
+SGOUND_USERS ?= user:rw
 
 export SGOUND_PORT
 export VITE_PORT
 export SGOUND_MUSIC_PATH
+export SGOUND_USERS
 
 all: test build
 
@@ -48,10 +50,12 @@ clean:
 	rm -rf web/dist
 
 db-reset:
-	@echo "=> Borrando base de datos actual (sgound.db)..."
+	@echo "=> Borrando TODAS las bases de datos (maestra y usuarios)..."
 	rm -f sgound.db
-	@echo "=> Base de datos borrada exitosamente."
-	@echo "=> Ejecuta 'make dev' para recrearla y re-escanear la música automáticamente."
+	rm -f library_*.db
+	if [ ! -z "$(SGOUND_DB_PATH)" ]; then rm -f $(SGOUND_DB_PATH); fi
+	@echo "=> Sistema totalmente reseteado con éxito."
+	@echo "=> Ejecuta 'make dev' para arrancar de cero."
 
 db-recreate: db-reset dev
 

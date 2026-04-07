@@ -329,16 +329,16 @@
   }
 
   .modal {
-    background: #1e293b;
-    padding: 2rem;
+    background: var(--surface-container-highest);
+    padding: 2.5rem;
     border-radius: 32px;
     width: 95%;
-    max-width: 500px;
+    max-width: 550px;
     max-height: 90vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
-    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 40px 80px rgba(0,0,0,0.5);
+    border: 1px solid var(--border-color);
     overflow: hidden;
     box-sizing: border-box;
   }
@@ -374,15 +374,15 @@
   }
 
   .auto-btn {
-    background: #ffcc00;
-    color: #1e293b;
-    border: none;
+    background: var(--surface-container-high);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
     padding: 0.6rem 1.2rem;
     border-radius: 20px;
     font-size: 0.8rem;
-    font-weight: 800;
+    font-weight: 700;
     cursor: pointer;
-    box-shadow: 0 4px 15px rgba(255, 204, 0, 0.2);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     width: fit-content;
     display: flex;
     align-items: center;
@@ -393,6 +393,7 @@
   .auto-btn.mb {
     background: var(--primary);
     color: white;
+    border: none;
     box-shadow: 0 4px 15px var(--primary-10);
   }
 
@@ -444,7 +445,7 @@
     cursor: pointer;
   }
 
-  .suggestions button:hover { background: rgba(255, 51, 102, 0.2); }
+  .suggestions button:hover { background: var(--primary-10); color: var(--primary); }
 
   .results-picker {
     display: flex;
@@ -501,26 +502,27 @@
   }
 
   .mini-btn {
-    background: rgba(255, 51, 102, 0.1);
-    color: #ff3366;
+    background: var(--primary-10);
+    color: var(--primary);
     border: none;
     padding: 0.3rem 0.6rem;
-    border-radius: 6px;
+    border-radius: 8px;
     font-size: 0.8rem;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
   }
 
   .tag-form input, .tag-form textarea {
-    background: rgba(0,0,0,0.2);
-    border: 1px solid rgba(255,255,255,0.1);
-    color: white;
-    padding: 0.8rem 1rem;
+    background: var(--surface-container);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 0.8rem 1.2rem;
     border-radius: 12px;
     font-size: 1rem;
     outline: none;
     width: 100%;
     box-sizing: border-box;
+    transition: border-color 0.2s, background 0.2s;
   }
 
   .tag-form textarea {
@@ -531,7 +533,8 @@
   }
 
   .tag-form input:focus, .tag-form textarea:focus {
-    border-color: #ff3366;
+    border-color: var(--primary);
+    background: var(--surface);
   }
 
   .actions {
@@ -541,14 +544,18 @@
   }
 
   .save-btn {
-    background: #ff3366;
+    background: var(--primary);
     color: white;
-    padding: 0.8rem 2rem;
-    border-radius: 12px;
-    font-weight: 600;
+    padding: 1rem 2.5rem;
+    border-radius: 14px;
+    font-weight: 700;
     border: none;
     cursor: pointer;
+    box-shadow: 0 8px 20px var(--primary-10);
+    transition: all 0.2s;
   }
+  .save-btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
+  .save-btn:disabled { opacity: 0.5; filter: grayscale(1); }
 
   .cancel-btn {
     background: transparent;

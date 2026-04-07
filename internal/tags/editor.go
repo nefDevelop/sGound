@@ -46,7 +46,7 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) error {
 	// Sincronizar cambios en la BD
 	query := `UPDATE tracks SET 
 		title = ?, genre = ?, track_num = ?, disc_num = ?, 
-		composer = ?, comment = ? 
+		composer = ?, comment = ?, rating = ?
 		WHERE id = ?`
 	
 	getString := func(k string) string {
@@ -62,7 +62,7 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) error {
 	_, err = e.DB.Conn.Exec(query, 
 		getString("title"), getString("genre"), getInt("trackNum"), 
 		getInt("discNum"), getString("composer"), getString("comment"), 
-		trackID)
+		getInt("rating"), trackID)
 	
 	if err != nil {
 		return err
@@ -309,6 +309,33 @@ func updateMP3(path string, data map[string]interface{}) error {
 		Text:        getString("comment"),
 	})
 
+	// Rating (POPM and RATING text frame)
+	rating := 0
+	if v, ok := data["rating"].(float64); ok { rating = int(v) }
+	if v, ok := data["rating"].(int); ok { rating = v }
+	
+	if rating > 0 {
+		// 1. Modern / MusicBee standard (Text Frame)
+		tag.AddTextFrame(tag.CommonID("Rating"), id3v2.EncodingUTF8, fmt.Sprintf("%d", rating))
+		
+		// 2. Tradicional / Windows standard (POPM)
+		// Map 1-5 to 0-255 scale
+		popmVal := byte(0)
+		switch rating {
+			case 1: popmVal = 1
+			case 2: popmVal = 64
+			case 3: popmVal = 128
+			case 4: popmVal = 196
+			case 5: popmVal = 255
+		}
+		
+		// Construcción manual del frame POPM si no hay helper directo
+		// Cuerpo: Email (null terminated) + Rating (1 byte)
+		email := "sgound\x00"
+		body := append([]byte(email), popmVal)
+		tag.AddFrame("POPM", id3v2.UnknownFrame{Body: body})
+	}
+
 	err = tag.Save()
 	if err == nil {
 		fmt.Printf("✓ Etiquetas guardadas correctamente en MP3: %s\n", path)
@@ -370,6 +397,13 @@ func updateFLAC(path string, data map[string]interface{}) error {
 	setField("DISCNUMBER", getIntStr("discNum"))
 	setField("COMPOSER", getString("composer"))
 	setField("COMMENT", getString("comment"))
+	
+	rating := 0
+	if v, ok := data["rating"].(float64); ok { rating = int(v) }
+	if v, ok := data["rating"].(int); ok { rating = v }
+	if rating > 0 {
+		setField("RATING", fmt.Sprintf("%d", rating))
+	}
 
 	block := cm.Marshal()
 	if cmIdx != -1 {

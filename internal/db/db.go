@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"os"
 
-	"sGound/internal/models"
+	"sgound/internal/models"
 
 	_ "modernc.org/sqlite"
 	"strings"
@@ -74,6 +74,9 @@ func (db *Database) initSchema() error {
 		bit_rate INTEGER,
 		sample_rate INTEGER,
 		last_played DATETIME,
+		status TEXT DEFAULT 'active',
+		rating INTEGER DEFAULT 0,
+		replay_gain REAL DEFAULT 0.0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE
 	);
@@ -88,8 +91,10 @@ func (db *Database) initSchema() error {
 	);`
 	_, err := db.Conn.Exec(schema)
 	if err != nil {
+		slog.Error("Schema creation failed", "error", err)
 		return err
 	}
+	slog.Info("Database schema initialized successfully")
 
 	// Migraciones "en caliente" por si se añadieron columnas después
 	cols := []string{
@@ -97,15 +102,20 @@ func (db *Database) initSchema() error {
 		"ALTER TABLE tracks ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
 		"ALTER TABLE tracks ADD COLUMN composer TEXT",
 		"ALTER TABLE tracks ADD COLUMN comment TEXT",
+		"ALTER TABLE tracks ADD COLUMN status TEXT DEFAULT 'active'",
+		"ALTER TABLE tracks ADD COLUMN rating INTEGER DEFAULT 0",
+		"ALTER TABLE tracks ADD COLUMN replay_gain REAL DEFAULT 0.0",
 	}
 
 	for _, sql := range cols {
 		if _, err := db.Conn.Exec(sql); err != nil {
 			if !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
 				slog.Error("Migration error", "sql", sql, "error", err)
+			} else {
+				slog.Debug("Migration skipped (already applied)", "sql", sql)
 			}
 		} else {
-			slog.Info("Migration success", "sql", sql)
+			slog.Info("Migration applied successfully", "sql", sql)
 		}
 	}
 	
