@@ -1,15 +1,33 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;600;700;800&family=Outfit:wght@300;400;600;700;800;900&display=swap');
 
 :root {
+  /* New Theme Tokens */
+  --primary: #ff3366;
+  --primary-10: rgba(255, 51, 102, 0.1);
+  --secondary: #C27085;
+  --tertiary: #D6B85C;
+  --radius: 32px;
+  --font-headline: "Open Sans", sans-serif;
+  --font-body: "Outfit", sans-serif;
+  --font-size-h1: 50px;
+  --font-weight-h1: 900;
+  --letter-spacing-h1: -3px;
+
+  /* Legacy / Utility Tokens */
   --bg-color: #0b0f19;
   --surface-color: #1a1f35;
   --surface-hover: #252b48;
-  --accent-color: #ff3366;
+  --accent-color: var(--primary);
   --accent-glow: rgba(255, 51, 102, 0.4);
   --text-main: #e2e8f0;
   --text-muted: #94a3b8;
   --border-color: rgba(255,255,255,0.08);
-  font-family: 'Outfit', system-ui, sans-serif;
+  
+  font-family: var(--font-body);
+}
+
+h1, h2, h3 {
+  font-family: var(--font-headline);
 }
 
 body {

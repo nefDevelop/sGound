@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"testing"
 
+	"sgound/internal/config"
 	"sgound/internal/db"
 )
 
@@ -19,7 +21,8 @@ func TestGetArtistsEmpty(t *testing.T) {
 	database, _ := db.Connect(dbPath)
 	defer database.Conn.Close()
 
-	server := NewServer(database)
+	cfg := &config.Config{MusicPath: "/tmp", Port: "8088"}
+	server := NewServer(database, cfg)
 	mux := server.SetupRoutes()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/artists", nil)
@@ -48,7 +51,8 @@ func TestStreamNotFound(t *testing.T) {
 	database, _ := db.Connect(dbPath)
 	defer database.Conn.Close()
 
-	server := NewServer(database)
+	cfg := &config.Config{MusicPath: "/tmp", Port: "8088"}
+	server := NewServer(database, cfg)
 	mux := server.SetupRoutes()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stream/notfound", nil)
@@ -58,5 +62,47 @@ func TestStreamNotFound(t *testing.T) {
 
 	if status := rr.Code; status != http.StatusNotFound {
 		t.Errorf("Expected 404 for unknown track, got %v", status)
+	}
+}
+
+func TestStreamTranscoding(t *testing.T) {
+	// Skip if ffmpeg is not available
+	_, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg not found, skipping transcoding test")
+	}
+
+	f, _ := os.CreateTemp("", "sgound-api-*.db")
+	dbPath := f.Name()
+	f.Close()
+	defer os.Remove(dbPath)
+
+	database, _ := db.Connect(dbPath)
+	defer database.Conn.Close()
+
+	// Insert a dummy track
+	tempMusic, _ := os.CreateTemp("", "test-*.mp3")
+	tempMusicPath := tempMusic.Name()
+	tempMusic.Close()
+	defer os.Remove(tempMusicPath)
+
+	database.Conn.Exec("INSERT INTO tracks (id, album_id, title, track_num, disc_num, path, duration, genre, size, format, bit_rate, sample_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"/test-track", "album-1", "Test Track", 1, 1, tempMusicPath, 10, "Genre", 100, "mp3", 128000, 44100)
+
+	cfg := &config.Config{MusicPath: "/tmp", Port: "8088"}
+	server := NewServer(database, cfg)
+	mux := server.SetupRoutes()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stream/test-track?bitrate=64k", nil)
+	rr := httptest.NewRecorder()
+
+	mux.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("Expected 200 for transcoding, got %v", status)
+	}
+
+	if rr.Header().Get("Content-Type") != "audio/mpeg" {
+		t.Errorf("Expected audio/mpeg content type, got %v", rr.Header().Get("Content-Type"))
 	}
 }

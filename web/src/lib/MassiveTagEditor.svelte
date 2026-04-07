@@ -1,5 +1,6 @@
 <script>
   import { createEventDispatcher } from 'svelte';
+  import Icon from './Icon.svelte';
   
   export let isOpen = false;
   export let selectedTracks = [];
@@ -146,7 +147,7 @@
           <span class="status-badge">{processingStatus}</span>
         {/if}
       </div>
-      <button class="close-btn" on:click={closeModal}>✕</button>
+      <button class="close-btn" on:click={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
     </div>
 
     <div class="bulk-layout">
@@ -194,8 +195,8 @@
           <label><span>Year</span><input type="number" bind:value={bulkData.year} /></label>
           
           <div class="bulk-actions">
-            <button class="tool-btn" on:click={autoSearchAll} disabled={loading}>⚡ Auto-Tag</button>
-            <button class="tool-btn" on:click={downloadAllLyrics} disabled={loading}>☁️ Lyrics</button>
+            <button class="tool-btn" on:click={autoSearchAll} disabled={loading}><Icon name="zap" size={14} /> Auto-Tag</button>
+            <button class="tool-btn" on:click={downloadAllLyrics} disabled={loading}><Icon name="cloud" size={14} /> Lyrics</button>
           </div>
         </div>
       </aside>
@@ -216,7 +217,13 @@
                 <td>{track.trackNum || '-'}</td>
                 <td class="bold">{track.title}</td>
                 <td class="muted">{track.album}</td>
-                <td>{track.lyrics ? '✅' : '❌'}</td>
+                <td>
+                  {#if track.lyrics}
+                    <Icon name="checkCircle" size={14} color="#10b981" />
+                  {:else}
+                    <Icon name="xCircle" size={14} color="#f87171" />
+                  {/if}
+                </td>
               </tr>
             {/each}
           </tbody>
@@ -227,7 +234,8 @@
     <div class="footer-actions">
       <button type="button" class="cancel-btn" on:click={closeModal}>Cancel</button>
       <button type="button" class="save-btn" on:click={handleBulkSave} disabled={loading}>
-        {loading ? 'Processing...' : saveSuccess ? 'Saved ✓' : 'Apply Changes'}
+        {loading ? 'Processing...' : saveSuccess ? 'Saved' : 'Apply Changes'}
+        {#if saveSuccess}<Icon name="check" size={16} color="#10b981" />{/if}
       </button>
     </div>
   </div>
@@ -257,6 +265,7 @@
     flex-direction: column;
     box-shadow: 0 40px 100px rgba(0,0,0,0.8);
     border: 1px solid rgba(255,255,255,0.1);
+    overflow: hidden;
   }
 
   .relative { position: relative; }
@@ -315,6 +324,7 @@
   .tracks-list-area {
     background: rgba(0,0,0,0.2); border-radius: 24px;
     overflow-y: auto; padding: 1rem; border: 1px solid rgba(255,255,255,0.03);
+    min-height: 0;
   }
 
   .mini-tracks-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }

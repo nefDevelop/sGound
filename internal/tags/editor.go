@@ -2,11 +2,15 @@ package tags
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/bogem/id3v2/v2"
+	"github.com/go-flac/flacvorbis"
+	"github.com/go-flac/go-flac"
 	"sgound/internal/db"
+	"log"
 )
 
 type Editor struct {
@@ -28,10 +32,15 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) error {
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext == ".mp3" {
 		if err := updateMP3(path, data); err != nil {
-			return fmt.Errorf("faled to rewrite mp3 ID3 tags: %w", err)
+			return fmt.Errorf("failed to rewrite mp3 ID3 tags: %w", err)
+		}
+	} else if ext == ".flac" {
+		if err := updateFLAC(path, data); err != nil {
+			return fmt.Errorf("failed to rewrite flac tags: %w", err)
 		}
 	} else {
-		return fmt.Errorf("edicion fisica solo soportada para .mp3")
+		// Log warning but continue with DB update
+		fmt.Printf("Physical tag editing not yet supported for format %s, only DB will be updated\n", ext)
 	}
 
 	// Sincronizar cambios en la BD
@@ -66,6 +75,7 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) error {
 		e.DB.Conn.Exec("UPDATE albums SET year = ? WHERE id = ?", getInt("year"), albumID)
 	}
 
+	log.Printf("✓ Etiquetas y año actualizados para el track: %s", trackID)
 	return nil
 }
 
@@ -108,7 +118,6 @@ func (e *Editor) OrganizeFile(trackID string, musicRoot string, pattern string) 
 	newPath := filepath.Join(musicRoot, newRelPath+"."+format)
 	newDirPath := filepath.Dir(newPath)
 
-...
 
 	if oldPath == newPath {
 		return newPath, nil
@@ -148,9 +157,97 @@ func (e *Editor) UpdateLyrics(trackID string, lyrics string) error {
 	}
 }
 
+func (e *Editor) ReadLyrics(trackID string) (string, error) {
+	var path string
+	err := e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+	if err != nil {
+		return "", err
+	}
+
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".mp3" {
+		tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
+		if err != nil {
+			return "", err
+		}
+		defer tag.Close()
+		// ID3v2: USLT frame
+		frames := tag.GetFrames(tag.CommonID("Unsynchronised lyrics/text transcription"))
+		for _, f := range frames {
+			if lf, ok := f.(id3v2.UnsynchronisedLyricsFrame); ok {
+				return lf.Lyrics, nil
+			}
+		}
+	} else if ext == ".flac" {
+		f, err := flac.ParseFile(path)
+		if err != nil {
+			return "", err
+		}
+		for _, block := range f.Meta {
+			if block.Type == flac.VorbisComment {
+				cm, _ := flacvorbis.ParseFromMetaDataBlock(*block)
+				if cm == nil { continue }
+				for _, key := range []string{"LYRICS", "UNSYNCEDLYRICS", "TEXT"} {
+					vals, _ := cm.Get(key)
+					if len(vals) > 0 {
+						return vals[0], nil
+					}
+				}
+			}
+		}
+	}
+	return "", nil
+}
+
 func updateVorbisLyrics(path string, lyrics string) error {
-	fmt.Printf("Guardando letras en formato Vorbis (FLAC/OGG): %s\n", path)
-	return nil 
+	f, err := flac.ParseFile(path)
+	if err != nil {
+		return err
+	}
+
+	var cm *flacvorbis.MetaDataBlockVorbisComment
+	var cmIdx = -1
+	for i, block := range f.Meta {
+		if block.Type == flac.VorbisComment {
+			cm, _ = flacvorbis.ParseFromMetaDataBlock(*block)
+			cmIdx = i
+			break
+		}
+	}
+
+	if cm == nil {
+		cm = flacvorbis.New()
+	}
+
+	// Eliminar letras viejas si existen y añadir nuevas
+	// Convención Vorbis: LYRICS o UNSYNCEDLYRICS
+	for _, key := range []string{"LYRICS", "UNSYNCEDLYRICS", "TEXT"} {
+		for {
+			found := false
+			for i, comment := range cm.Comments {
+				if strings.ToUpper(strings.Split(comment, "=")[0]) == key {
+					cm.Comments = append(cm.Comments[:i], cm.Comments[i+1:]...)
+					found = true
+					break
+				}
+			}
+			if !found { break }
+		}
+	}
+	cm.Add("LYRICS", lyrics)
+
+	block := cm.Marshal()
+	if cmIdx != -1 {
+		f.Meta[cmIdx] = &block
+	} else {
+		f.Meta = append(f.Meta, &block)
+	}
+
+	err = f.Save(path)
+	if err == nil {
+		fmt.Printf("✓ Letras guardadas correctamente en FLAC: %s\n", path)
+	}
+	return err
 }
 
 func updateMP3Lyrics(path string, lyrics string) error {
@@ -160,14 +257,18 @@ func updateMP3Lyrics(path string, lyrics string) error {
 	}
 	defer tag.Close()
 
-	tag.AddUnsynchronizedLyricsFrame(id3v2.UnsynchronizedLyricsFrame{
+	tag.AddUnsynchronisedLyricsFrame(id3v2.UnsynchronisedLyricsFrame{
 		Encoding:          id3v2.EncodingUTF8,
 		Language:          "eng",
 		ContentDescriptor: "",
 		Lyrics:            lyrics,
 	})
 
-	return tag.Save()
+	err = tag.Save()
+	if err == nil {
+		fmt.Printf("✓ Letras guardadas correctamente en MP3: %s\n", path)
+	}
+	return err
 }
 
 func updateMP3(path string, data map[string]interface{}) error {
@@ -208,5 +309,78 @@ func updateMP3(path string, data map[string]interface{}) error {
 		Text:        getString("comment"),
 	})
 
-	return tag.Save()
+	err = tag.Save()
+	if err == nil {
+		fmt.Printf("✓ Etiquetas guardadas correctamente en MP3: %s\n", path)
+	}
+	return err
+}
+
+func updateFLAC(path string, data map[string]interface{}) error {
+	f, err := flac.ParseFile(path)
+	if err != nil {
+		return err
+	}
+
+	var cm *flacvorbis.MetaDataBlockVorbisComment
+	var cmIdx = -1
+	for i, block := range f.Meta {
+		if block.Type == flac.VorbisComment {
+			cm, _ = flacvorbis.ParseFromMetaDataBlock(*block)
+			cmIdx = i
+			break
+		}
+	}
+
+	if cm == nil {
+		cm = flacvorbis.New()
+	}
+
+	getString := func(k string) string {
+		if v, ok := data[k].(string); ok { return v }
+		return ""
+	}
+	getIntStr := func(k string) string {
+		if v, ok := data[k].(float64); ok { return fmt.Sprintf("%d", int(v)) }
+		if v, ok := data[k].(int); ok { return fmt.Sprintf("%d", v) }
+		return ""
+	}
+
+	// Para FLAC/Vorbis, lo mejor es limpiar el tag específico y añadir el nuevo
+	// para evitar múltiples entradas del mismo tipo (que Vorbis permite)
+	setField := func(field string, value string) {
+		if value == "" { return }
+		// Eliminar existentes
+		var newComments []string
+		for _, c := range cm.Comments {
+			if !strings.HasPrefix(strings.ToUpper(c), field+"=") {
+				newComments = append(newComments, c)
+			}
+		}
+		cm.Comments = newComments
+		cm.Add(field, value)
+	}
+
+	setField("TITLE", getString("title"))
+	setField("ARTIST", getString("artist"))
+	setField("ALBUM", getString("album"))
+	setField("GENRE", getString("genre"))
+	setField("DATE", getIntStr("year"))
+	setField("TRACKNUMBER", getIntStr("trackNum"))
+	setField("DISCNUMBER", getIntStr("discNum"))
+	setField("COMPOSER", getString("composer"))
+	setField("COMMENT", getString("comment"))
+
+	block := cm.Marshal()
+	if cmIdx != -1 {
+		f.Meta[cmIdx] = &block
+	} else {
+		f.Meta = append(f.Meta, &block)
+	}
+
+	err = f.Save(path)
+	if err == nil {
+		fmt.Printf("✓ Etiquetas guardadas correctamente en FLAC: %s\n", path)
+	}
+	return err
 }

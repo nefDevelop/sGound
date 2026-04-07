@@ -2,8 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"io/fs"
 	"log/slog"
@@ -36,7 +41,9 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/albums", s.handleGetAlbums)
 	mux.HandleFunc("/api/albums/", s.handleAlbumActions)
 	mux.HandleFunc("/api/stream/", s.handleStream) // /api/stream/{id}
+	mux.HandleFunc("/api/stream", s.handleStream)
 	mux.HandleFunc("/api/cover/", s.handleGetCover)
+	mux.HandleFunc("/api/cover", s.handleGetCover)
 	mux.HandleFunc("/api/tracks", s.handleGetTracks)
 	mux.HandleFunc("/api/tracks/", s.handleTrackActions)
 	mux.HandleFunc("/api/scan", s.handleScan)
@@ -44,11 +51,15 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/search", s.handleSearch)
 	mux.HandleFunc("/api/dashboard", s.handleDashboard)
 	mux.HandleFunc("/api/library/health", s.handleLibraryHealth)
-	mux.HandleFunc("/api/artists/", s.handleArtistActions)
-	mux.HandleFunc("/api/lyrics/", s.handleLyrics)
+	mux.HandleFunc("/api/lyrics/", s.handleLyrics) // /api/lyrics/{id} or /api/lyrics/search
+	mux.HandleFunc("/api/lyrics", s.handleLyrics)
+	mux.HandleFunc("/api/lyrics/search", s.handleLyricsSearch)
 	mux.HandleFunc("/api/metadata/search", s.handleMetadataSearch)
 	mux.HandleFunc("/api/autocomplete", s.handleAutocomplete)
 	mux.HandleFunc("/api/playlists", s.handlePlaylists)
+	mux.HandleFunc("/api/playlists/", s.handlePlaylistActions)
+
+
 
 	// 2. Subsonic Adapter Layer (Retrocompatibilidad OpenSubsonic)
 	gw := gateway.NewSubsonicGateway(s.DB)
@@ -78,6 +89,29 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	return mux
 }
 
+func (s *Server) extractID(r *http.Request, prefix string) string {
+	// 1. Intentar sacar de la ruta (después del prefijo)
+	id := r.URL.Path[len(prefix):]
+	
+	// 2. Si está vacío en la ruta, intentar sacar del parámetro ?id=
+	if id == "" || id == "/" {
+		id = r.URL.Query().Get("id")
+	}
+
+	// Limpiar posibles barras sobrantes y sub-rutas
+	id = strings.Trim(id, "/")
+	id = strings.TrimSuffix(id, "/tags")
+	id = strings.TrimSuffix(id, "/organize")
+	id = strings.TrimSuffix(id, "/albums")
+	id = strings.TrimSuffix(id, "/tracks")
+
+	if decoded, err := url.PathUnescape(id); err == nil {
+		id = decoded
+	}
+	
+	return id
+}
+
 func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -104,13 +138,20 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodPut {
 		var newCfg struct {
-			MusicPath string `json:"musicPath"`
+			MusicPath     string `json:"musicPath"`
+			ThemeColor    string `json:"themeColor"`
+			AutoRename    bool   `json:"autoRename"`
+			RenamePattern string `json:"renamePattern"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
 			http.Error(w, "Invalid payload", http.StatusBadRequest)
 			return
 		}
 		s.Config.MusicPath = newCfg.MusicPath
+		s.Config.ThemeColor = newCfg.ThemeColor
+		s.Config.AutoRename = newCfg.AutoRename
+		s.Config.RenamePattern = newCfg.RenamePattern
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"updated"}`))
 		return
@@ -146,9 +187,9 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleArtistActions(w http.ResponseWriter, r *http.Request) {
-	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) == 4 && pathParts[3] == "albums" {
-		s.handleGetArtistAlbums(pathParts[2], w, r)
+	if strings.HasSuffix(r.URL.Path, "/albums") {
+		artistID := s.extractID(r, "/api/artists/")
+		s.handleGetArtistAlbums(artistID, w, r)
 		return
 	}
 	http.NotFound(w, r)
@@ -207,9 +248,9 @@ func (s *Server) handleGetAlbums(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAlbumActions(w http.ResponseWriter, r *http.Request) {
-	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) == 4 && pathParts[3] == "tracks" {
-		s.handleGetAlbumTracks(pathParts[2], w, r)
+	if strings.HasSuffix(r.URL.Path, "/tracks") {
+		albumID := s.extractID(r, "/api/albums/")
+		s.handleGetAlbumTracks(albumID, w, r)
 		return
 	}
 	http.NotFound(w, r)
@@ -245,20 +286,64 @@ func (s *Server) handleGetAlbumTracks(albumID string, w http.ResponseWriter, r *
 }
 
 func (s *Server) handleTrackActions(w http.ResponseWriter, r *http.Request) {
-	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	
+	trackID := s.extractID(r, "/api/tracks/")
+
 	// PUT /api/tracks/{id}/tags
-	if len(pathParts) == 4 && pathParts[3] == "tags" && r.Method == http.MethodPut {
-		s.handleEditTags(pathParts[2], w, r)
+	if strings.HasSuffix(r.URL.Path, "/tags") && r.Method == http.MethodPut {
+		s.handleEditTags(trackID, w, r)
 		return
 	}
 
 	// POST /api/tracks/{id}/organize
-	if len(pathParts) == 4 && pathParts[3] == "organize" && r.Method == http.MethodPost {
-		s.handleManualOrganize(pathParts[2], w, r)
+	if strings.HasSuffix(r.URL.Path, "/organize") && r.Method == http.MethodPost {
+		s.handleManualOrganize(trackID, w, r)
 		return
 	}
-...
+	// DELETE /api/tracks/{id}
+	if r.Method == http.MethodDelete {
+		s.handleDeleteTrack(trackID, w, r)
+		return
+	}
+
+	http.NotFound(w, r)
+}
+
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	trackID := s.extractID(r, "/api/stream/")
+	var fpath string
+	err := s.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath)
+	if err != nil {
+		http.Error(w, "Track not found", http.StatusNotFound)
+		return
+	}
+
+	bitrate := r.URL.Query().Get("bitrate")
+	if bitrate != "" && bitrate != "original" {
+		// Basic validation: must be something like "128k" or "192k"
+		// Only allow alphanumeric characters and 'k'
+		for _, char := range bitrate {
+			if !((char >= '0' && char <= '9') || char == 'k' || char == 'm') {
+				http.Error(w, "Invalid bitrate format", http.StatusBadRequest)
+				return
+			}
+		}
+
+		// Transcoding requested
+		w.Header().Set("Content-Type", "audio/mpeg")
+		// Use ffmpeg to transcode on the fly
+		// We use mp3 as a safe universal format for now
+		cmd := exec.Command("ffmpeg", "-i", fpath, "-f", "mp3", "-ab", bitrate, "-map_metadata", "-1", "pipe:1")
+		cmd.Stdout = w
+		if err := cmd.Start(); err != nil {
+			http.Error(w, "Transcoding failed", http.StatusInternalServerError)
+			return
+		}
+		cmd.Wait()
+		return
+	}
+
+	http.ServeFile(w, r, fpath)
+}
 func (s *Server) handleEditTags(trackID string, w http.ResponseWriter, r *http.Request) {
 	var body map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -356,46 +441,57 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	results := make(map[string]interface{})
 
 	// 1. Search Tracks (por título o género)
-	tracksRows, _ := s.DB.Conn.Query(`
-		SELECT t.id, t.title, a.name as artist, al.title as album, t.genre
+	tracksRows, err := s.DB.Conn.Query(`
+		SELECT t.id, t.title, a.name as artist 
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
 		WHERE t.title LIKE ? OR t.genre LIKE ?
-		LIMIT 20`, searchTerm, searchTerm)
-	defer tracksRows.Close()
-	var tracks []map[string]string
-	for tracksRows.Next() {
-		var id, title, artist, album, genre string
-		tracksRows.Scan(&id, &title, &artist, &album, &genre)
-		tracks = append(tracks, map[string]string{"id": id, "title": title, "artist": artist, "album": album, "genre": genre})
+		LIMIT 20
+	`, searchTerm, searchTerm)
+	
+	var tracks []map[string]interface{}
+	if err == nil {
+		defer tracksRows.Close()
+		for tracksRows.Next() {
+			var id, title, artist string
+			tracksRows.Scan(&id, &title, &artist)
+			tracks = append(tracks, map[string]interface{}{"id": id, "title": title, "artist": artist})
+		}
 	}
 	results["tracks"] = tracks
 
-	// 2. Search Artists (por nombre)
-	artistsRows, _ := s.DB.Conn.Query("SELECT id, name FROM artists WHERE name LIKE ? LIMIT 10", searchTerm)
-	defer artistsRows.Close()
-	var artists []map[string]string
-	for artistsRows.Next() {
-		var id, name string
-		artistsRows.Scan(&id, &name)
-		artists = append(artists, map[string]string{"id": id, "name": name})
+	// 2. Search Artists
+	artistRows, err := s.DB.Conn.Query("SELECT id, name FROM artists WHERE name LIKE ?", searchTerm)
+	
+	var artists []map[string]interface{}
+	if err == nil {
+		defer artistRows.Close()
+		for artistRows.Next() {
+			var id, name string
+			artistRows.Scan(&id, &name)
+			artists = append(artists, map[string]interface{}{"id": id, "name": name})
+		}
 	}
 	results["artists"] = artists
 
-	// 3. Search Albums (por título)
-	albumsRows, _ := s.DB.Conn.Query(`
+	// 3. Search Albums
+	albumRows, err := s.DB.Conn.Query(`
 		SELECT al.id, al.title, ar.name as artist 
-		FROM albums al 
-		JOIN artists ar ON al.artist_id = ar.id 
-		WHERE al.title LIKE ? 
-		LIMIT 10`, searchTerm)
-	defer albumsRows.Close()
-	var albums []map[string]string
-	for albumsRows.Next() {
-		var id, title, artist string
-		albumsRows.Scan(&id, &title, &artist)
-		albums = append(albums, map[string]string{"id": id, "title": title, "artist": artist})
+		FROM albums al
+		JOIN artists ar ON al.artist_id = ar.id
+		WHERE al.title LIKE ?
+		LIMIT 20
+	`, searchTerm)
+	
+	var albums []map[string]interface{}
+	if err == nil {
+		defer albumRows.Close()
+		for albumRows.Next() {
+			var id, title, artist string
+			albumRows.Scan(&id, &title, &artist)
+			albums = append(albums, map[string]interface{}{"id": id, "title": title, "artist": artist})
+		}
 	}
 	results["albums"] = albums
 
@@ -447,26 +543,28 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	stats := make(map[string]interface{})
 	
 	// Contadores básicos
-	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM tracks").Scan(&stats["totalTracks"])
-	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM albums").Scan(&stats["totalAlbums"])
-	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM artists").Scan(&stats["totalArtists"])
-	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM playlists").Scan(&stats["totalPlaylists"])
+	var tTracks, tAlbums, tArtists, tPlaylists int
+	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM tracks").Scan(&tTracks)
+	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM albums").Scan(&tAlbums)
+	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM artists").Scan(&tArtists)
+	s.DB.Conn.QueryRow("SELECT COUNT(*) FROM playlists").Scan(&tPlaylists)
+	stats["totalTracks"] = tTracks
+	stats["totalAlbums"] = tAlbums
+	stats["totalArtists"] = tArtists
+	stats["totalPlaylists"] = tPlaylists
 
 	// Joyas olvidadas (10 canciones aleatorias para redescubrir)
-	rows, _ := s.DB.Conn.Query(`
-		SELECT t.id, t.title, a.name as artist 
-		FROM tracks t 
-		JOIN albums al ON t.album_id = al.id 
-		JOIN artists a ON al.artist_id = a.id 
-		ORDER BY RANDOM() LIMIT 10`)
-	defer rows.Close()
-	var forgotten []map[string]string
-	for rows.Next() {
-		var id, title, artist string
-		rows.Scan(&id, &title, &artist)
-		forgotten = append(forgotten, map[string]string{"id": id, "title": title, "artist": artist})
+	rows, err := s.DB.Conn.Query("SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist FROM tracks ORDER BY RANDOM() LIMIT 10")
+	var gems []map[string]interface{}
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id, title, artist string
+			rows.Scan(&id, &title, &artist)
+			gems = append(gems, map[string]interface{}{"id": id, "title": title, "artist": artist})
+		}
 	}
-	stats["forgottenGems"] = forgotten
+	stats["forgottenGems"] = gems
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
@@ -486,6 +584,8 @@ func (s *Server) handleLibraryHealth(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(health)
 }
+
+func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
 	artist := r.URL.Query().Get("artist")
 	title := r.URL.Query().Get("title")
 	
@@ -519,7 +619,7 @@ func (s *Server) handleLibraryHealth(w http.ResponseWriter, r *http.Request) {
 
 	json.NewDecoder(resp.Body).Decode(&itunesResult)
 
-	var list []map[string]interface{}
+	list := make([]map[string]interface{}, 0)
 	for _, item := range itunesResult.Results {
 		year := 0
 		if len(item.ReleaseDate) >= 4 { fmt.Sscanf(item.ReleaseDate[:4], "%d", &year) }
@@ -541,7 +641,7 @@ func (s *Server) handleLibraryHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
-	trackID := r.URL.Path[len("/api/lyrics/"):]
+	trackID := s.extractID(r, "/api/lyrics/")
 	
 	if r.Method == http.MethodGet {
 		s.handleGetLyrics(trackID, w, r)
@@ -584,9 +684,28 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 		http.Error(w, "Track not found", http.StatusNotFound)
 		return
 	}
+	
+	editor := tags.NewEditor(s.DB)
 
-	// 1. Intentar descargar letras de API externa
-	resp, err := http.Get(fmt.Sprintf("https://api.lyrics.ovh/v1/%s/%s", artist, title))
+	// 1. Intentar leer de archivo local primero (verdad absoluta del usuario)
+	localLyrics, _ := editor.ReadLyrics(trackID)
+	if localLyrics != "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"lyrics": localLyrics})
+		return
+	}
+
+	// 2. Intentar obtener de LRCLib (mejor calidad, letras sincronizadas)
+	resp, err := http.Get(fmt.Sprintf("https://lrclib.net/api/get?artist_name=%s&track_name=%s", url.QueryEscape(artist), url.QueryEscape(title)))
+	if err == nil && resp.StatusCode == 200 {
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		io.Copy(w, resp.Body)
+		return
+	}
+
+	// Fallback: lyrics.ovh
+	resp, err = http.Get(fmt.Sprintf("https://api.lyrics.ovh/v1/%s/%s", url.QueryEscape(artist), url.QueryEscape(title)))
 	if err != nil {
 		http.Error(w, "Failed to fetch lyrics", http.StatusInternalServerError)
 		return
@@ -597,10 +716,54 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 	io.Copy(w, resp.Body)
 }
 
+func (s *Server) handleLyricsSearch(w http.ResponseWriter, r *http.Request) {
+	artist := r.URL.Query().Get("artist")
+	title := r.URL.Query().Get("title")
+	
+	if artist == "" || title == "" {
+		http.Error(w, "Artist and title are required", http.StatusBadRequest)
+		return
+	}
+
+	resp, err := http.Get(fmt.Sprintf("https://lrclib.net/api/search?artist_name=%s&track_name=%s", url.QueryEscape(artist), url.QueryEscape(title)))
+	if err != nil {
+		http.Error(w, "Failed to search lyrics", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	io.Copy(w, resp.Body)
+}
+
 func (s *Server) handlePlaylists(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid body", http.StatusBadRequest)
+			return
+		}
+
+		id := strings.ToLower(strings.ReplaceAll(body.Name, " ", "-")) + "-" + fmt.Sprintf("%d", os.Getpid())
+		_, err := s.DB.Conn.Exec("INSERT INTO playlists (id, name, is_smart) VALUES (?, ?, ?)", id, body.Name, 0)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		return
+	}
+
 	// Simple list for now
-	rows, _ := s.DB.Conn.Query("SELECT id, name, is_smart FROM playlists")
+	rows, err := s.DB.Conn.Query("SELECT id, name, is_smart FROM playlists")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	defer rows.Close()
+
 	var list []map[string]interface{}
 	for rows.Next() {
 		var id, name string
@@ -611,8 +774,49 @@ func (s *Server) handlePlaylists(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(list)
 }
 
+func (s *Server) handlePlaylistActions(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/tracks") {
+		s.handleGetPlaylistTracks(w, r)
+		return
+	}
+	http.Error(w, "Not implemented", http.StatusNotImplemented)
+}
+
+func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/playlists/")
+	id = strings.TrimSuffix(id, "/tracks")
+
+	rows, err := s.DB.Conn.Query(`
+		SELECT t.id, t.title, a.name, al.title, t.duration
+		FROM tracks t
+		JOIN playlist_tracks pt ON t.id = pt.track_id
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists a ON al.artist_id = a.id
+		WHERE pt.playlist_id = ?
+		ORDER BY pt.position ASC
+	`, id)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var list []map[string]interface{}
+	for rows.Next() {
+		var tid, title, artist, album string
+		var duration int
+		rows.Scan(&tid, &title, &artist, &album, &duration)
+		list = append(list, map[string]interface{}{
+			"id": tid, "title": title, "artist": artist, 
+			"album": album, "duration": duration,
+		})
+	}
+	json.NewEncoder(w).Encode(list)
+}
+
 func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
-	trackID := r.URL.Path[len("/api/cover/"):]
+	trackID := s.extractID(r, "/api/cover/")
 	if trackID == "" {
 		http.Error(w, "Invalid ID", http.StatusBadRequest)
 		return
@@ -620,6 +824,7 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 
 	var fpath string
 	if err := s.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath); err != nil {
+		slog.Error("Cover lookup: failed to find track path in DB", "trackID", trackID, "error", err)
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
@@ -628,32 +833,68 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 	f, err := os.Open(fpath)
 	if err == nil {
 		defer f.Close()
-		if metadata, err := tag.ReadFrom(f); err == nil && metadata.Picture() != nil {
-			pic := metadata.Picture()
-			w.Header().Set("Content-Type", pic.MIMEType)
-			w.Write(pic.Data)
-			return
-		}
-	}
-
-	// 2. Fallback: Buscar archivos de imagen en la misma carpeta
-	dir := filepath.Dir(fpath)
-	coverFiles := []string{"cover.jpg", "cover.png", "folder.jpg", "folder.png", "album.jpg", "front.jpg"}
-	
-	for _, cf := range coverFiles {
-		fullPath := filepath.Join(dir, cf)
-		if imgData, err := os.ReadFile(fullPath); err == nil {
-			// Detectar el tipo de contenido por la extensión
-			ext := strings.ToLower(filepath.Ext(cf))
-			mime := "image/jpeg"
-			if ext == ".png" {
-				mime = "image/png"
+		metadata, err := tag.ReadFrom(f)
+		if err == nil {
+			if pic := metadata.Picture(); pic != nil {
+				w.Header().Set("Cache-Control", "public, max-age=86400")
+				w.Header().Set("Content-Type", pic.MIMEType)
+				w.Write(pic.Data)
+				return
 			}
-			w.Header().Set("Content-Type", mime)
-			w.Write(imgData)
-			return
+		} else {
+			slog.Warn("Cover lookup: failed to read tags from file", "path", fpath, "error", err)
+		}
+	} else {
+		slog.Error("Cover lookup: failed to open file", "path", fpath, "error", err)
+	}
+
+	// 2. Fallback: Buscar archivos de imagen en la misma carpeta (Case-insensitive)
+	dir := filepath.Dir(fpath)
+	entries, err := os.ReadDir(dir)
+	if err == nil {
+		possibleNames := map[string]bool{
+			"cover": true, "folder": true, "album": true, "front": true, "artwork": true,
+		}
+		for _, entry := range entries {
+			if entry.IsDir() { continue }
+			name := strings.ToLower(entry.Name())
+			ext := filepath.Ext(name)
+			if ext != ".jpg" && ext != ".jpeg" && ext != ".png" { continue }
+			
+			base := strings.TrimSuffix(name, ext)
+			if possibleNames[base] {
+				fullPath := filepath.Join(dir, entry.Name())
+				if imgData, err := os.ReadFile(fullPath); err == nil {
+					mime := "image/jpeg"
+					if ext == ".png" { mime = "image/png" }
+					w.Header().Set("Cache-Control", "public, max-age=86400")
+					w.Header().Set("Content-Type", mime)
+					w.Write(imgData)
+					return
+				}
+			}
 		}
 	}
 
+	// 3. Last fallback: try to find ANY image in the folder if it's the only one
+	if err == nil && len(entries) > 0 {
+		for _, entry := range entries {
+			if entry.IsDir() { continue }
+			name := strings.ToLower(entry.Name())
+			ext := filepath.Ext(name)
+			if ext == ".jpg" || ext == ".jpeg" || ext == ".png" {
+				fullPath := filepath.Join(dir, entry.Name())
+				if imgData, err := os.ReadFile(fullPath); err == nil {
+					mime := "image/jpeg"
+					if ext == ".png" { mime = "image/png" }
+					w.Header().Set("Content-Type", mime)
+					w.Write(imgData)
+					return
+				}
+			}
+		}
+	}
+
+	slog.Warn("Cover lookup: no cover found", "path", fpath)
 	http.Error(w, "No cover found", http.StatusNotFound)
 }

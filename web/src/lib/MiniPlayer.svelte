@@ -1,10 +1,14 @@
 <script>
+  import { createEventDispatcher } from 'svelte';
+  import Icon from './Icon.svelte';
+  
   export let currentPlaying = null;
   export let audioRef = null;
+  export let progress = 0;
+  export let duration = 0;
+  export let currentTime = 0;
 
-  let progress = 0;
-  let duration = 0;
-  let currentTime = 0;
+  const dispatch = createEventDispatcher();
   let volume = 1;
   let isMuted = false;
 
@@ -35,9 +39,11 @@
 </script>
 
 <footer class="player glass">
-  <div class="now-playing">
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="now-playing" on:click={() => dispatch('openFull')}>
     {#if currentPlaying}
-      <img class="cover" src={`/api/cover/${currentPlaying.id}`} alt="Artwork" />
+      <img class="cover" src={`/api/cover?id=${encodeURIComponent(currentPlaying.id)}`} alt="Artwork" />
     {:else}
       <div class="cover-placeholder"></div>
     {/if}
@@ -49,11 +55,11 @@
   
   <div class="controls-container">
     <div class="main-controls">
-      <button class="icon-btn">⏮</button>
+      <button class="icon-btn"><Icon name="skipBack" /></button>
       <button class="icon-btn play-btn" on:click={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()}>
-        {audioRef?.paused ? '▶' : '⏸'}
+        <Icon name={audioRef?.paused ? 'play' : 'pause'} size={20} color="black" />
       </button>
-      <button class="icon-btn">⏭</button>
+      <button class="icon-btn"><Icon name="skipForward" /></button>
     </div>
     
     <div class="progress-area">
@@ -71,7 +77,7 @@
   
   <div class="volume-container">
     <button class="icon-btn" on:click={toggleMute}>
-      {isMuted ? '🔇' : '🔊'}
+      <Icon name={isMuted ? 'volumeX' : 'volume2'} size={20} />
     </button>
     <input 
       type="range" 
@@ -105,6 +111,7 @@
     display: flex;
     align-items: center;
     gap: 1rem;
+    cursor: pointer;
   }
 
   .cover, .cover-placeholder {

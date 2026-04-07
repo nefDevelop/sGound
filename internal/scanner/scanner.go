@@ -11,6 +11,8 @@ import (
 	"sgound/internal/db"
 
 	"github.com/dhowden/tag"
+	"crypto/sha1"
+	"encoding/hex"
 )
 
 type Scanner struct {
@@ -85,7 +87,7 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 	if err != nil {
 		slog.Warn("Tag parsing failed (corrupt metadata), fallback to paths", "path", path, "err", err)
-		genre = "Subsonic Media"
+		genre = "Unknown"
 		artistName = "Unknown Artist"
 		baseDir := filepath.Base(filepath.Dir(path))
 		if baseDir == "." || baseDir == "/" {
@@ -112,7 +114,7 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		year = metadata.Year()
 		genre = metadata.Genre()
 		if genre == "" {
-			genre = "Subsonic Media"
+			genre = "Unknown"
 		}
 		composer = metadata.Composer()
 		comment = metadata.Comment()
@@ -156,5 +158,7 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 // naive id generator, in real app consider uuid or hashing
 func generateID(input string) string {
-	return strings.ReplaceAll(strings.ToLower(input), " ", "-") // VERY naive, for POC
+	h := sha1.New()
+	h.Write([]byte(input))
+	return hex.EncodeToString(h.Sum(nil))
 }

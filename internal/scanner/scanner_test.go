@@ -18,8 +18,9 @@ func TestIsAudioFile(t *testing.T) {
 		{"Test txt", ".txt", false},
 	}
 	for _, c := range cases {
-		if got := isAudioFile("song" + c.ext); got != c.want {
-			t.Errorf("isAudioFile(%q) == %v, want %v", c.ext, got, c.want)
+		got := isAudioFile("song" + c.ext)
+		if (got == nil) != c.want {
+			t.Errorf("isAudioFile(%q) == %v, want %v", c.ext, got == nil, c.want)
 		}
 	}
 }

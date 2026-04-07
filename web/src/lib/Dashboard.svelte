@@ -1,5 +1,6 @@
 <script>
   import { onMount, createEventDispatcher } from 'svelte';
+  import Icon from './Icon.svelte';
   
   const dispatch = createEventDispatcher();
   let stats = {
@@ -29,10 +30,10 @@
   <header class="dash-header">
     <h1>Welcome back to <span>Sgound</span></h1>
     <div class="chips-row">
-      <div class="chip"><span class="icon">🎵</span> {stats.totalTracks} Songs</div>
-      <div class="chip"><span class="icon">📀</span> {stats.totalAlbums} Albums</div>
-      <div class="chip"><span class="icon">👤</span> {stats.totalArtists} Artists</div>
-      <div class="chip"><span class="icon">📜</span> {stats.totalPlaylists} Playlists</div>
+      <div class="chip"><Icon name="music" size={14} color="#ff3366" /> {stats.totalTracks} Songs</div>
+      <div class="chip"><Icon name="disc" size={14} color="#ff3366" /> {stats.totalAlbums} Albums</div>
+      <div class="chip"><Icon name="user" size={14} color="#ff3366" /> {stats.totalArtists} Artists</div>
+      <div class="chip"><Icon name="list" size={14} color="#ff3366" /> {stats.totalPlaylists} Playlists</div>
     </div>
   </header>
 
@@ -40,7 +41,7 @@
     <!-- Joyas Olvidadas -->
     <section class="dash-card gems-card">
       <div class="card-header">
-        <h3>✨ Forgotten Gems</h3>
+        <h3><Icon name="sparkles" size={18} color="#ffcc00" /> Forgotten Gems</h3>
         <button class="text-btn">Shuffle All</button>
       </div>
       <div class="gems-list">
@@ -48,7 +49,7 @@
           <!-- svelte-ignore a11y-click-events-have-key-events -->
           <!-- svelte-ignore a11y-no-static-element-interactions -->
           <div class="gem-item" on:click={() => dispatch('play', gem)}>
-            <img src={`/api/cover/${gem.id}`} alt="" on:error={(e) => e.target.style.display='none'} />
+            <img src={`/api/cover/${gem.id}`} alt="" on:error={(e) => (e.currentTarget.style.display='none')} />
             <div class="gem-info">
               <span class="title">{gem.title}</span>
               <span class="artist">{gem.artist}</span>
@@ -61,7 +62,7 @@
     <!-- Saneamiento de Biblioteca -->
     <section class="dash-card health-card">
       <div class="card-header">
-        <h3>🛡️ Library Health</h3>
+        <h3><Icon name="shield" size={18} color="#10b981" /> Library Health</h3>
       </div>
       <div class="health-stats">
         <div class="health-item" class:warning={health.missingTags > 0}>
@@ -80,7 +81,7 @@
     <!-- Categorías Más Escuchadas -->
     <section class="dash-card charts-card">
       <div class="card-header">
-        <h3>🔥 Top Genres</h3>
+        <h3><Icon name="flame" size={18} color="#ff4400" /> Top Genres</h3>
       </div>
       <div class="genres-pills">
         <div class="pill-bar" style="width: 80%">Rock <span class="perc">80%</span></div>

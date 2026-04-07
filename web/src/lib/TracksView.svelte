@@ -1,5 +1,6 @@
 <script>
   import { createEventDispatcher } from 'svelte';
+  import Icon from './Icon.svelte';
   
   export let tracks = [];
   export let currentPlaying = null;
@@ -29,7 +30,7 @@
 
   async function handleOrganize(id) {
     try {
-      const res = await fetch(`/api/tracks/${id}/organize`, { method: 'POST' });
+      const res = await fetch(`/api/tracks/organize?id=${encodeURIComponent(id)}`, { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         alert("File organized to: " + data.newPath);
@@ -67,7 +68,8 @@
           <td class="num">{track.trackNum || '-'}</td>
           <td class="title-cell">
             <div class="flex-align">
-              <img class="mini-cover" src={`/api/cover/${track.id}`} alt="" on:error={(e) => e.target.style.display='none'} />
+              <!-- svelte-ignore a11y-missing-attribute -->
+              <img class="mini-cover" src={`/api/cover?id=${encodeURIComponent(track.id)}`} on:error={(e) => (e.currentTarget.style.display='none')} />
               <span class="title-text">{track.title}</span>
             </div>
           </td>
@@ -75,9 +77,9 @@
           <td>{track.album}</td>
           <td><span class="genre-tag">{track.genre || '-'}</span></td>
           <td class="actions">
-            <button class="btn-icon" on:click={() => dispatch('play', track)} title="Play">▶</button>
-            <button class="btn-icon" on:click={() => dispatch('edit', track)} title="Edit Tags">✏️</button>
-            <button class="btn-icon" on:click={() => handleOrganize(track.id)} title="Organize File">📁</button>
+            <button class="btn-icon" on:click={() => dispatch('play', track)} title="Play"><Icon name="play" size={14} /></button>
+            <button class="btn-icon" on:click={() => dispatch('edit', track)} title="Edit Tags"><Icon name="edit" size={14} /></button>
+            <button class="btn-icon" on:click={() => handleOrganize(track.id)} title="Organize File"><Icon name="folder" size={14} /></button>
           </td>
         </tr>
       {/each}

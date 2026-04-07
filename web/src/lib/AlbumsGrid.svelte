@@ -1,5 +1,6 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte';
+  import Icon from './Icon.svelte';
   
   const dispatch = createEventDispatcher();
   let albums = [];
@@ -29,10 +30,10 @@
         <!-- svelte-ignore a11y-no-static-element-interactions -->
         <div class="album-card" on:click={() => dispatch('selectAlbum', album.id)}>
           <div class="cover-wrapper">
-            <img class="cover" src={`/api/cover/${album.coverId}`} alt={album.title} 
-                 on:error={(e) => e.target.src = 'https://placehold.co/300x300?text=Album'} />
+            <img class="cover" src={`/api/cover?id=${encodeURIComponent(album.coverId)}`} alt={album.title} 
+                 on:error={(e) => (e.currentTarget.src = 'https://placehold.co/300x300?text=Album')} />
             <div class="play-overlay">
-              <div class="play-pill">▶</div>
+              <div class="play-pill"><Icon name="play" color="white" size={20} /></div>
             </div>
           </div>
           <div class="album-info">

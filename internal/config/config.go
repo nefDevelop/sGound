@@ -11,12 +11,18 @@ type Config struct {
 	Port          string
 	AutoRename    bool
 	RenamePattern string
+	ThemeColor    string
 }
 
 func LoadConfig() *Config {
 	dbPath := os.Getenv("SGOUND_DB_PATH")
 	if dbPath == "" {
 		dbPath = "sgound.db"
+	}
+
+	themeColor := os.Getenv("SGOUND_THEME_COLOR")
+	if themeColor == "" {
+		themeColor = "#ff3366"
 	}
 
 	musicPath := os.Getenv("SGOUND_MUSIC_PATH")
@@ -35,7 +41,7 @@ func LoadConfig() *Config {
 		renamePattern = "{artist}/{album}/{track} - {title}"
 	}
 
-	slog.Info("Configuration loaded", "dbPath", dbPath, "musicPath", musicPath, "port", port, "autoRename", autoRename)
+	slog.Info("Configuration loaded", "dbPath", dbPath, "musicPath", musicPath, "port", port, "autoRename", autoRename, "themeColor", themeColor)
 
 	return &Config{
 		DBPath:        dbPath,
@@ -43,5 +49,6 @@ func LoadConfig() *Config {
 		Port:          port,
 		AutoRename:    autoRename,
 		RenamePattern: renamePattern,
+		ThemeColor:    themeColor,
 	}
 }
