@@ -1,8 +1,9 @@
 <script>
   import { onMount } from 'svelte';
+  import { fade } from 'svelte/transition';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { queue, currentIndex, audioQuality, isPlaying } from './stores.js';
+  import { queue, currentIndex, audioQuality, isPlaying, showToast } from './stores.js';
   import { get } from 'svelte/store';
   
   let { 
@@ -18,6 +19,7 @@
 
   let volume = $state(1);
   let isMuted = $state(false);
+  let showVolume = $state(false);
 
   // Dual audio elements for gapless
   let audioA = $state(), audioB = $state();
@@ -162,6 +164,23 @@
     }
   }
 
+  async function handleRate(track, rating) {
+    try {
+      const res = await fetch(`/api/tracks/${track.id}/rate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating }),
+      });
+      if (res.ok) {
+        track.rating = rating;
+        showToast(`Valorado con ${rating} estrellas`, "success");
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Error al valorar", "error");
+    }
+  }
+
   function formatTime(secs) {
     if (isNaN(secs)) return "0:00";
     const mins = Math.floor(secs / 60);
@@ -171,68 +190,70 @@
 </script>
 
 <footer class="player">
+  <div class="progress-bg" style="width: {progress}%"></div>
+  
   <div class="now-playing" onclick={onopenFull} oncontextmenu={showContextMenu} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && onopenFull?.()}>
-    {#if currentPlaying}
-      <img class="cover" src={`/api/cover/${currentPlaying.id}`} alt="Artwork" />
-      <div class="track-info">
-        <span class="title">{currentPlaying.title}</span>
-        <span class="artist">{currentPlaying.artist}</span>
+    <div class="cover-container">
+      {#if currentPlaying?.id}
+        <img src="/api/tracks/{currentPlaying.id}/cover" alt="Cover" class="cover" />
+      {:else}
+        <div class="cover-placeholder"></div>
+      {/if}
+    </div>
+    <div class="info">
+      <div class="album-name">{currentPlaying?.album || 'Sgound Player'}</div>
+      <div class="track-meta">
+        <span class="track-title">{currentPlaying?.title || 'No track playing'}</span>
+        {#if currentPlaying?.format}
+          <span class="quality-chip">{currentPlaying.format.toUpperCase()}</span>
+        {/if}
       </div>
-    {:else}
-      <div class="cover-placeholder"></div>
-      <div class="track-info">
-        <span class="title">No Active Track</span>
-        <span class="artist">Select something to play</span>
-      </div>
-    {/if}
+    </div>
   </div>
-  
-  <div class="controls-container">
-    <div class="main-controls">
-      <button class="icon-btn" onclick={skipBack} title="Previous"><Icon name="skipBack" size={28} /></button>
-      <button class="play-btn" onclick={() => audioRef?.paused ? audioRef.play().catch(() => {}) : audioRef?.pause()} title="Play/Pause">
-        <Icon name={$isPlaying ? 'pause' : 'play'} size={28} />
+
+  <div class="right-actions">
+    <div class="playback-btns">
+      <button class="icon-btn" onclick={skipBack} title="Previous">
+        <Icon name="skipBack" size={22} />
       </button>
-      <button class="icon-btn" onclick={skipNext} title="Next"><Icon name="skipForward" size={28} /></button>
+      <button class="main-play-btn" onclick={() => audioRef?.paused ? audioRef.play().catch(() => {}) : audioRef?.pause()} title={$isPlaying ? 'Pause' : 'Play'}>
+        <Icon name={$isPlaying ? 'pause' : 'play'} size={24} />
+      </button>
+      <button class="icon-btn" onclick={skipNext} title="Next">
+        <Icon name="skipForward" size={22} />
+      </button>
     </div>
-    
-    <div class="progress-area">
-      <span class="time">{formatTime(currentTime)}</span>
-      <div class="modern-slider-container">
-        <input 
-          type="range" 
-          class="progress-bar" 
-          min="0" max="100" 
-          style="--progress: {progress}%"
-          bind:value={progress} 
-          oninput={handleSeek} 
-        />
-        <div class="progress-fill" style="width: {progress}%"></div>
+
+    <div class="extra-controls">
+      <div class="volume-container">
+        <button class="icon-btn" onclick={() => showVolume = !showVolume} title="Volume">
+          <Icon name={isMuted ? 'volumeX' : 'volume2'} size={20} />
+        </button>
+        {#if showVolume}
+          <div class="volume-popover" transition:fade={{duration: 150}}>
+            <div class="vol-slider-wrap">
+              <input 
+                type="range" 
+                class="vol-slider-vertical" 
+                min="0" max="1" step="0.01" 
+                bind:value={volume} 
+                oninput={() => {
+                  if (!audioRef) return;
+                  const gain = currentPlaying?.replay_gain || 0;
+                  const linearGain = Math.pow(10, gain / 20);
+                  audioA.volume = Math.min(1.0, volume * linearGain);
+                  audioB.volume = Math.min(1.0, volume * linearGain);
+                }}
+              />
+              <div class="v-fill" style="height: {volume * 100}%"></div>
+            </div>
+          </div>
+        {/if}
       </div>
-      <span class="time">{formatTime(duration)}</span>
+      <button class="icon-btn expand-btn" onclick={onopenFull} title="Expand">
+        <Icon name="maximize" size={20} />
+      </button>
     </div>
-  </div>
-  
-  <div class="volume-container">
-    <button class="icon-btn" onclick={toggleMute}>
-      <Icon name={isMuted ? 'volumeX' : 'volume2'} size={20} />
-    </button>
-    <input 
-      type="range" 
-      class="volume-bar" 
-      min="0" max="1" step="0.01" 
-      bind:value={volume} 
-      oninput={() => {
-        if (!audioRef) return;
-        const gain = currentPlaying?.replay_gain || 0;
-        const linearGain = Math.pow(10, gain / 20);
-        audioA.volume = Math.min(1.0, volume * linearGain);
-        audioB.volume = Math.min(1.0, volume * linearGain);
-      }}
-    />
-    {#if currentPlaying && currentPlaying.format}
-      <div class="tech-badge">{currentPlaying.format.toUpperCase()}</div>
-    {/if}
   </div>
 
   <ContextMenu 
@@ -249,162 +270,176 @@
 
 <style>
   .player {
-    grid-area: player;
-    background: var(--surface-container);
-    display: grid;
-    grid-template-columns: minmax(220px, 1fr) 2fr minmax(220px, 1fr);
+    display: flex;
+    justify-content: space-between;
     align-items: center;
-    padding: 0 2.5rem;
-    height: 110px;
-    margin: 0.5rem 1.5rem 1.5rem 1.5rem;
-    border-radius: 40px;
+    padding: 0 2rem;
+    height: 100px;
+    margin: 0; 
+    border-radius: inherit;
     border: 1px solid var(--border-color);
     box-shadow: 0 12px 40px rgba(0,0,0,0.2);
-    backdrop-filter: blur(20px);
+    position: relative;
+    overflow: hidden;
     z-index: 1000;
+  }
+
+  .progress-bg {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: var(--primary);
+    opacity: 0.08;
+    z-index: -1;
+    transition: width 0.3s linear;
   }
 
   .now-playing {
     display: flex;
     align-items: center;
     gap: 1.2rem;
-    cursor: pointer;
     min-width: 0;
-    transition: transform 0.2s;
+    flex: 1;
+    cursor: pointer;
   }
-  .now-playing:hover { transform: translateX(4px); }
 
-  .cover, .cover-placeholder {
-    width: 68px;
-    height: 68px;
-    border-radius: 16px;
-    background: var(--surface-container-high);
+  .cover {
+    width: 60px;
+    height: 60px;
+    border-radius: 12px;
     object-fit: cover;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
   }
 
-  .track-info {
+  .info {
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-    gap: 2px;
+    gap: 0.1rem;
+    min-width: 0;
   }
 
-  .track-info .title { 
-    font-weight: 850; 
-    color: var(--text-main);
+  .album-name {
+    font-size: 0.75rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 1.1rem;
-    letter-spacing: -0.3px;
+    opacity: 0.9;
   }
-  .track-info .artist { font-size: 0.9rem; color: var(--text-muted); font-weight: 600; opacity: 0.8; }
 
-  .controls-container {
+  .track-meta {
     display: flex;
-    flex-direction: column;
     align-items: center;
     gap: 0.8rem;
-    width: 100%;
+    min-width: 0;
   }
 
-  .main-controls {
+  .track-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: white;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .quality-chip {
+    font-size: 0.65rem;
+    font-weight: 900;
+    padding: 0.15rem 0.4rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
+  }
+
+  .right-actions {
     display: flex;
-    gap: 2rem;
     align-items: center;
+    gap: 1.5rem;
   }
 
-  .play-btn {
-    background: var(--primary) !important;
-    color: white !important;
-    width: 64px;
-    height: 64px;
+  .playback-btns {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    background: rgba(255,255,255,0.03);
+    padding: 0.4rem 0.8rem;
+    border-radius: 100px;
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .main-play-btn {
+    background: white;
+    color: black;
+    border: none;
+    width: 46px;
+    height: 46px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 8px 24px var(--primary-30);
-    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-    border: none;
     cursor: pointer;
+    transition: transform 0.2s;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   }
-  .play-btn:hover { transform: scale(1.1); box-shadow: 0 12px 32px var(--primary-40); }
-  .play-btn:active { transform: scale(0.95); }
+  .main-play-btn:hover { transform: scale(1.08); }
 
-  .progress-area {
-    width: 100%;
-    max-width: 700px;
+  .extra-controls {
     display: flex;
     align-items: center;
-    gap: 1.2rem;
+    gap: 0.6rem;
   }
-
-  .modern-slider-container {
-    position: relative;
-    flex: 1;
-    height: 6px;
-    display: flex;
-    align-items: center;
-  }
-
-  .progress-bar {
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    appearance: none;
-    background: var(--surface-container-highest);
-    border-radius: 100px;
-    cursor: pointer;
-    z-index: 2;
-    opacity: 0;
-  }
-
-  .progress-fill {
-    position: absolute;
-    height: 100%;
-    background: var(--primary);
-    border-radius: 100px;
-    z-index: 1;
-    pointer-events: none;
-  }
-
-  .modern-slider-container::after {
-    content: '';
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    background: var(--surface-container-highest);
-    border-radius: 100px;
-    z-index: 0;
-  }
-
-  .progress-bar::-webkit-slider-thumb {
-    appearance: none;
-    width: 16px;
-    height: 16px;
-    background: white;
-    border-radius: 50%;
-    box-shadow: 0 0 10px rgba(0,0,0,0.5);
-  }
-
-  .time { font-size: 0.8rem; color: var(--text-muted); font-weight: 700; font-variant-numeric: tabular-nums; width: 45px; }
 
   .volume-container {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 1.2rem;
+    position: relative;
   }
 
-  .volume-bar {
-    width: 100px;
-    height: 5px;
-    appearance: none;
+  .volume-popover {
+    position: absolute;
+    bottom: calc(100% + 1.5rem);
+    left: 50%;
+    transform: translateX(-50%);
     background: var(--surface-container-highest);
+    padding: 1.2rem 0.6rem;
+    border-radius: 20px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    z-index: 2000;
+  }
+
+  .vol-slider-wrap {
+    height: 120px;
+    width: 8px;
+    background: rgba(255,255,255,0.1);
     border-radius: 10px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .vol-slider-vertical {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    appearance: none;
+    background: transparent;
     cursor: pointer;
-    accent-color: var(--primary);
+    z-index: 5;
+    writing-mode: vertical-lr;
+    direction: rtl;
+  }
+
+  .v-fill {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: var(--primary);
+    border-radius: 10px;
+    z-index: 4;
   }
 
   .icon-btn {
@@ -412,57 +447,29 @@
     border: none;
     color: var(--text-muted);
     cursor: pointer;
+    padding: 8px;
+    border-radius: 50%;
     transition: all 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 8px;
-    border-radius: 12px;
   }
-  .icon-btn:hover { color: var(--text-main); background: var(--surface-container-high); transform: scale(1.1); }
-
-  .tech-badge {
-    background: var(--primary-10);
-    padding: 0.3rem 0.6rem;
-    border-radius: 8px;
-    font-size: 0.7rem;
-    font-weight: 800;
-    color: var(--primary);
-    border: 1px solid var(--primary-20);
-    letter-spacing: 0.5px;
-  }
-
-  @media (max-width: 1400px) {
-    .player { grid-template-columns: 240px 1fr 240px; padding: 0 1.5rem; }
-  }
-
-  @media (max-width: 1100px) {
-    .player { 
-      grid-template-columns: 1fr 1.5fr auto; 
-      height: 115px; 
-      padding: 0 1.5rem; 
-      gap: 1rem;
-    }
-    .volume-bar, .tech-badge { display: none; }
-    .play-btn { width: 56px; height: 56px; }
-    .controls-container { gap: 0.4rem; }
-    .cover { width: 60px; height: 60px; }
-  }
+  .icon-btn:hover { color: white; background: rgba(255,255,255,0.1); }
 
   @media (max-width: 768px) {
-    .player {
-      grid-template-columns: 1fr auto;
-      height: 80px;
-      margin: 0.5rem 1rem 0 1rem;
-      border-radius: 32px 32px 0 0;
+    .player { 
+      margin: 0; 
+      padding: 0 1rem; 
+      height: 72px; 
+      border-radius: inherit;
       border-bottom: none;
-      padding: 0 1.5rem;
-      gap: 1.5rem;
     }
-    .progress-area, .volume-container, .tech-badge { display: none !important; }
-    .play-btn { width: 52px; height: 52px; }
-    .cover { width: 48px; height: 48px; }
-    .track-info .title { font-size: 1rem; }
-    .main-controls { gap: 1rem; }
+    .album-name, .progress-bg { display: none; }
+    .right-actions { gap: 0.6rem; }
+    .playback-btns { padding: 0.2rem 0.5rem; gap: 0.3rem; background: transparent; border: none; }
+    .main-play-btn { width: 38px; height: 38px; }
+    .cover { width: 44px; height: 44px; border-radius: 8px; }
+    .track-title { font-size: 0.95rem; }
+    .expand-btn { display: none; }
   }
 </style>

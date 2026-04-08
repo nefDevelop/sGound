@@ -3,6 +3,7 @@
   import TagEditor from "./lib/TagEditor.svelte";
   import MassiveTagEditor from "./lib/MassiveTagEditor.svelte";
   import MiniPlayer from "./lib/MiniPlayer.svelte";
+  import PlayerAnchorBar from "./lib/PlayerAnchorBar.svelte";
   import Icon from "./lib/Icon.svelte";
   import TracksView from "./lib/TracksView.svelte";
   import AlbumsGrid from "./lib/AlbumsGrid.svelte";
@@ -455,7 +456,7 @@
     </nav>
   </aside>
 
-  <section class="content">
+  <section class="content {currentView === 'fullplayer' ? 'full-player-view' : ''}">
     <header class="top-bar">
       <div class="search-box">
         <input
@@ -565,20 +566,40 @@
         <Settings onscan={triggerScan} />
       {:else if currentView === "maintenance"}
         <Maintenance onfixTags={() => { /* logic to open tag editor */ }} />
+      {:else if currentView === "fullplayer"}
+        <FullPlayer
+          {currentPlaying}
+          {audioRef}
+          isOpen={true}
+          bind:progress
+          bind:duration
+          bind:currentTime
+          onedit={(track) => openEditor(track)}
+          ondelete={(track) => handleDelete(track)}
+        />
       {/if}
     </div>
   </section>
 
-  <MiniPlayer
-    {currentPlaying}
-    bind:audioRef
-    bind:progress
-    bind:duration
-    bind:currentTime
-    onopenFull={() => (isFullPlayerOpen = true)}
-    onedit={(track) => openEditor(track)}
-    ondelete={(track) => handleDelete(track)}
-  />
+  <div class="player-area">
+    {#if currentView === 'fullplayer'}
+      <PlayerAnchorBar
+        {currentPlaying}
+        oncloseFull={() => { currentView = "dashboard"; }}
+      />
+    {:else}
+      <MiniPlayer
+        {currentPlaying}
+        bind:audioRef
+        bind:progress
+        bind:duration
+        bind:currentTime
+        onopenFull={() => { currentView = "fullplayer"; }}
+        onedit={(track) => openEditor(track)}
+        ondelete={(track) => handleDelete(track)}
+      />
+    {/if}
+  </div>
 </main>
 {/if}
 
@@ -596,16 +617,7 @@
 
 <Toast />
 
-<FullPlayer
-  {currentPlaying}
-  {audioRef}
-  bind:isOpen={isFullPlayerOpen}
-  bind:progress
-  bind:duration
-  bind:currentTime
-  onedit={(track) => openEditor(track)}
-  ondelete={(track) => handleDelete(track)}
-/>
+
 
 <style>
   .app-layout {
@@ -743,6 +755,29 @@
     border-radius: 28px;
     border: 1px solid var(--border-color);
     box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+  }
+
+  .content.full-player-view {
+    margin-bottom: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom: none;
+  }
+
+  .player-area {
+    grid-area: player;
+    margin: 0.5rem 1rem 1.5rem 1rem;
+    border-radius: 30px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* FullPlayer Unified Island on Desktop */
+  .app-layout:has(.content.full-player-view) .player-area {
+    margin: 0 1rem 1.5rem 1rem;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-top: none;
   }
 
   .top-bar {
@@ -884,8 +919,8 @@
       border: 1px solid var(--border-color);
       border-top: none;
       padding: 0 !important;
-      margin: 0 1rem 1.5rem 1rem !important;
-      border-radius: 0 0 32px 32px !important;
+      margin: 0 1rem 1rem 1rem !important; /* Joined with player at 1rem bottom */
+      border-radius: 0 0 24px 24px !important;
       background: var(--surface-container-highest);
       box-shadow: 0 10px 30px rgba(0,0,0,0.3);
     }
@@ -899,5 +934,45 @@
     .brand, .nav-label, .nav-divider, .playlists-scroll, .logout-btn { display: none !important; }
     .nav-item { margin: 0; width: 50px; height: 50px; }
     .content { margin: 1rem 1rem 0.5rem 1rem !important; border-radius: 24px; }
+    .player-area { 
+      margin: 0 1rem 0 1rem !important; 
+      border-radius: 24px 24px 0 0 !important;
+      background: var(--surface-container-highest); /* Match sidebar background */
+      border: 1px solid var(--border-color);
+      border-bottom: none;
+    }
+    .sidebar {
+      margin-top: 0 !important;
+      border-radius: 0 0 24px 24px !important;
+      border-top: none;
+    }
+    .app-layout:has(.content.full-player-view) .content {
+      margin-bottom: 0 !important;
+      border-radius: 24px 24px 0 0 !important;
+      border-bottom: none;
+    }
+    .app-layout:has(.content.full-player-view) .player-area {
+      margin: 0 1rem 0 1rem !important;
+      border-radius: 0 !important;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      border-bottom: none;
+    }
+    .app-layout:has(.content.full-player-view) .sidebar {
+      margin-top: 0 !important;
+      border-radius: 0 0 24px 24px !important;
+      border-top: none;
+    }
   }
+  .content.full-player-view {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .content.full-player-view .scroll-view {
+    padding-bottom: 0;
+  }
+
+  /* Target the anchor bar through global or context if needed, 
+     but App.svelte controls the grid container too */
 </style>
