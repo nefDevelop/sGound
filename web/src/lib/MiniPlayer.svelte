@@ -1,10 +1,11 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
+  import { queue, currentIndex, audioQuality, isPlaying } from './stores.js';
+  import { get } from 'svelte/store';
   
   export let currentPlaying = null;
-  export let audioRef = null;
   export let progress = 0;
   export let duration = 0;
   export let currentTime = 0;
@@ -13,6 +14,14 @@
   let volume = 1;
   let isMuted = false;
 
+  // Dual audio elements for gapless
+  let audioA, audioB;
+  let activeAudio = 'A';
+  export let audioRef = null; // Current active audio for external control
+  
+  let nextTrack = null;
+  let preloadedId = null;
+
   let contextMenu = {
     visible: false,
     x: 0,
@@ -20,28 +29,79 @@
     items: []
   };
 
-  function showContextMenu(e) {
-    if (!currentPlaying) return;
-    e.preventDefault();
-    contextMenu = {
-      visible: true,
-      x: e.clientX,
-      y: e.clientY,
-      items: [
-        { label: 'Editar etiquetas', icon: 'edit', action: () => dispatch('edit', currentPlaying) },
-        { divider: true },
-        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(currentPlaying.title) },
-        { label: 'Eliminar de biblioteca', icon: 'xCircle', color: 'danger', action: () => dispatch('delete', currentPlaying) }
-      ]
+  onMount(() => {
+    audioRef = audioA;
+    setupAudio(audioA);
+    setupAudio(audioB);
+  });
+
+  function setupAudio(el) {
+    el.onended = handleTrackEnded;
+    el.ontimeupdate = () => {
+      if (el === audioRef) {
+        currentTime = el.currentTime;
+        duration = el.duration;
+        progress = (currentTime / duration) * 100;
+        checkPreload();
+      }
     };
+    el.onplay = () => isPlaying.set(true);
+    el.onpause = () => isPlaying.set(false);
   }
 
-  $: if (audioRef) {
-    audioRef.ontimeupdate = () => {
-      currentTime = audioRef.currentTime;
-      duration = audioRef.duration;
-      progress = (currentTime / duration) * 100;
-    };
+  // Preload logic: when 90% done, start loading next
+  function checkPreload() {
+    if (duration > 0 && currentTime / duration > 0.8) {
+      const q = get(queue);
+      const idx = get(currentIndex);
+      if (idx < q.length - 1) {
+        const next = q[idx + 1];
+        if (next && next.id !== preloadedId) {
+          const nextEl = activeAudio === 'A' ? audioB : audioA;
+          const quality = get(audioQuality);
+          const url = `/api/stream/${next.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
+          nextEl.src = url;
+          nextEl.load();
+          preloadedId = next.id;
+          console.log("Preloading next track:", next.title);
+        }
+      }
+    }
+  }
+
+  function handleTrackEnded() {
+     const q = get(queue);
+     const idx = get(currentIndex);
+     if (idx < q.length - 1) {
+        currentIndex.set(idx + 1);
+        switchAudio();
+     } else {
+        isPlaying.set(false);
+     }
+  }
+
+  function switchAudio() {
+    const prevAudio = activeAudio === 'A' ? audioA : audioB;
+    activeAudio = activeAudio === 'A' ? 'B' : 'A';
+    audioRef = activeAudio === 'A' ? audioA : audioB;
+    
+    // Smooth transition
+    prevAudio.pause();
+    audioRef.play().catch(e => console.error("Play failed", e));
+    
+    // Sync currentPlaying with App (via store or prop)
+    const q = get(queue);
+    const idx = get(currentIndex);
+    currentPlaying = q[idx];
+    preloadedId = null; // Reset for next cycle
+  }
+
+  // Handle manual play from App
+  $: if (currentPlaying && audioRef && audioRef.src.indexOf(currentPlaying.id) === -1 && !preloadedId) {
+     const quality = get(audioQuality);
+     const url = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
+     audioRef.src = url;
+     audioRef.play();
   }
 
   function handleSeek(e) {
@@ -51,7 +111,40 @@
 
   function toggleMute() {
     isMuted = !isMuted;
-    audioRef.muted = isMuted;
+    audioA.muted = isMuted;
+    audioB.muted = isMuted;
+  }
+
+  function skipNext() {
+    const q = get(queue);
+    const idx = get(currentIndex);
+    if (idx < q.length - 1) {
+      currentIndex.set(idx + 1);
+      const next = q[idx + 1];
+      currentPlaying = next;
+      // If already preloaded, switch. Else, load fresh
+      if (preloadedId === next.id) {
+         switchAudio();
+      } else {
+         const quality = get(audioQuality);
+         audioRef.src = `/api/stream/${next.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
+         audioRef.play();
+         preloadedId = null;
+      }
+    }
+  }
+
+  function skipBack() {
+    const idx = get(currentIndex);
+    if (idx > 0) {
+      currentIndex.set(idx - 1);
+      const q = get(queue);
+      currentPlaying = q[idx-1];
+      const quality = get(audioQuality);
+      audioRef.src = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
+      audioRef.play();
+      preloadedId = null;
+    }
   }
 
   function formatTime(secs) {
@@ -83,11 +176,11 @@
   
   <div class="controls-container">
     <div class="main-controls">
-      <button class="icon-btn"><Icon name="skipBack" /></button>
+      <button class="icon-btn" on:click={skipBack}><Icon name="skipBack" /></button>
       <button class="icon-btn play-btn" on:click={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()}>
-        <Icon name={audioRef?.paused ? 'play' : 'pause'} size={20} color="black" />
+        <Icon name={$isPlaying ? 'pause' : 'play'} size={20} color="black" />
       </button>
-      <button class="icon-btn"><Icon name="skipForward" /></button>
+      <button class="icon-btn" on:click={skipNext}><Icon name="skipForward" /></button>
     </div>
     
     <div class="progress-area">
@@ -117,7 +210,8 @@
         if (!audioRef) return;
         const gain = currentPlaying?.replay_gain || 0;
         const linearGain = Math.pow(10, gain / 20);
-        audioRef.volume = Math.min(1.0, volume * linearGain);
+        audioA.volume = Math.min(1.0, volume * linearGain);
+        audioB.volume = Math.min(1.0, volume * linearGain);
       }}
     />
     {#if currentPlaying && currentPlaying.format}
@@ -133,8 +227,9 @@
     on:close={() => contextMenu.visible = false}
   />
 
-  <!-- Hidden audio element managed by parent or here -->
-  <audio bind:this={audioRef} style="display:none"></audio>
+  <!-- Dual hidden audio elements managed by parent or here -->
+  <audio bind:this={audioA} style="display:none"></audio>
+  <audio bind:this={audioB} style="display:none"></audio>
 </footer>
 
 <style>

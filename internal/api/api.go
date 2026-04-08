@@ -89,6 +89,7 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/library/status", auth(s.handleScanStatus))
 	mux.HandleFunc("/api/library/inbox", auth(s.handleGetInbox))
 	mux.HandleFunc("/api/tracks/approve", auth(s.handleApproveTracks))
+	mux.HandleFunc("/api/tracks/reject", auth(s.handleRejectTracks))
 	mux.HandleFunc("/api/tracks/rate", auth(s.handleRateTrack))
 	mux.HandleFunc("/api/lyrics", auth(s.handleLyrics))
 	mux.HandleFunc("/api/lyrics/", auth(s.handleLyrics))
@@ -506,7 +507,14 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.getDB(r).Conn.Query("SELECT id, name FROM artists ORDER BY name")
+	rows, err := s.getDB(r).Conn.Query(`
+		SELECT DISTINCT ar.id, ar.name 
+		FROM artists ar
+		JOIN albums al ON ar.id = al.artist_id
+		JOIN tracks t ON al.id = t.album_id
+		WHERE t.status = 'active'
+		ORDER BY ar.name
+	`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -520,6 +528,10 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		artists = append(artists, map[string]string{"id": id, "name": name})
+	}
+
+	if len(artists) == 0 {
+		artists = []map[string]string{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -536,7 +548,13 @@ func (s *Server) handleArtistActions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r *http.Request) {
-	rows, err := s.getDB(r).Conn.Query("SELECT id, title, year FROM albums WHERE artist_id = ? ORDER BY year DESC", artistID)
+	rows, err := s.getDB(r).Conn.Query(`
+		SELECT DISTINCT al.id, al.title, al.year 
+		FROM albums al
+		JOIN tracks t ON al.id = t.album_id
+		WHERE al.artist_id = ? AND t.status = 'active'
+		ORDER BY al.year DESC
+	`, artistID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -553,16 +571,22 @@ func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r
 		albums = append(albums, map[string]interface{}{"id": id, "title": title, "year": year})
 	}
 
+	if len(albums) == 0 {
+		albums = []map[string]interface{}{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(albums)
 }
 
 func (s *Server) handleGetAlbums(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.getDB(r).Conn.Query(`
-		SELECT al.id, al.title, al.year, ar.name as artist, 
-		       (SELECT t.id FROM tracks t WHERE t.album_id = al.id LIMIT 1) as sample_track_id
+		SELECT DISTINCT al.id, al.title, al.year, ar.name as artist, 
+		       (SELECT t2.id FROM tracks t2 WHERE t2.album_id = al.id AND t2.status = 'active' LIMIT 1) as sample_track_id
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
+		JOIN tracks t ON al.id = t.album_id
+		WHERE t.status = 'active'
 		ORDER BY al.title
 	`)
 	if err != nil {
@@ -583,6 +607,10 @@ func (s *Server) handleGetAlbums(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	if len(albums) == 0 {
+		albums = []map[string]interface{}{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(albums)
 }
@@ -600,7 +628,7 @@ func (s *Server) handleGetAlbumTracks(albumID string, w http.ResponseWriter, r *
 	rows, err := s.getDB(r).Conn.Query(`
 		SELECT id, title, track_num, duration, genre 
 		FROM tracks 
-		WHERE album_id = ? 
+		WHERE album_id = ? AND status = 'active'
 		ORDER BY track_num
 	`, albumID)
 	if err != nil {
@@ -619,6 +647,10 @@ func (s *Server) handleGetAlbumTracks(albumID string, w http.ResponseWriter, r *
 		tracks = append(tracks, map[string]interface{}{
 			"id": id, "title": title, "trackNum": trackNum, "duration": duration, "genre": genre,
 		})
+	}
+
+	if len(tracks) == 0 {
+		tracks = []map[string]interface{}{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -813,6 +845,32 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"success"}`))
 }
 
+func (s *Server) handleRejectTracks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var data struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	for _, id := range data.IDs {
+		// Mark as rejected so scanner doesn't pick it up as pending again
+		_, err := s.getDB(r).Conn.Exec("UPDATE tracks SET status = 'rejected' WHERE id = ?", id)
+		if err != nil {
+			slog.Error("Failed to reject track", "id", id, "error", err)
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success"}`))
+}
+
 func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -872,13 +930,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	results := make(map[string]interface{})
 
-	// 1. Search Tracks (por título o género)
+	// 1. Search Tracks (por título o género) - Solo activas
 	tracksRows, err := s.getDB(r).Conn.Query(`
 		SELECT t.id, t.title, a.name as artist 
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
-		WHERE t.title LIKE ? OR t.genre LIKE ?
+		WHERE (t.title LIKE ? OR t.genre LIKE ?) AND t.status = 'active'
 		LIMIT 20
 	`, searchTerm, searchTerm)
 	
@@ -893,8 +951,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	results["tracks"] = tracks
 
-	// 2. Search Artists
-	artistRows, err := s.getDB(r).Conn.Query("SELECT id, name FROM artists WHERE name LIKE ?", searchTerm)
+	// 2. Search Artists - Solo si tienen pistas activas
+	artistRows, err := s.getDB(r).Conn.Query(`
+		SELECT DISTINCT ar.id, ar.name 
+		FROM artists ar
+		JOIN albums al ON ar.id = al.artist_id
+		JOIN tracks t ON al.id = t.album_id
+		WHERE ar.name LIKE ? AND t.status = 'active'
+		LIMIT 20
+	`, searchTerm)
 	
 	var artists []map[string]interface{}
 	if err == nil {
@@ -907,12 +972,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	results["artists"] = artists
 
-	// 3. Search Albums
+	// 3. Search Albums - Solo si tienen pistas activas
 	albumRows, err := s.getDB(r).Conn.Query(`
-		SELECT al.id, al.title, ar.name as artist 
+		SELECT DISTINCT al.id, al.title, ar.name as artist 
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
-		WHERE al.title LIKE ?
+		JOIN tracks t ON al.id = t.album_id
+		WHERE al.title LIKE ? AND t.status = 'active'
 		LIMIT 20
 	`, searchTerm)
 	
@@ -943,13 +1009,13 @@ func (s *Server) handleAutocomplete(w http.ResponseWriter, r *http.Request) {
 	var query string
 	switch field {
 	case "artist":
-		query = "SELECT DISTINCT name FROM artists WHERE name LIKE ? ORDER BY name LIMIT 10"
+		query = "SELECT DISTINCT ar.name FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id WHERE ar.name LIKE ? AND t.status = 'active' ORDER BY ar.name LIMIT 10"
 	case "genre":
-		query = "SELECT DISTINCT genre FROM tracks WHERE genre LIKE ? ORDER BY genre LIMIT 10"
+		query = "SELECT DISTINCT genre FROM tracks WHERE genre LIKE ? AND status = 'active' ORDER BY genre LIMIT 10"
 	case "album":
-		query = "SELECT DISTINCT title FROM albums WHERE title LIKE ? ORDER BY title LIMIT 10"
+		query = "SELECT DISTINCT al.title FROM albums al JOIN tracks t ON al.id = t.album_id WHERE al.title LIKE ? AND t.status = 'active' ORDER BY al.title LIMIT 10"
 	case "composer":
-		query = "SELECT DISTINCT composer FROM tracks WHERE composer LIKE ? ORDER BY composer LIMIT 10"
+		query = "SELECT DISTINCT composer FROM tracks WHERE composer LIKE ? AND status = 'active' ORDER BY composer LIMIT 10"
 	default:
 		json.NewEncoder(w).Encode([]string{})
 		return
@@ -972,8 +1038,14 @@ func (s *Server) handleAutocomplete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLibraryMetadata(w http.ResponseWriter, r *http.Request) {
-	// Obtener décadas únicas
-	decadeRows, err := s.getDB(r).Conn.Query("SELECT DISTINCT (year / 10) * 10 as decade FROM albums WHERE year > 0 ORDER BY decade DESC")
+	// Obtener décadas únicas - Solo activas
+	decadeRows, err := s.getDB(r).Conn.Query(`
+		SELECT DISTINCT (al.year / 10) * 10 as decade 
+		FROM albums al 
+		JOIN tracks t ON al.id = t.album_id
+		WHERE al.year > 0 AND t.status = 'active'
+		ORDER BY decade DESC
+	`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -987,8 +1059,8 @@ func (s *Server) handleLibraryMetadata(w http.ResponseWriter, r *http.Request) {
 		decades = append(decades, d)
 	}
 
-	// Obtener géneros únicos
-	genreRows, err := s.getDB(r).Conn.Query("SELECT DISTINCT genre FROM tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre ASC")
+	// Obtener géneros únicos - Solo activas
+	genreRows, err := s.getDB(r).Conn.Query("SELECT DISTINCT genre FROM tracks WHERE genre IS NOT NULL AND genre != '' AND status = 'active' ORDER BY genre ASC")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1012,11 +1084,11 @@ func (s *Server) handleLibraryMetadata(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	stats := make(map[string]interface{})
 	
-	// Contadores básicos
+	// Contadores básicos - Filtrando por status='active'
 	var tTracks, tAlbums, tArtists, tPlaylists int
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks").Scan(&tTracks)
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM albums").Scan(&tAlbums)
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM artists").Scan(&tArtists)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active'").Scan(&tTracks)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT album_id) FROM tracks WHERE status = 'active'").Scan(&tAlbums)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT ar.id) FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id WHERE t.status = 'active'").Scan(&tArtists)
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM playlists").Scan(&tPlaylists)
 	stats["totalTracks"] = tTracks
 	stats["totalAlbums"] = tAlbums
@@ -1028,9 +1100,14 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&pendingCount)
 	stats["inboxCount"] = pendingCount
 
-	// Joyas olvidadas (9 canciones aleatorias para redescubrir)
+	// Joyas olvidadas (9 canciones aleatorias para redescubrir) - Solo activas
 	gems := make([]map[string]interface{}, 0)
-	rows, err := s.getDB(r).Conn.Query("SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist FROM tracks ORDER BY RANDOM() LIMIT 9")
+	rows, err := s.getDB(r).Conn.Query(`
+		SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist 
+		FROM tracks 
+		WHERE status = 'active'
+		ORDER BY RANDOM() LIMIT 9
+	`)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -1041,9 +1118,14 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	stats["forgottenGems"] = gems
 
-	// Lo más escuchado (Top 10)
+	// Lo más escuchado (Top 10) - Solo activas
 	topPlays := make([]map[string]interface{}, 0)
-	rows2, err := s.getDB(r).Conn.Query("SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist, play_count FROM tracks WHERE play_count > 0 ORDER BY play_count DESC LIMIT 10")
+	rows2, err := s.getDB(r).Conn.Query(`
+		SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist, play_count 
+		FROM tracks 
+		WHERE play_count > 0 AND status = 'active'
+		ORDER BY play_count DESC LIMIT 10
+	`)
 	if err == nil {
 		defer rows2.Close()
 		for rows2.Next() {
@@ -1429,15 +1511,16 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id`
 	
-	var whereClause, orderClause string
+	whereClause := "WHERE t.status = 'active'"
+	var orderClause string
 	var args []interface{}
 
 	switch typeStr {
 	case "recently-played":
-		whereClause = "WHERE t.last_played IS NOT NULL"
+		whereClause += " AND t.last_played IS NOT NULL"
 		orderClause = "ORDER BY t.last_played DESC LIMIT 50"
 	case "high-quality":
-		whereClause = "WHERE t.bit_rate >= 320000 OR t.format = 'flac' OR t.format = 'wav'"
+		whereClause += " AND (t.bit_rate >= 320000 OR t.format = 'flac' OR t.format = 'wav')"
 		orderClause = "ORDER BY t.bit_rate DESC"
 	case "recently-added":
 		orderClause = "ORDER BY t.created_at DESC LIMIT 50"
@@ -1445,14 +1528,14 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 		decade := r.URL.Query().Get("value")
 		if decade != "" {
 			dInt, _ := strconv.Atoi(decade)
-			whereClause = "WHERE al.year >= ? AND al.year <= ?"
+			whereClause += " AND al.year >= ? AND al.year <= ?"
 			args = append(args, dInt, dInt+9)
 		}
 		orderClause = "ORDER BY al.year DESC, al.title, t.track_num"
 	case "genre":
 		genre := r.URL.Query().Get("value")
 		if genre != "" {
-			whereClause = "WHERE t.genre = ?"
+			whereClause += " AND t.genre = ?"
 			args = append(args, genre)
 		}
 		orderClause = "ORDER BY a.name, al.title, t.track_num"
@@ -1527,7 +1610,7 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 		JOIN playlist_tracks pt ON t.id = pt.track_id
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
-		WHERE pt.playlist_id = ?
+		WHERE pt.playlist_id = ? AND t.status = 'active'
 		ORDER BY pt.position ASC
 	`, id)
 

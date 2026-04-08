@@ -11,6 +11,13 @@ audioQuality.subscribe(value => {
     localStorage.setItem('audioQuality', value);
 });
 
+// Playback state
+export const queue = writable([]);
+export const currentIndex = writable(-1);
+export const isPlaying = writable(false);
+export const repeatMode = writable('none'); // 'none', 'all', 'one'
+export const isShuffle = writable(false);
+
 export function showToast(message, type = 'info') {
     toast.set({ message, type });
     setTimeout(() => {

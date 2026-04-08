@@ -15,7 +15,7 @@
   import InboxView from "./lib/InboxView.svelte";
   import Toast from "./lib/Toast.svelte";
   import FullPlayer from "./lib/FullPlayer.svelte";
-  import { showToast, audioQuality } from "./lib/stores.js";
+  import { showToast, audioQuality, queue, currentIndex, isPlaying } from "./lib/stores.js";
   import { get } from "svelte/store";
   import { generatePalette, applyTheme } from "./lib/theme.js";
   import Login from "./lib/Login.svelte";
@@ -52,6 +52,15 @@
   let currentPlaying = $state(null);
   let audioRef = $state(null);
   let isFullPlayerOpen = $state(false);
+
+  // Sync currentPlaying with queue
+  $effect(() => {
+    const q = $queue;
+    const idx = $currentIndex;
+    if (idx >= 0 && idx < q.length) {
+      currentPlaying = q[idx];
+    }
+  });
 
   // Shared audio state
   let progress = $state(0);
@@ -197,16 +206,25 @@
     isTagEditorOpen = true;
   }
 
-  function handlePlay(track) {
-    currentPlaying = track;
-    if (audioRef) {
-      const quality = get(audioQuality);
-      const url =
-        `/api/stream/${track.id}` +
-        (quality !== "original" ? `?bitrate=${quality}` : "");
-      audioRef.src = url;
-      audioRef.play();
+  function handlePlay(data) {
+    let track, trackList;
+    if (data.track) {
+      track = data.track;
+      trackList = data.tracks;
+    } else {
+      track = data;
     }
+
+    if (trackList && trackList.length > 0) {
+      queue.set(trackList);
+      const idx = trackList.findIndex(t => t.id === track.id);
+      currentIndex.set(idx >= 0 ? idx : 0);
+    } else {
+      // Single track play
+      queue.set([track]);
+      currentIndex.set(0);
+    }
+    isPlaying.set(true);
   }
 
   function handleSelectionChange(selected) {

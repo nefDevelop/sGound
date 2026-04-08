@@ -56,6 +56,24 @@
     }
   }
 
+  async function rejectIds(ids) {
+    if (!confirm(`¿Estás seguro de que quieres rechazar ${ids.length} pistas? No aparecerán en tu biblioteca.`)) return;
+    try {
+      const res = await fetch('/api/tracks/reject', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      });
+      if (res.ok) {
+        // Refresh
+        await fetchInbox();
+        selectedTracks = [];
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   function handleSelection(e) {
     selectedTracks = e.detail;
   }
@@ -70,14 +88,22 @@
     
     <div class="actions">
        {#if selectedTracks.length > 0}
+         <button class="btn danger" onclick={() => rejectIds(selectedTracks.map(t => t.id))}>
+           <Icon name="trash" size={18} />
+           Rechazar ({selectedTracks.length})
+         </button>
          <button class="btn primary" onclick={approveSelected}>
            <Icon name="zap" size={18} />
            Aprobar Selección ({selectedTracks.length})
          </button>
+       {:else}
+         <button class="btn ghost" onclick={() => rejectIds(tracks.map(t => t.id))} disabled={tracks.length === 0}>
+           Ignorar Todo
+         </button>
+         <button class="btn ghost" onclick={approveAll} disabled={tracks.length === 0}>
+           Aprobar Todo ({tracks.length})
+         </button>
        {/if}
-       <button class="btn ghost" onclick={approveAll} disabled={tracks.length === 0}>
-         Aprobar Todo ({tracks.length})
-       </button>
     </div>
   </header>
 
@@ -133,6 +159,7 @@
   }
 
   .btn.primary { background: var(--primary); color: white; box-shadow: 0 4px 12px var(--primary-10); }
+  .btn.danger { background: #ff4444; color: white; }
   .btn.ghost { background: var(--surface-container-high); color: var(--text-main); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 

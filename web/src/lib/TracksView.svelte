@@ -27,7 +27,7 @@
       y: e.clientY,
       track,
       items: [
-        { label: 'Reproducir', icon: 'play', action: () => dispatch('play', track) },
+        { label: 'Reproducir', icon: 'play', action: () => dispatch('play', { track, tracks }) },
         { label: 'Añadir a cola', icon: 'plus', action: () => dispatch('queue', track) },
         { divider: true },
         { label: 'Editar etiquetas', icon: 'edit', action: () => dispatch('edit', track) },
@@ -106,7 +106,7 @@
           class="track-row" 
           class:active={currentPlaying && currentPlaying.id === track.id}
           class:selected={selectedIds.has(track.id)}
-          ondblclick={() => dispatch('play', track)}
+          ondblclick={() => dispatch('play', { track, tracks })}
           oncontextmenu={(e) => showContextMenu(track, e)}
         >
           <td class="checkbox-cell">
@@ -127,7 +127,7 @@
           <td>{track.album}</td>
           <td><span class="genre-tag">{track.genre || '-'}</span></td>
           <td class="actions">
-            <button class="btn-icon" onclick={() => dispatch('play', track)} title="Play"><Icon name="play" size={14} /></button>
+            <button class="btn-icon" onclick={() => dispatch('play', { track, tracks })} title="Play"><Icon name="play" size={14} /></button>
             <button class="btn-icon" onclick={() => dispatch('edit', track)} title="Edit Tags"><Icon name="edit" size={14} /></button>
             <button class="btn-icon" onclick={() => handleOrganize(track.id)} title="Organize File"><Icon name="folder" size={14} /></button>
           </td>
