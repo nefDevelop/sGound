@@ -129,6 +129,9 @@
   }
 
   onMount(async () => {
+    // 1. Cargar el tema inmediatamente para evitar saltos visuales
+    loadTheme();
+
     // Escuchar cambios en otras pestañas para sincronizar el logout
     window.addEventListener('storage', (e) => {
       if (e.key === 'username' && !e.newValue) {
@@ -137,13 +140,11 @@
     });
 
     try {
-      // 1. Verificar estado global (solo para loguear errores o debug si fuera necesario)
+      // 2. Verificar estado global
       const resStatus = await fetch("/api/auth/status");
       
       if (isLoggedIn) {
-        // 2. Si hay sesión aparente, verificarla intentando cargar la config
-        // El interceptor hará el logout si esto falla con 401
-        loadTheme();
+        // 3. Cargar datos si hay sesión
         fetchTracks();
         fetchPlaylists();
         checkScanStatus();
@@ -162,11 +163,11 @@
     try {
       const res = await fetch("/api/config");
       const config = await res.json();
-      if (config.themeColor) {
-        applyTheme(generatePalette(config.themeColor));
-      }
+      const seed = config.themeColor || '#ff3366';
+      applyTheme(generatePalette(seed));
     } catch (e) {
-      console.error("Failed to load theme");
+      console.error("Failed to load theme, using fallback");
+      applyTheme(generatePalette('#ff3366'));
     }
   }
 
@@ -771,6 +772,8 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    background: var(--surface-container-highest);
+    border: 1px solid var(--border-color);
   }
 
   /* FullPlayer Unified Island on Desktop */
@@ -946,7 +949,8 @@
     .sidebar {
       margin-top: 0 !important;
       border-radius: 0 0 24px 24px !important;
-      border-top: none;
+      border-top: 1px solid rgba(255,255,255,0.03); /* Subtle internal division */
+      background: var(--surface-container-high) !important;
     }
     .app-layout:has(.content.full-player-view) .content {
       margin-bottom: 0 !important;

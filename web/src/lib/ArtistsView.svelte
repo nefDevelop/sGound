@@ -45,15 +45,6 @@
       <h1 class="responsive-title">Artists</h1>
       <p class="subtitle">{artists.length} creators in your collection.</p>
     </div>
-    
-    <div class="search-wrap">
-      <Icon name="search" size={20} color="var(--text-muted)" />
-      <input 
-        type="text" 
-        placeholder="Filter artists..." 
-        bind:value={searchTerm} 
-      />
-    </div>
   </header>
 
   {#if loading}
@@ -108,19 +99,7 @@
 
   .subtitle { color: var(--text-muted); font-size: 1.1rem; font-weight: 500; margin-top: 0.5rem; }
 
-  .search-wrap {
-    background: var(--surface-container-high);
-    border: 1px solid var(--border-color);
-    padding: 0.8rem 1.5rem;
-    border-radius: 100px;
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    width: 320px;
-    transition: all 0.3s;
-  }
-  .search-wrap:focus-within { border-color: var(--primary); width: 400px; background: var(--surface-container-highest); }
-  .search-wrap input { background: transparent; border: none; color: white; outline: none; font-weight: 600; width: 100%; }
+  .subtitle { color: var(--text-muted); font-size: 1.1rem; font-weight: 500; margin-top: 0.5rem; }
 
   .artist-grid {
     display: grid;
@@ -173,8 +152,6 @@
 
   @media (max-width: 900px) {
     .view-header { flex-direction: column; align-items: flex-start; gap: 1.5rem; }
-    .search-wrap { width: 100%; }
-    .search-wrap:focus-within { width: 100%; }
     .artist-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1rem; }
     .artist-card { padding: 1.2rem; border-radius: 24px; }
     .avatar-container { width: 100px; height: 100px; }

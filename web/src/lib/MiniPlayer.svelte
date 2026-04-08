@@ -277,8 +277,6 @@
     height: 100px;
     margin: 0; 
     border-radius: inherit;
-    border: 1px solid var(--border-color);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
     position: relative;
     overflow: hidden;
     z-index: 1000;

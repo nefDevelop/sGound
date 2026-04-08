@@ -287,7 +287,9 @@
   @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
   @media (max-width: 900px) {
-    .bento-grid { grid-template-columns: 1fr; }
+    .bento-grid { grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+    .bento-card { padding: 1.5rem; border-radius: 24px; gap: 1rem; }
+    .bento-card .val { font-size: 2.5rem; }
     .detail-container { padding: 1.5rem; border-radius: 32px; }
     .m-table th { display: none; }
     .m-table td { display: block; padding: 1rem; }

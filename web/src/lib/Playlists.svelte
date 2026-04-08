@@ -107,8 +107,7 @@
   {:else if playlists.length === 0}
     <div class="empty-state">
       <div class="empty-icon"><Icon name="list" size={64} /></div>
-      <p>Your collection is empty.</p>
-      <button class="secondary-btn" onclick={createPlaylist}>Create First Playlist</button>
+      <p>Your collection is empty. Use the New Playlist button above to get started.</p>
     </div>
   {:else}
     <div class="playlists-grid">
@@ -221,20 +220,15 @@
     display: flex;
     flex-direction: column;
     gap: 1.2rem;
-    padding: 12px;
-    background: transparent;
+    padding: 1rem;
+    background: var(--surface-container);
     border-radius: 32px;
-    transition: all 0.3s ease;
-    border: 1px solid transparent;
+    transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+    border: 1px solid var(--border-color);
     cursor: pointer;
     text-align: left;
   }
-
-  .playlist-card:hover {
-    background: var(--surface-container);
-    border-color: var(--border-color);
-    transform: translateY(-8px);
-  }
+  .playlist-card:hover { border-color: var(--primary); transform: translateY(-8px); box-shadow: 0 12px 24px rgba(0,0,0,0.2); }
 
   .playlist-art {
     aspect-ratio: 1;
@@ -272,8 +266,6 @@
 
   .status { text-align: center; padding: 4rem; color: var(--text-muted); }
   .empty-state { text-align: center; padding: 5rem 0; color: var(--text-muted); }
-  .secondary-btn { margin-top: 1.5rem; padding: 1rem 2.5rem; border: 2px solid var(--primary); border-radius: 100px; color: var(--primary); font-weight: 900; background: transparent; cursor: pointer; transition: all 0.2s; }
-  .secondary-btn:hover { background: var(--primary); color: white; }
 
   @media (max-width: 768px) {
     h1 { font-size: 2rem; }

@@ -114,6 +114,10 @@
                 <div class="mini-swatch" style="background-color: {palette.secondary}"></div>
                 <span>Sec</span>
               </div>
+              <div class="swatch-group">
+                <div class="mini-swatch" style="background-color: {palette.tertiary}"></div>
+                <span>Ter</span>
+              </div>
             </div>
           </div>
         </section>
@@ -135,6 +139,7 @@
             <p>Choose the bitrate for streaming.</p>
           </div>
           <select bind:value={$audioQuality} class="select-input">
+            <option value="auto">Auto-detect</option>
             <option value="original">Original</option>
             <option value="320k">320 kbps</option>
             <option value="192k">192 kbps</option>

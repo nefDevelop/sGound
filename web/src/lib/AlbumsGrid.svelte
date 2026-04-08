@@ -60,10 +60,13 @@
   {:else}
     <div class="albums-grid">
       {#each albums as album}
-        <button 
+        <div 
           class="album-card" 
           onclick={() => onselectAlbum?.(album.id)}
           oncontextmenu={(e) => showContextMenu(album, e)}
+          role="button"
+          tabindex="0"
+          onkeydown={(e) => e.key === 'Enter' && onselectAlbum?.(album.id)}
         >
           <div class="cover-wrapper">
             <img 
@@ -76,7 +79,16 @@
               }} 
             />
             <div class="play-overlay">
-              <div class="play-pill"><Icon name="play" size={24} /></div>
+              <button 
+                class="play-pill" 
+                onclick={(e) => {
+                  e.stopPropagation();
+                  onplayAlbum?.(album.id);
+                }}
+                aria-label="Play album"
+              >
+                <Icon name="play" size={20} />
+              </button>
             </div>
           </div>
           <div class="album-info">
@@ -86,7 +98,7 @@
               <span class="year">{album.year}</span>
             {/if}
           </div>
-        </button>
+        </div>
       {/each}
     </div>
   {/if}
@@ -112,7 +124,6 @@
     gap: 1.5rem;
   }
 
-  /* MD3 + GNOME Style Album Card */
   .album-card {
     background: transparent;
     cursor: pointer;
@@ -123,6 +134,7 @@
     padding: 10px;
     border-radius: 24px;
     border: 1px solid transparent;
+    outline: none;
   }
 
   .album-card:hover {
@@ -135,9 +147,9 @@
     position: relative;
     aspect-ratio: 1;
     width: 100%;
-    border-radius: 24px; /* Slightly tighter than the card */
+    border-radius: 24px;
     overflow: hidden;
-    box-shadow: 0 8px 30px rgba(0,0,0,0.4); /* MD3 shadow depth */
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
   }
 
   .cover {
@@ -149,32 +161,35 @@
   .play-overlay {
     position: absolute;
     top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.3);
+    background: linear-gradient(to top, rgba(0,0,0,0.4), transparent 40%);
     display: flex;
-    align-items: center;
-    justify-content: center;
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding: 1rem;
     opacity: 0;
-    transition: opacity 0.2s;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .album-card:hover .play-overlay { opacity: 1; }
 
   .play-pill {
-    background: #ff3366; /* Accent Color */
+    background: var(--primary);
     color: white;
-    width: 48px;
-    height: 48px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.2rem;
-    box-shadow: 0 4px 15px rgba(255, 51, 102, 0.4);
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.4);
     transform: scale(0.8);
-    transition: transform 0.2s;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .album-card:hover .play-pill { transform: scale(1); }
+  .play-pill:hover { transform: scale(1.1) !important; filter: brightness(1.2); }
 
   .album-info {
     display: flex;
