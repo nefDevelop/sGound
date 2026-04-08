@@ -766,15 +766,16 @@
 
   .player-area {
     grid-area: player;
-    margin: 0.5rem 1rem 1.5rem 1rem;
-    border-radius: 30px;
+    margin: 0.5rem 1rem 1rem 1rem; /* Aligned with content and sidebar */
+    border-radius: 28px;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
   }
 
   /* FullPlayer Unified Island on Desktop */
   .app-layout:has(.content.full-player-view) .player-area {
-    margin: 0 1rem 1.5rem 1rem;
+    margin: 0 1rem 1rem 1rem;
     border-top-left-radius: 0;
     border-top-right-radius: 0;
     border-top: none;
@@ -899,7 +900,8 @@
       border-radius: 16px; 
     }
     .nav-notification-dot { display: block !important; }
-    .content { margin-left: 0.5rem; border-radius: 28px; }
+    .content { margin: 1rem 0.6rem 0.5rem 0.6rem; border-radius: 28px; }
+    .player-area { margin: 0.5rem 0.6rem 1rem 0.6rem; border-radius: 28px; }
   }
 
   @media (max-width: 768px) {

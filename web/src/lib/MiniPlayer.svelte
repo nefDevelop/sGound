@@ -278,7 +278,7 @@
     margin: 0; 
     border-radius: inherit;
     border: 1px solid var(--border-color);
-    box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
     position: relative;
     overflow: hidden;
     z-index: 1000;
@@ -287,17 +287,17 @@
   .progress-bg {
     position: absolute;
     left: 0; top: 0; bottom: 0;
-    background: var(--primary);
-    opacity: 0.08;
+    /* Creating a subtle filling effect with a primary gradient */
+    background: linear-gradient(to bottom, rgba(var(--primary-rgb), 0.1), rgba(var(--primary-rgb), 0.18));
     z-index: -1;
-    transition: width 0.3s linear;
+    transition: width 0.4s cubic-bezier(0.1, 0.7, 0.1, 1);
   }
 
   .now-playing {
     display: flex;
     align-items: center;
     gap: 1.2rem;
-    min-width: 0;
+    min-width: 0; /* Essential for text trimming */
     flex: 1;
     cursor: pointer;
   }
@@ -307,26 +307,27 @@
     height: 60px;
     border-radius: 12px;
     object-fit: cover;
-    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    flex-shrink: 0;
   }
 
   .info {
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: 0.15rem;
     min-width: 0;
   }
 
   .album-name {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-weight: 800;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
     color: var(--primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    opacity: 0.9;
+    opacity: 0.85;
   }
 
   .track-meta {
@@ -337,7 +338,7 @@
   }
 
   .track-title {
-    font-size: 1.15rem;
+    font-size: 1.2rem;
     font-weight: 700;
     color: white;
     white-space: nowrap;
@@ -346,53 +347,49 @@
   }
 
   .quality-chip {
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     font-weight: 900;
-    padding: 0.15rem 0.4rem;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 6px;
-    color: var(--text-muted);
-    letter-spacing: 0.02em;
+    padding: 0.1rem 0.45rem;
+    background: var(--primary);
+    border-radius: 4px;
+    color: white;
+    letter-spacing: 0.05em;
     flex-shrink: 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
   }
 
   .right-actions {
     display: flex;
     align-items: center;
-    gap: 1.5rem;
+    gap: 2rem;
   }
 
   .playback-btns {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    background: rgba(255,255,255,0.03);
-    padding: 0.4rem 0.8rem;
-    border-radius: 100px;
-    border: 1px solid rgba(255,255,255,0.05);
+    gap: 0.8rem;
   }
 
   .main-play-btn {
     background: white;
     color: black;
     border: none;
-    width: 46px;
-    height: 46px;
+    width: 52px;
+    height: 52px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: transform 0.2s;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.4);
   }
   .main-play-btn:hover { transform: scale(1.08); }
 
   .extra-controls {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.5rem;
   }
 
   .volume-container {
@@ -401,11 +398,11 @@
 
   .volume-popover {
     position: absolute;
-    bottom: calc(100% + 1.5rem);
+    bottom: calc(100% + 1.8rem);
     left: 50%;
     transform: translateX(-50%);
     background: var(--surface-container-highest);
-    padding: 1.2rem 0.6rem;
+    padding: 1.4rem 0.6rem;
     border-radius: 20px;
     border: 1px solid var(--border-color);
     box-shadow: 0 10px 40px rgba(0,0,0,0.5);
@@ -414,8 +411,8 @@
 
   .vol-slider-wrap {
     height: 120px;
-    width: 8px;
-    background: rgba(255,255,255,0.1);
+    width: 6px;
+    background: rgba(255,255,255,0.08);
     border-radius: 10px;
     position: relative;
     overflow: hidden;
@@ -447,14 +444,17 @@
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 8px;
+    padding: 10px;
     border-radius: 50%;
-    transition: all 0.2s;
+    transition: all 0.25s ease;
     display: flex;
     align-items: center;
     justify-content: center;
   }
-  .icon-btn:hover { color: white; background: rgba(255,255,255,0.1); }
+  .icon-btn:hover { 
+    color: white; 
+    background: rgba(255,255,255,0.08);
+  }
 
   @media (max-width: 768px) {
     .player { 
@@ -466,10 +466,11 @@
     }
     .album-name, .progress-bg { display: none; }
     .right-actions { gap: 0.6rem; }
-    .playback-btns { padding: 0.2rem 0.5rem; gap: 0.3rem; background: transparent; border: none; }
-    .main-play-btn { width: 38px; height: 38px; }
+    .playback-btns { gap: 0.4rem; }
+    .main-play-btn { width: 38px; height: 38px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
     .cover { width: 44px; height: 44px; border-radius: 8px; }
     .track-title { font-size: 0.95rem; }
     .expand-btn { display: none; }
+    .icon-btn { padding: 6px; }
   }
 </style>
