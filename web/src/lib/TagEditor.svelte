@@ -168,158 +168,161 @@
 <div class="modal-backdrop" onclick={closeModal}>
   <div class="modal glass" onclick={(e) => e.stopPropagation()}>
     <div class="modal-header">
-      <div class="title-with-btn">
-        <h2>Edit Track Tags</h2>
-        <div class="header-actions">
-          <button type="button" class="auto-btn mb" onclick={suggestMusicBrainz} title="Auto-tag with MusicBrainz">
-            <Icon name="music" size={16} color="white" /> Auto-Tag MB
-          </button>
-          <button type="button" class="auto-btn" onclick={autoSearchTags} title="Search Metadata">
-            <Icon name="zap" size={16} color="#1e293b" /> Search
-          </button>
-        </div>
-      </div>
+      <h2>Edit Track Tags</h2>
       <button class="close-btn" onclick={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
     </div>
 
-    {#if searchResults.length > 0}
-      <div class="results-picker">
-        <div class="picker-header">
-           <h3>Select correct metadata</h3>
-           <p>Found {searchResults.length} matches</p>
-        </div>
-        <div class="results-list">
-          {#each searchResults as res}
-            <button class="result-item" onclick={() => applyMetadata(res)}>
-              <img src={res.artwork} alt="" />
-              <div class="res-info">
-                <span class="res-title">{res.title}</span>
-                <span class="res-sub">{res.artist} • {res.album} ({res.year})</span>
+    <div class="editor-content-wrap">
+      <aside class="editor-sidebar">
+        <div class="editor-hero">
+          <div class="cover-canvas">
+              <img src="/api/cover/{track.id}?t={Date.now()}" alt="Cover" />
+              <div class="cover-overlay">
+                  <Icon name="image" size={24} color="white" />
               </div>
-            </button>
-          {/each}
+          </div>
+          <div class="hero-info">
+              <h3>{track.title || 'Untitled'}</h3>
+              <p>{track.artist || 'Unknown Artist'}</p>
+          </div>
         </div>
-        <button class="cancel-btn block-btn" onclick={() => searchResults = []}>Back to editor</button>
-      </div>
-    {:else}
-      <form class="tag-form" onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
-        <div class="form-scroll">
-          <div class="editor-hero">
-            <div class="cover-canvas">
-                <img src="/api/cover/{track.id}?t={Date.now()}" alt="Cover" />
-                <div class="cover-overlay">
-                    <Icon name="image" size={24} color="white" />
-                </div>
+
+        <div class="sidebar-actions">
+          <button type="button" class="auto-btn mb" onclick={suggestMusicBrainz}>
+            <Icon name="music" size={16} color="white" /> 
+            <span>MusicBrainz Auto-Tag</span>
+          </button>
+          <button type="button" class="auto-btn" onclick={autoSearchTags}>
+            <Icon name="zap" size={16} color="var(--primary)" /> 
+            <span>Search Metadata</span>
+          </button>
+        </div>
+
+        {#if searchResults.length > 0}
+          <div class="results-picker">
+            <div class="picker-header">
+               <h3>Match results</h3>
+               <p>Found {searchResults.length} matches</p>
             </div>
-            <div class="hero-info">
-                <h3>{track.title || 'Untitled'}</h3>
-                <p>{track.artist || 'Unknown Artist'}</p>
-            </div>
-          </div>
-
-          <label>
-            <span>Title</span>
-            <input type="text" bind:value={track.title} required />
-          </label>
-
-          <label class="relative">
-            <span>Artist</span>
-            <input type="text" bind:value={track.artist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} required />
-            {#if suggestions.length > 0 && activeSuggestionField === 'artist'}
-              <div class="suggestions">
-                {#each suggestions as s}
-                  <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
-                {/each}
-              </div>
-            {/if}
-          </label>
-
-          <label class="relative">
-            <span>Album</span>
-            <input type="text" bind:value={track.album} oninput={(e) => fetchSuggestions('album', e.currentTarget.value)} required />
-            {#if suggestions.length > 0 && activeSuggestionField === 'album'}
-              <div class="suggestions">
-                {#each suggestions as s}
-                  <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
-                {/each}
-              </div>
-            {/if}
-          </label>
-
-          <div class="row">
-            <label>
-              <span>Year</span>
-              <input type="number" bind:value={track.year} />
-            </label>
-            <label class="relative">
-              <span>Genre</span>
-              <input type="text" bind:value={track.genre} oninput={(e) => fetchSuggestions('genre', e.currentTarget.value)} />
-              {#if suggestions.length > 0 && activeSuggestionField === 'genre'}
-                <div class="suggestions">
-                  {#each suggestions as s}
-                    <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
-                  {/each}
-                </div>
-              {/if}
-            </label>
-          </div>
-
-
-        <div class="row">
-          <label>
-            <span>Track #</span>
-            <input type="number" bind:value={track.trackNum} placeholder="1" />
-          </label>
-          <label>
-            <span>Disc #</span>
-            <input type="number" bind:value={track.discNum} placeholder="1" />
-          </label>
-        </div>
-
-        <label>
-          <span>Composer</span>
-          <input type="text" bind:value={track.composer} placeholder="Composer name..." />
-        </label>
-
-        <label>
-          <span>Comment</span>
-          <input type="text" bind:value={track.comment} placeholder="Your notes..." />
-        </label>
-
-        <label class="checkbox-row">
-          <input type="checkbox" bind:checked={track.instrumental} />
-          <span>Instrumental</span>
-        </label>
-
-        <label class="lyrics-label">
-          <div class="label-header">
-            <span>Lyrics</span>
-            <button type="button" class="mini-btn" onclick={searchLyrics}><Icon name="search" size={14} /> Search Online</button>
-          </div>
-          
-          {#if lyricSearchResults.length > 0}
-            <div class="lyric-chips">
-              {#each lyricSearchResults as res}
-                <button type="button" class="lyric-chip {res.syncedLyrics ? 'sync' : ''}" onclick={() => selectLyric(res)}>
-                   <Icon name={res.syncedLyrics ? "zap" : "fileText"} size={12} color={res.syncedLyrics ? "#1e293b" : "#94a3b8"} />
-                   <span>{res.syncedLyrics ? 'SYNC' : 'Plain'}</span>
+            <div class="results-list">
+              {#each searchResults as res}
+                <button class="result-item" onclick={() => applyMetadata(res)}>
+                  <img src={res.artwork} alt="" />
+                  <div class="res-info">
+                    <span class="res-title">{res.title}</span>
+                    <span class="res-sub">{res.artist} • {res.album} ({res.year})</span>
+                  </div>
                 </button>
               {/each}
             </div>
-          {/if}
+          </div>
+        {/if}
+      </aside>
 
-          <textarea bind:value={track.lyrics} placeholder="Paste lyrics or search online..."></textarea>
-        </label>
-      </div>
+      <div class="main-editor-area">
+        <form class="tag-form" onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
+          <div class="form-scroll">
+            <div class="form-grid">
+              <label class="col-span-2">
+                <span>Title</span>
+                <input type="text" bind:value={track.title} required />
+              </label>
 
-      <div class="actions">
-        <button type="button" class="cancel-btn" onclick={closeModal}>Cancel</button>
-        <button type="submit" class="save-btn" disabled={loading}>
-          {loading ? 'Saving...' : saveSuccess ? 'Saved ✓' : 'Save Tags & Lyrics'}
-        </button>
+              <label class="relative col-span-2">
+                <span>Artist</span>
+                <input type="text" bind:value={track.artist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} required />
+                {#if suggestions.length > 0 && activeSuggestionField === 'artist'}
+                  <div class="suggestions">
+                    {#each suggestions as s}
+                      <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
+                    {/each}
+                  </div>
+                {/if}
+              </label>
+
+              <label class="relative col-span-2">
+                <span>Album</span>
+                <input type="text" bind:value={track.album} oninput={(e) => fetchSuggestions('album', e.currentTarget.value)} required />
+                {#if suggestions.length > 0 && activeSuggestionField === 'album'}
+                  <div class="suggestions">
+                    {#each suggestions as s}
+                      <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
+                    {/each}
+                  </div>
+                {/if}
+              </label>
+
+              <label>
+                <span>Year</span>
+                <input type="number" bind:value={track.year} />
+              </label>
+              <label class="relative">
+                <span>Genre</span>
+                <input type="text" bind:value={track.genre} oninput={(e) => fetchSuggestions('genre', e.currentTarget.value)} />
+                {#if suggestions.length > 0 && activeSuggestionField === 'genre'}
+                  <div class="suggestions">
+                    {#each suggestions as s}
+                      <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
+                    {/each}
+                  </div>
+                {/if}
+              </label>
+
+              <label>
+                <span>Track #</span>
+                <input type="number" bind:value={track.trackNum} placeholder="1" />
+              </label>
+              <label>
+                <span>Disc #</span>
+                <input type="number" bind:value={track.discNum} placeholder="1" />
+              </label>
+
+              <label class="col-span-2">
+                <span>Composer</span>
+                <input type="text" bind:value={track.composer} placeholder="Composer name..." />
+              </label>
+
+              <label class="col-span-2">
+                <span>Comment</span>
+                <input type="text" bind:value={track.comment} placeholder="Your notes..." />
+              </label>
+
+              <label class="checkbox-row col-span-2">
+                <input type="checkbox" bind:checked={track.instrumental} />
+                <span>Instrumental Track</span>
+              </label>
+
+              <label class="lyrics-label col-span-2">
+                <div class="label-header">
+                  <span>Lyrics</span>
+                  <button type="button" class="mini-btn" onclick={searchLyrics}><Icon name="search" size={14} /> Search Online</button>
+                </div>
+                
+                {#if lyricSearchResults.length > 0}
+                  <div class="lyric-chips">
+                    {#each lyricSearchResults as res}
+                      <button type="button" class="lyric-chip {res.syncedLyrics ? 'sync' : ''}" onclick={() => selectLyric(res)}>
+                         <Icon name={res.syncedLyrics ? "zap" : "fileText"} size={12} color={res.syncedLyrics ? "#1e293b" : "#94a3b8"} />
+                         <span>{res.syncedLyrics ? 'SYNC' : 'Plain'}</span>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+
+                <textarea bind:value={track.lyrics} placeholder="Paste lyrics or search online..."></textarea>
+              </label>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button type="button" class="cancel-btn" onclick={closeModal}>Cancel</button>
+            <button type="submit" class="save-btn" disabled={loading}>
+              {loading ? 'Saving...' : saveSuccess ? 'Saved ✓' : 'Save Track Details'}
+            </button>
+          </div>
+        </form>
       </div>
-      </form>
-    {/if}
+    </div>
   </div>
 </div>
 {/if}
@@ -333,76 +336,103 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 100;
+    z-index: 5000;
   }
 
   .modal {
     background: var(--surface-container-highest);
-    padding: 2.5rem;
-    border-radius: 32px;
+    padding: 0;
+    border-radius: 40px;
     width: 95%;
-    max-width: 550px;
-    max-height: 90vh;
+    max-width: 900px;
+    height: 85vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 40px 80px rgba(0,0,0,0.5);
+    box-shadow: 0 40px 120px rgba(0,0,0,0.6);
     border: 1px solid var(--border-color);
     overflow: hidden;
     box-sizing: border-box;
   }
 
-  .form-scroll {
-    overflow-y: auto;
-    padding-right: 0.5rem;
+  .editor-content-wrap {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .editor-sidebar {
+    width: 320px;
+    background: rgba(0,0,0,0.2);
+    border-right: 1px solid var(--border-color);
+    padding: 2rem;
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: 2rem;
+    overflow-y: auto;
+  }
+
+  .main-editor-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 2.5rem;
+    overflow: hidden;
+  }
+
+  .form-scroll {
+    overflow-y: auto;
+    padding-right: 1rem;
     margin-bottom: 2rem;
     flex: 1;
     min-height: 0;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+
+  .col-span-2 {
+    grid-column: span 2;
   }
 
   .modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 2rem;
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid var(--border-color);
   }
 
-  .title-with-btn {
+  .sidebar-actions {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .header-actions {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    gap: 0.8rem;
   }
 
   .auto-btn {
     background: var(--surface-container-high);
     color: var(--text-main);
     border: 1px solid var(--border-color);
-    padding: 0.6rem 1.2rem;
-    border-radius: 20px;
-    font-size: 0.8rem;
+    padding: 0.8rem 1.2rem;
+    border-radius: 16px;
+    font-size: 0.85rem;
     font-weight: 700;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    width: fit-content;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.8rem;
     transition: all 0.2s;
   }
+
+  .auto-btn span { white-space: nowrap; }
 
   .auto-btn.mb {
     background: var(--primary);
     color: white;
     border: none;
-    box-shadow: 0 4px 15px var(--primary-10);
+    box-shadow: 0 4px 15px var(--primary-20);
   }
 
   .auto-btn:hover {
@@ -410,20 +440,7 @@
     filter: brightness(1.1);
   }
 
-  .modal-header h2 { margin: 0; color: white; }
-
-  .row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    width: 100%;
-  }
-
-  @media (max-width: 400px) {
-    .row {
-      grid-template-columns: 1fr;
-    }
-  }
+  .modal-header h2 { margin: 0; color: white; font-size: 1.2rem; }
 
   .relative { position: relative; }
 
@@ -595,31 +612,15 @@
     padding: 0.8rem;
   }
 
-  .block-btn {
-    width: 100%;
-    background: rgba(255,255,255,0.05);
-    margin-top: 1rem;
-    border-radius: 12px;
-  }
-
-  .editor-hero {
-     display: flex;
-     gap: 1.5rem;
-     align-items: center;
-     background: rgba(255,255,255,0.03);
-     padding: 1rem;
-     border-radius: 20px;
-     border: 1px solid rgba(255,255,255,0.05);
-  }
-
   .cover-canvas {
       position: relative;
-      width: 80px;
-      height: 80px;
-      border-radius: 12px;
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 24px;
       overflow: hidden;
       flex-shrink: 0;
-      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+      margin-bottom: 1rem;
   }
 
   .cover-canvas img {
@@ -639,10 +640,8 @@
       transition: opacity 0.2s;
   }
 
-  .cover-canvas:hover .cover-overlay { opacity: 1; }
-
-  .hero-info h3 { margin: 0; font-size: 1.1rem; color: white; }
-  .hero-info p { margin: 0.2rem 0 0; font-size: 0.9rem; color: #94a3b8; }
+  .hero-info h3 { margin: 0; font-size: 1.2rem; color: white; font-weight: 900; }
+  .hero-info p { margin: 0.3rem 0 0; font-size: 1rem; color: #94a3b8; font-weight: 600; }
 
   .picker-header { margin-bottom: 1rem; }
   .picker-header h3 { margin: 0; color: white; font-size: 1.2rem; }

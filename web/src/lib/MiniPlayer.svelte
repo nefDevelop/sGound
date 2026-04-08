@@ -3,7 +3,7 @@
   import { fade } from 'svelte/transition';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { queue, currentIndex, audioQuality, isPlaying, showToast } from './stores.js';
+  import { queue, currentIndex, audioQuality, effectiveQuality, isPlaying, showToast } from './stores.js';
   import { get } from 'svelte/store';
   
   let { 
@@ -78,7 +78,7 @@
         const next = q[idx + 1];
         if (next && next.id !== preloadedId) {
           const nextEl = activeAudio === 'A' ? audioB : audioA;
-          const quality = get(audioQuality);
+          const quality = get(effectiveQuality);
           const url = `/api/stream/${next.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
           nextEl.src = url;
           nextEl.load();
@@ -115,7 +115,7 @@
 
   $effect(() => {
     if (currentPlaying && audioRef && audioRef.src.indexOf(currentPlaying.id) === -1 && !preloadedId) {
-      const quality = get(audioQuality);
+      const quality = get(effectiveQuality);
       const url = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
       audioRef.src = url;
       audioRef.play().catch(() => {});
@@ -143,7 +143,7 @@
       if (preloadedId === next.id) {
          switchAudio();
       } else {
-         const quality = get(audioQuality);
+         const quality = get(effectiveQuality);
          audioRef.src = `/api/stream/${next.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
          audioRef.play().catch(() => {});
          preloadedId = null;
@@ -157,7 +157,7 @@
       currentIndex.set(idx - 1);
       const q = get(queue);
       currentPlaying = q[idx-1];
-      const quality = get(audioQuality);
+      const quality = get(effectiveQuality);
       audioRef.src = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
       audioRef.play().catch(() => {});
       preloadedId = null;

@@ -53,7 +53,7 @@
         <label for="password">Contraseña</label>
         <div class="input-wrapper">
           <Icon name="lock" size={18} color="var(--text-muted)" />
-          <input type="password" id="password" bind:value={password} placeholder="Mínimo 8 caracteres" required autofocus />
+          <input type="password" id="password" bind:value={password} placeholder="Mínimo 8 caracteres" required />
         </div>
       </div>
 

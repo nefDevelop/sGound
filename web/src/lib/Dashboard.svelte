@@ -27,7 +27,8 @@
     inboxCount: 0,
     forgottenGems: [],
     mostPlayed: [],
-    discovery: []
+    discovery: [],
+    trends: []
   });
   let health = $state({ missingTags: 0, missingLyrics: 0, duplicateCount: 0, orphanCount: 0 });
   let loading = $state(true);
@@ -69,6 +70,7 @@
         const data = await sRes.json();
         data.forgottenGems = data.forgottenGems || [];
         data.mostPlayed = data.mostPlayed || [];
+        data.trends = data.trends || [];
         stats = data;
         inboxCount.set(data.inboxCount);
       }
@@ -227,25 +229,26 @@
     {/if}
 
     <!-- Trends Tile -->
-    {#if stats.totalGenres > 0}
+    {#if stats.trends && stats.trends.length > 0}
     <section class="bento-item trends-tile">
       <div class="tile-header">
         <Icon name="flame" size={20} color="var(--tertiary)" />
         <h3>Trends</h3>
       </div>
       <div class="genre-bars">
-        <div class="bar-item">
-          <div class="bar-info"><span>Electronic</span> <small>42%</small></div>
-          <div class="progress"><div class="fill" style="width: 42%"></div></div>
-        </div>
-        <div class="bar-item">
-          <div class="bar-info"><span>Jazz</span> <small>28%</small></div>
-          <div class="progress"><div class="fill sec" style="width: 28%"></div></div>
-        </div>
-        <div class="bar-item">
-          <div class="bar-info"><span>Lo-Fi</span> <small>15%</small></div>
-          <div class="progress"><div class="fill ter" style="width: 15%"></div></div>
-        </div>
+        {#each stats.trends as t, i}
+          <div class="bar-item">
+            <div class="bar-info"><span>{t.genre}</span> <small>{t.percentage}%</small></div>
+            <div class="progress">
+              <div 
+                class="fill" 
+                class:sec={i === 1} 
+                class:ter={i === 2} 
+                style="width: {t.percentage}%"
+              ></div>
+            </div>
+          </div>
+        {/each}
       </div>
     </section>
     {/if}

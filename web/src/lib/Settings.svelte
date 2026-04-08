@@ -18,6 +18,7 @@
     const data = await res.json();
     config.musicPath = data.musicPath;
     config.autoRename = data.autoRename;
+    config.renamePattern = data.renamePattern || '{artist}/{album}/{track} - {title}';
     config.themeColor = data.themeColor || '#ff3366';
     config.replayGainEnabled = data.replayGainEnabled;
     applyTheme(palette);
@@ -56,6 +57,33 @@
   $effect(() => {
     applyTheme(palette);
   });
+
+  let organizeStatus = $state({ isRunning: false, total: 0, processed: 0, current: '' });
+
+  async function pollOrganizeStatus() {
+    const res = await fetch('/api/library/organize/status');
+    if (res.ok) {
+      organizeStatus = await res.json();
+      if (organizeStatus.isRunning) {
+        setTimeout(pollOrganizeStatus, 1000);
+      }
+    }
+  }
+
+  $effect(() => {
+    pollOrganizeStatus();
+  });
+
+  async function startOrganize() {
+    if (!confirm("This will move ALL files in your library to match the pattern. Are you sure?")) return;
+    
+    const res = await fetch('/api/library/organize', { method: 'POST' });
+    if (res.ok) {
+      pollOrganizeStatus();
+    } else {
+      alert("Failed to start organization");
+    }
+  }
 
   async function saveConfig() {
     loading = true;
@@ -132,6 +160,50 @@
           </div>
           <input type="text" bind:value={config.musicPath} placeholder="/path/to/music" />
         </section>
+
+        <section class="setting-item">
+          <div class="info">
+            <div class="title-with-help">
+              <h3>Auto Cataloging</h3>
+              <div class="tooltip-wrap">
+                <Icon name="helpCircle" size={14} />
+                <div class="tooltip">Automatically renames and moves files based on tags.</div>
+              </div>
+            </div>
+            <p>Automatically move files when tags are updated.</p>
+          </div>
+          <div style="display: flex; align-items: center; gap: 1rem;">
+             <input type="checkbox" bind:checked={config.autoRename} style="width: 20px; height: 20px;" />
+             <span style="font-weight: 700;">Enable Automatic Organization</span>
+          </div>
+        </section>
+
+        {#if config.autoRename}
+        <section class="setting-item">
+          <div class="info">
+            <h3>Rename Pattern</h3>
+            <p>Use placeholders: <b>{`{artist}, {album}, {title}, {year}, {genre}, {track}, {bitrate}`}</b></p>
+          </div>
+          <input type="text" bind:value={config.renamePattern} placeholder="{artist}/{album}/{track} - {title}" />
+          
+          {#if organizeStatus.isRunning}
+            <div class="organize-progress-wrap">
+              <div class="progress-bar-bg">
+                 <div class="progress-bar-fill" style="width: {(organizeStatus.processed / organizeStatus.total) * 100}%"></div>
+              </div>
+              <div class="progress-stats">
+                 <span class="p-count">{organizeStatus.processed} / {organizeStatus.total} tracks</span>
+                 <span class="p-current">Moving: {organizeStatus.current}</span>
+              </div>
+            </div>
+          {:else}
+            <button class="scan-btn" onclick={startOrganize}>
+               <Icon name="folder" size={18} />
+               Organize Library Now
+            </button>
+          {/if}
+        </section>
+        {/if}
 
         <section class="setting-item">
           <div class="info">
@@ -270,6 +342,41 @@
     font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 0.8rem; transition: all 0.2s;
   }
   .scan-btn:hover { background: var(--primary-10); border-color: var(--primary); }
+
+  .organize-progress-wrap {
+    background: var(--surface-container-low);
+    padding: 1.5rem;
+    border-radius: 20px;
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .progress-bar-bg {
+    height: 8px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--primary);
+    box-shadow: 0 0 15px var(--primary-40);
+    transition: width 0.3s ease-out;
+  }
+
+  .progress-stats {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+  }
+
+  .p-count { font-weight: 800; color: var(--primary); }
+  .p-current { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
 
   .api-keys-list { display: flex; flex-direction: column; gap: 1rem; }
   .key-item { 

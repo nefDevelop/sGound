@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, derived } from 'svelte/store';
 
 export const toast = writable(null);
 
@@ -9,6 +9,21 @@ export const audioQuality = writable(localStorage.getItem('audioQuality') || def
 
 audioQuality.subscribe(value => {
     localStorage.setItem('audioQuality', value);
+});
+
+export const effectiveQuality = derived(audioQuality, ($quality) => {
+    if ($quality !== 'auto') return $quality;
+    
+    // Auto-detection based on network speed (where available)
+    if (typeof navigator !== 'undefined' && navigator.connection) {
+        const type = navigator.connection.effectiveType; // '4g', '3g', '2g', 'slow-2g'
+        if (type === '4g') return 'original';
+        if (type === '3g') return '192k';
+        return '128k'; // Fallback for 2g or slow connections
+    }
+    
+    // Basic fallback for browsers without Network Information API (like Safari)
+    return isMobile ? '128k' : 'original';
 });
 
 // Playback state

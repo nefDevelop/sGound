@@ -63,7 +63,7 @@
         <label for="username">Usuario</label>
         <div class="input-wrapper">
           <Icon name="user" size={18} color="var(--text-muted)" />
-          <input type="text" id="username" bind:value={username} placeholder="admin" required autofocus />
+          <input type="text" id="username" bind:value={username} placeholder="admin" required />
         </div>
       </div>
 

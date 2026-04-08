@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"crypto/rand"
 
 	"github.com/bogem/id3v2/v2"
 	"github.com/go-flac/flacvorbis"
@@ -12,6 +13,78 @@ import (
 	"sgound/internal/db"
 	"log"
 )
+
+// GenerateUUID genera un ID único para cada track
+func GenerateUUID() string {
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+// ReadPersistentID lee el SGOUND_ID del archivo físico
+func ReadPersistentID(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".mp3" {
+		tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
+		if err != nil { return "" }
+		defer tag.Close()
+		frames := tag.GetFrames(tag.CommonID("User defined text information"))
+		for _, f := range frames {
+			if tf, ok := f.(id3v2.UserDefinedTextFrame); ok && tf.Description == "SGOUND_ID" {
+				return tf.Value
+			}
+		}
+	} else if ext == ".flac" {
+		f, err := flac.ParseFile(path)
+		if err != nil { return "" }
+		for _, block := range f.Meta {
+			if block.Type == flac.VorbisComment {
+				cm, _ := flacvorbis.ParseFromMetaDataBlock(*block)
+				if cm == nil { continue }
+				vals, _ := cm.Get("SGOUND_ID")
+				if len(vals) > 0 { return vals[0] }
+			}
+		}
+	}
+	return ""
+}
+
+// WritePersistentID escribe el SGOUND_ID en el archivo físico
+func WritePersistentID(path string, id string) error {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".mp3" {
+		tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
+		if err != nil { return err }
+		defer tag.Close()
+		tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
+			Encoding:    id3v2.EncodingUTF8,
+			Description: "SGOUND_ID",
+			Value:       id,
+		})
+		return tag.Save()
+	} else if ext == ".flac" {
+		f, err := flac.ParseFile(path)
+		if err != nil { return err }
+		var cm *flacvorbis.MetaDataBlockVorbisComment
+		var cmIdx = -1
+		for i, block := range f.Meta {
+			if block.Type == flac.VorbisComment {
+				cm, _ = flacvorbis.ParseFromMetaDataBlock(*block)
+				cmIdx = i
+				break
+			}
+		}
+		if cm == nil { cm = flacvorbis.New() }
+		cm.Comments = append(cm.Comments, "SGOUND_ID="+id)
+		block := cm.Marshal()
+		if cmIdx != -1 { f.Meta[cmIdx] = &block } else { f.Meta = append(f.Meta, &block) }
+		return f.Save(path)
+	}
+	return nil
+}
 
 type Editor struct {
 	DB *db.Database
@@ -89,7 +162,17 @@ func (e *Editor) OrganizeFile(trackID string, musicRoot string, pattern string) 
 	var trackNum, year, discNum, bitrate int
 
 	query := `
-		SELECT t.path, t.title, a.name, al.title, t.track_num, t.format, t.genre, al.year, t.disc_num, t.bit_rate
+		SELECT 
+			t.path, 
+			COALESCE(t.title, 'Unknown Title'), 
+			COALESCE(a.name, 'Unknown Artist'), 
+			COALESCE(al.title, 'Unknown Album'), 
+			COALESCE(t.track_num, 0), 
+			COALESCE(t.format, 'mp3'), 
+			COALESCE(t.genre, 'Unknown'), 
+			COALESCE(al.year, 0), 
+			COALESCE(t.disc_num, 0), 
+			COALESCE(t.bit_rate, 0)
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
@@ -107,6 +190,13 @@ func (e *Editor) OrganizeFile(trackID string, musicRoot string, pattern string) 
 		return strings.TrimSpace(r.Replace(s))
 	}
 
+	// Valores por defecto para tags vacíos
+	if artist == "" { artist = "Unknown Artist" }
+	if album == "" { album = "Unknown Album" }
+	if genre == "" { genre = "Unknown" }
+	yearStr := fmt.Sprintf("%d", year)
+	if year == 0 { yearStr = "Unknown Year" }
+
 	// Reemplazar marcadores en el patrón
 	newRelPath := pattern
 	newRelPath = strings.ReplaceAll(newRelPath, "{artist}", clean(artist))
@@ -114,14 +204,31 @@ func (e *Editor) OrganizeFile(trackID string, musicRoot string, pattern string) 
 	newRelPath = strings.ReplaceAll(newRelPath, "{title}", clean(title))
 	newRelPath = strings.ReplaceAll(newRelPath, "{genre}", clean(genre))
 	newRelPath = strings.ReplaceAll(newRelPath, "{format}", strings.ToLower(format))
-	newRelPath = strings.ReplaceAll(newRelPath, "{year}", fmt.Sprintf("%d", year))
+	newRelPath = strings.ReplaceAll(newRelPath, "{year}", yearStr)
 	newRelPath = strings.ReplaceAll(newRelPath, "{track}", fmt.Sprintf("%02d", trackNum))
 	newRelPath = strings.ReplaceAll(newRelPath, "{disc}", fmt.Sprintf("%d", discNum))
 	newRelPath = strings.ReplaceAll(newRelPath, "{bitrate}", fmt.Sprintf("%dk", bitrate/1000))
 
 	newPath := filepath.Join(musicRoot, newRelPath+"."+format)
-	newDirPath := filepath.Dir(newPath)
+	
+	// Prevenir colisiones: si el archivo existe y no es el mismo, añadir sufijo (1), (2)...
+	if _, err := os.Stat(newPath); err == nil && newPath != oldPath {
+		ext := "." + format
+		base := strings.TrimSuffix(newPath, ext)
+		counter := 1
+		for {
+			candidate := fmt.Sprintf("%s (%d)%s", base, counter, ext)
+			if _, err := os.Stat(candidate); os.IsNotExist(err) {
+				newPath = candidate
+				break
+			}
+			counter++
+		}
+		log.Printf("[Organize] Collision detected for %s, renaming to %s", trackID, filepath.Base(newPath))
+	}
 
+	newDirPath := filepath.Dir(newPath)
+	oldDirPath := filepath.Dir(oldPath)
 
 	if oldPath == newPath {
 		return newPath, nil
@@ -132,15 +239,74 @@ func (e *Editor) OrganizeFile(trackID string, musicRoot string, pattern string) 
 		return "", fmt.Errorf("failed to create directories: %w", err)
 	}
 
-	// Mover archivo
+	// Mover archivos adjuntos antes de mover el principal (covers, lyrics, etc)
+	moveSidecars(oldPath, newPath)
+
+	// Mover archivo principal
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return "", fmt.Errorf("failed to move file: %w", err)
 	}
+
+	// Limpieza de carpetas vacías (subiendo por el árbol)
+	go func(dir string, root string) {
+		for dir != root && dir != "." && dir != "/" {
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) > 0 {
+				break // Hay archivos o error, paramos limpieza
+			}
+			os.Remove(dir)
+			dir = filepath.Dir(dir)
+		}
+	}(oldDirPath, musicRoot)
 
 	// Actualizar base de datos con la nueva ruta
 	_, err = e.DB.Conn.Exec("UPDATE tracks SET path = ? WHERE id = ?", newPath, trackID)
 	
 	return newPath, err
+}
+
+// moveSidecars busca y mueve archivos relacionados (letras, carátulas) al mover un track
+func moveSidecars(oldPath, newPath string) {
+	oldDir := filepath.Dir(oldPath)
+	newDir := filepath.Dir(newPath)
+	
+	oldBase := strings.TrimSuffix(filepath.Base(oldPath), filepath.Ext(oldPath))
+	newBase := strings.TrimSuffix(filepath.Base(newPath), filepath.Ext(newPath))
+
+	entries, err := os.ReadDir(oldDir)
+	if err != nil { return }
+
+	commonSidecars := []string{"cover", "folder", "front", "album", "artwork"}
+
+	for _, e := range entries {
+		if e.IsDir() { continue }
+		name := e.Name()
+		lowName := strings.ToLower(name)
+		ext := strings.ToLower(filepath.Ext(name))
+
+		// 1. Letras o archivos con el mismo nombre que el audio (ej: song.lrc, song.txt)
+		if strings.HasPrefix(name, oldBase+".") && name != filepath.Base(oldPath) {
+			os.Rename(filepath.Join(oldDir, name), filepath.Join(newDir, newBase+ext))
+			continue
+		}
+
+		// 2. Archivos de carátula comunes en la carpeta (ej: cover.jpg, folder.png)
+		isAlbumSidecar := false
+		for _, cs := range commonSidecars {
+			if strings.HasPrefix(lowName, cs) {
+				isAlbumSidecar = true
+				break
+			}
+		}
+
+		if isAlbumSidecar {
+			// Solo lo movemos si el destino no lo tiene ya (ej: ya se movió con otro track del mismo álbum)
+			destPath := filepath.Join(newDir, name)
+			if _, err := os.Stat(destPath); os.IsNotExist(err) {
+				os.Rename(filepath.Join(oldDir, name), destPath)
+			}
+		}
+	}
 }
 
 func (e *Editor) UpdateLyrics(trackID string, lyrics string) error {

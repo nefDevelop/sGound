@@ -40,6 +40,14 @@ type Server struct {
 	dbMutex      sync.RWMutex
 	jwtSecret    []byte
 	scanStatuses sync.Map // [string]*ScanStatus
+	organizeStatuses sync.Map // [string]*OrganizeStatus
+}
+
+type OrganizeStatus struct {
+	IsRunning bool   `json:"isRunning"`
+	Total     int    `json:"total"`
+	Processed int    `json:"processed"`
+	Current   string `json:"current"`
 }
 
 func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
@@ -51,11 +59,12 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 	}
 
 	return &Server{
-		MasterDB:     masterDB,
-		Config:       cfg,
-		activeDBs:    make(map[string]*db.Database),
-		jwtSecret:    []byte(secret),
-		scanStatuses: sync.Map{},
+		MasterDB:         masterDB,
+		Config:           cfg,
+		activeDBs:        make(map[string]*db.Database),
+		jwtSecret:        []byte(secret),
+		scanStatuses:     sync.Map{},
+		organizeStatuses: sync.Map{},
 	}
 }
 
@@ -86,6 +95,8 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/search", auth(s.handleSearch))
 	mux.HandleFunc("/api/dashboard", auth(s.handleDashboard))
 	mux.HandleFunc("/api/library/health", auth(s.handleLibraryHealth))
+	mux.HandleFunc("/api/library/organize", auth(s.handleOrganizeLibrary))
+	mux.HandleFunc("/api/library/organize/status", auth(s.handleOrganizeStatus))
 	mux.HandleFunc("/api/library/status", auth(s.handleScanStatus))
 	mux.HandleFunc("/api/library/inbox", auth(s.handleGetInbox))
 	mux.HandleFunc("/api/tracks/approve", auth(s.handleApproveTracks))
@@ -785,6 +796,76 @@ func (s *Server) handleManualOrganize(trackID string, w http.ResponseWriter, r *
 	json.NewEncoder(w).Encode(map[string]string{"newPath": newPath})
 }
 
+func (s *Server) handleOrganizeLibrary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	user, ok := r.Context().Value(userKey).(string)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Evitar que corran dos al mismo tiempo
+	if status, ok := s.organizeStatuses.Load(user); ok && status.(*OrganizeStatus).IsRunning {
+		http.Error(w, "Organization already in progress", http.StatusConflict)
+		return
+	}
+
+	db := s.getDB(r)
+	var total int
+	db.Conn.QueryRow("SELECT COUNT(*) FROM tracks").Scan(&total)
+
+	status := &OrganizeStatus{
+		IsRunning: true,
+		Total:     total,
+		Processed: 0,
+		Current:   "Counting files...",
+	}
+	s.organizeStatuses.Store(user, status)
+
+	// Lógica en segundo plano
+	go func() {
+		rows, err := db.Conn.Query("SELECT id, title FROM tracks")
+		if err != nil {
+			status.IsRunning = false
+			return
+		}
+		defer rows.Close()
+
+		editor := tags.NewEditor(db)
+		for rows.Next() {
+			var id, title string
+			if err := rows.Scan(&id, &title); err == nil {
+				status.Current = title
+				editor.OrganizeFile(id, s.Config.MusicPath, s.Config.RenamePattern)
+				status.Processed++
+			}
+		}
+		status.IsRunning = false
+		status.Current = "Done"
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+}
+
+func (s *Server) handleOrganizeStatus(w http.ResponseWriter, r *http.Request) {
+	user, _ := r.Context().Value(userKey).(string)
+	status, ok := s.organizeStatuses.Load(user)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(OrganizeStatus{IsRunning: false})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
 func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -1222,6 +1303,35 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	stats["discovery"] = recentAlbums
+	
+	// Trends: Top 3 genres by track count
+	trends := make([]map[string]interface{}, 0)
+	var totalActiveWithGenre int
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active' AND genre != ''").Scan(&totalActiveWithGenre)
+
+	if totalActiveWithGenre > 0 {
+		rows4, err := s.getDB(r).Conn.Query(`
+			SELECT genre, COUNT(*) as count 
+			FROM tracks 
+			WHERE status = 'active' AND genre != '' 
+			GROUP BY genre 
+			ORDER BY count DESC LIMIT 3
+		`)
+		if err == nil {
+			defer rows4.Close()
+			for rows4.Next() {
+				var g string
+				var c int
+				rows4.Scan(&g, &c)
+				percentage := (c * 100) / totalActiveWithGenre
+				trends = append(trends, map[string]interface{}{
+					"genre":      g,
+					"percentage": percentage,
+				})
+			}
+		}
+	}
+	stats["trends"] = trends
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
