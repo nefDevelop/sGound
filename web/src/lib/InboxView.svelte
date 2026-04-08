@@ -77,7 +77,7 @@
 </script>
 
 <div class="inbox-view" in:fade>
-  <header class="view-header">
+  <header class="section-header">
     <div class="texts">
       <h1>Inbox</h1>
       <p class="desc">Newly detected files. Approve them to include them in your main library.</p>
@@ -132,15 +132,15 @@
     flex-direction: column;
   }
 
-  .view-header {
+  .section-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-end;
-    margin-bottom: 2rem;
+    align-items: center;
+    margin-bottom: 2.5rem;
     gap: 2rem;
   }
 
-  h1 { font-family: var(--font-headline); font-size: 3rem; margin: 0; letter-spacing: -1.5px; }
+  h1 { font-size: 2.5rem; font-weight: 950; margin: 0; letter-spacing: -1.5px; color: var(--text-main); }
   .desc { color: var(--text-muted); margin-top: 0.5rem; max-width: 600px; }
 
   .actions { display: flex; gap: 1rem; }

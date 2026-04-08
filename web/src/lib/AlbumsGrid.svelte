@@ -52,7 +52,10 @@
 </script>
 
 <div class="albums-container">
-  <h1>Albums</h1>
+  <header class="section-header">
+    <h1>Albums</h1>
+  </header>
+
   {#if loading}
     <div class="status">Curating your library...</div>
   {:else if albums.length === 0}
@@ -114,7 +117,14 @@
 
 <style>
   .albums-container { width: 100%; padding: 0 0 3rem 0; animation: fadeIn 0.4s ease-out; }
-  h1 { font-size: 2.5rem; font-weight: 900; letter-spacing: -1px; margin: 0.5rem 0 2.5rem 0; color: var(--text-main); }
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2.5rem;
+  }
+
+  h1 { font-size: 2.5rem; font-weight: 950; letter-spacing: -1.5px; margin: 0; color: var(--text-main); }
   
   .status { color: var(--text-muted); text-align: center; margin-top: 5rem; font-weight: 700; font-size: 1.2rem; }
 

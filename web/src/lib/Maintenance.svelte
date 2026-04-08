@@ -74,18 +74,20 @@
 </script>
 
 <div class="maintenance-view" in:fade>
-  <header class="view-header">
-    <div class="header-content">
-      {#if currentView !== 'overview'}
-        <button class="icon-btn back-btn" onclick={() => currentView = 'overview'} aria-label="Back to overview">
-          <Icon name="arrowLeft" size={24} />
-        </button>
+  <header class="section-header">
+    <div class="texts">
+       <div class="title-row">
+        {#if currentView !== 'overview'}
+          <button class="icon-btn back-btn" onclick={() => currentView = 'overview'} aria-label="Back to overview">
+            <Icon name="arrowLeft" size={24} />
+          </button>
+        {/if}
+        <h1>Library Health</h1>
+      </div>
+      {#if currentView === 'overview'}
+        <p class="subtitle">System tools for library optimization and integrity checks.</p>
       {/if}
-      <h1 class="responsive-title">Library Health</h1>
     </div>
-    {#if currentView === 'overview'}
-      <p class="subtitle">System tools for library optimization and integrity checks.</p>
-    {/if}
   </header>
 
   {#if currentView === 'overview'}
@@ -191,18 +193,7 @@
 <style>
   .maintenance-view { padding: 0; width: 100%; max-width: 1400px; margin: 0 auto; }
   
-  .view-header { margin-bottom: 3.5rem; }
-  .header-content { display: flex; align-items: center; gap: 1.5rem; margin-bottom: 0.5rem; }
-  
-  .responsive-title { 
-    font-size: clamp(2.5rem, 6vw, 4.5rem); 
-    font-weight: 900; 
-    margin: 0; 
-    letter-spacing: -0.04em;
-    color: var(--text-main);
-  }
-
-  .subtitle { color: var(--text-muted); font-size: 1.2rem; font-weight: 500; opacity: 0.8; }
+  .subtitle { color: var(--text-muted); font-size: 1.2rem; font-weight: 500; opacity: 0.8; margin-top: 0.5rem; }
 
   .bento-grid {
     display: grid;
@@ -257,6 +248,25 @@
     border: 1px solid var(--border-color); 
     animation: slideUp 0.4s ease-out;
   }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2.5rem;
+    gap: 2rem;
+  }
+
+  h1 { 
+    font-size: 2.5rem; 
+    font-weight: 950; 
+    margin: 0; 
+    letter-spacing: -1.5px;
+    line-height: 1;
+    color: var(--text-main);
+  }
+
+  .title-row { display: flex; align-items: center; gap: 1rem; }
 
   .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2.5rem; }
   .detail-header h2 { font-size: 2.2rem; font-weight: 900; margin: 0; letter-spacing: -0.02em; }

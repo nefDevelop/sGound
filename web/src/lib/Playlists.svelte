@@ -151,7 +151,7 @@
     margin-bottom: 2.5rem;
   }
 
-  h1 { font-size: 2.5rem; font-weight: 900; letter-spacing: -1.5px; margin: 0; color: var(--text-main); }
+  h1 { font-size: 2.5rem; font-weight: 950; letter-spacing: -1.5px; margin: 0; color: var(--text-main); }
 
   .smart-playlists { margin-bottom: 4rem; }
   .smart-playlists h2 {

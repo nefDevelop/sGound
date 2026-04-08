@@ -193,6 +193,9 @@
 </script>
 
 <div class="tracks-view">
+  <header class="section-header">
+    <h1>Tracks</h1>
+  </header>
   <div class="table-container">
     <table class="tracks-table">
       <thead>
@@ -338,6 +341,13 @@
 
 <style>
   .tracks-view { width: 100%; padding: 0 0 2rem 0; }
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2.5rem;
+  }
+  h1 { font-size: 2.5rem; font-weight: 950; letter-spacing: -1.5px; margin: 0; color: var(--text-main); }
   .table-container { width: 100%; overflow-x: hidden; }
   .tracks-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 0.95rem; table-layout: fixed; }
   .tracks-table th { text-align: left; padding: 1rem; color: var(--text-muted); text-transform: uppercase; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; }

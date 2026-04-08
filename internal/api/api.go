@@ -954,6 +954,36 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 		if err != nil { continue }
 
 		newID := tags.GenerateUUID()
+		
+		// Lógica de Carátulas: Si no tiene interna, buscar local e incrustar
+		go func(p string, tid string) {
+			f, err := os.Open(p)
+			if err != nil { return }
+			defer f.Close()
+			metadata, _ := tag.ReadFrom(f)
+			if metadata == nil || metadata.Picture() == nil {
+				// No tiene interna, buscamos local
+				dir := filepath.Dir(p)
+				common := []string{"cover", "folder", "front", "album"}
+				entries, _ := os.ReadDir(dir)
+				for _, ent := range entries {
+					name := strings.ToLower(ent.Name())
+					ext := filepath.Ext(name)
+					if ext != ".jpg" && ext != ".jpeg" && ext != ".png" { continue }
+					base := strings.TrimSuffix(name, ext)
+					for _, c := range common {
+						if base == c {
+							imgData, _ := os.ReadFile(filepath.Join(dir, ent.Name()))
+							mime := "image/jpeg"
+							if ext == ".png" { mime = "image/png" }
+							tags.NewEditor(s.getDB(r)).EmbedCover(tid, imgData, mime)
+							return
+						}
+					}
+				}
+			}
+		}(path, oldID)
+
 		if err := tags.WritePersistentID(path, newID); err == nil {
 			// Si se escribió correctamente, actualizamos el ID en la DB y lo activamos
 			// Usamos una transacción o simplemente actualizamos por partes
@@ -1141,13 +1171,13 @@ func (s *Server) handleAutocomplete(w http.ResponseWriter, r *http.Request) {
 	var query string
 	switch field {
 	case "artist":
-		query = "SELECT DISTINCT ar.name FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id WHERE ar.name LIKE ? AND t.status = 'active' ORDER BY ar.name LIMIT 10"
+		query = "SELECT DISTINCT ar.name FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id WHERE ar.name LIKE ? ORDER BY ar.name LIMIT 10"
 	case "genre":
-		query = "SELECT DISTINCT genre FROM tracks WHERE genre LIKE ? AND status = 'active' ORDER BY genre LIMIT 10"
+		query = "SELECT DISTINCT genre FROM tracks WHERE genre LIKE ? ORDER BY genre LIMIT 10"
 	case "album":
-		query = "SELECT DISTINCT al.title FROM albums al JOIN tracks t ON al.id = t.album_id WHERE al.title LIKE ? AND t.status = 'active' ORDER BY al.title LIMIT 10"
+		query = "SELECT DISTINCT al.title FROM albums al JOIN tracks t ON al.id = t.album_id WHERE al.title LIKE ? ORDER BY al.title LIMIT 10"
 	case "composer":
-		query = "SELECT DISTINCT composer FROM tracks WHERE composer LIKE ? AND status = 'active' ORDER BY composer LIMIT 10"
+		query = "SELECT DISTINCT composer FROM tracks WHERE composer LIKE ? ORDER BY composer LIMIT 10"
 	default:
 		json.NewEncoder(w).Encode([]string{})
 		return
@@ -1849,127 +1879,79 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
-	// GIF transparente de 1x1 base
 	transparentPixel := []byte{
 		0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0xFF, 0xFF, 0xFF,
 		0x00, 0x00, 0x00, 0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2C, 0x00, 0x00, 0x00, 0x00,
 		0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3B,
 	}
 
-	trackID := s.extractID(r, "/api/cover") // Usar prefijo limpio
+	trackID := s.extractID(r, "/api/cover")
 	if trackID == "" {
 		w.Header().Set("Content-Type", "image/gif")
-		w.WriteHeader(http.StatusOK)
 		w.Write(transparentPixel)
 		return
 	}
 
+	// 0. VERIFICAR CACHÉ (VELOCIDAD MÁXIMA)
+	cacheDir := filepath.Join(os.TempDir(), "sgound_covers")
+	os.MkdirAll(cacheDir, 0755)
+	cachePath := filepath.Join(cacheDir, trackID+".jpg")
+
+	if _, err := os.Stat(cachePath); err == nil {
+		w.Header().Set("Cache-Control", "public, max-age=604800")
+		w.Header().Set("Content-Type", "image/jpeg")
+		http.ServeFile(w, r, cachePath)
+		return
+	}
+
 	var fpath string
-	// Intentamos buscar por track ID primero
 	err := s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath)
 	if err != nil {
-		slog.Debug("Cover lookup: ID not found in tracks, trying albums", "id", trackID)
-		// Si falla, quizás es un ID de álbum? Intentamos buscar el primer track del álbum
 		err = s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE album_id = ? LIMIT 1", trackID).Scan(&fpath)
 		if err != nil {
-			slog.Warn("Cover lookup: ID not found in tracks or albums", "id", trackID)
 			w.Header().Set("Content-Type", "image/gif")
-			w.WriteHeader(http.StatusOK)
 			w.Write(transparentPixel)
 			return
 		}
 	}
 
-	slog.Info("Requesting cover art", "id", trackID, "fpath", fpath)
-
-	// 1. Intentar extraer portada embebida usando dhowden/tag
+	// 1. Intentar extraer embebida ligera
 	f, err := os.Open(fpath)
 	if err == nil {
 		defer f.Close()
 		metadata, err := tag.ReadFrom(f)
 		if err == nil {
 			if pic := metadata.Picture(); pic != nil {
-				w.Header().Set("Cache-Control", "public, max-age=86400")
+				os.WriteFile(cachePath, pic.Data, 0644)
+				w.Header().Set("Cache-Control", "public, max-age=604800")
 				w.Header().Set("Content-Type", pic.MIMEType)
 				w.Write(pic.Data)
 				return
 			}
-		} else {
-			slog.Warn("Cover lookup: tag reading failed (dhowden/tag)", "path", fpath, "error", err)
 		}
-	} else {
-		slog.Error("Cover lookup: failed to open file", "path", fpath, "error", err)
 	}
 
-	// 1.5 Fallback: Intentar con ffmpeg para extraer carátula embebida (muy robusto)
-	slog.Debug("Cover lookup: trying ffmpeg as fallback for embedded art", "path", fpath)
-	ffmpegMsg := exec.Command("ffmpeg", "-i", fpath, "-an", "-vcodec", "copy", "-f", "image2", "pipe:1")
-	ffmpegOutput, err := ffmpegMsg.Output()
-	if err == nil && len(ffmpegOutput) > 0 {
-		// Heurística básica de tipo: si empieza por \xFF\xD8 es JPEG
-		mime := "image/jpeg"
-		if strings.HasPrefix(string(ffmpegOutput), "\x89PNG") {
-			mime = "image/png"
-		}
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Header().Set("Content-Type", mime)
-		w.Write(ffmpegOutput)
-		return
-	}
-
-	// 2. Fallback: Buscar archivos de imagen en la misma carpeta (Case-insensitive)
+	// 2. Intentar buscar archivo local (cover.jpg, etc)
 	dir := filepath.Dir(fpath)
-	entries, err := os.ReadDir(dir)
-	if err == nil {
-		possibleNames := map[string]bool{
-			"cover": true, "folder": true, "album": true, "front": true, "artwork": true,
-		}
-		for _, entry := range entries {
-			if entry.IsDir() { continue }
-			name := strings.ToLower(entry.Name())
-			ext := filepath.Ext(name)
-			if ext != ".jpg" && ext != ".jpeg" && ext != ".png" { continue }
-			
-			base := strings.TrimSuffix(name, ext)
-			if possibleNames[base] {
-				fullPath := filepath.Join(dir, entry.Name())
-				if imgData, err := os.ReadFile(fullPath); err == nil {
-					mime := "image/jpeg"
-					if ext == ".png" { mime = "image/png" }
-					w.Header().Set("Cache-Control", "public, max-age=86400")
-					w.Header().Set("Content-Type", mime)
-					w.Write(imgData)
-					return
-				}
-			}
+	commonNames := map[string]bool{"cover": true, "folder": true, "front": true, "album": true, "artwork": true}
+	entries, _ := os.ReadDir(dir)
+	for _, entry := range entries {
+		name := strings.ToLower(entry.Name())
+		ext := filepath.Ext(name)
+		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" { continue }
+		base := strings.TrimSuffix(name, ext)
+		if commonNames[base] {
+			imgData, _ := os.ReadFile(filepath.Join(dir, entry.Name()))
+			os.WriteFile(cachePath, imgData, 0644)
+			w.Header().Set("Cache-Control", "public, max-age=604800")
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.Write(imgData)
+			return
 		}
 	}
 
-	// 3. Last fallback: try to find ANY image in the folder if it's the only one
-	if err == nil && len(entries) > 0 {
-		for _, entry := range entries {
-			if entry.IsDir() { continue }
-			name := strings.ToLower(entry.Name())
-			ext := filepath.Ext(name)
-			if ext == ".jpg" || ext == ".jpeg" || ext == ".png" {
-				fullPath := filepath.Join(dir, entry.Name())
-				if imgData, err := os.ReadFile(fullPath); err == nil {
-					mime := "image/jpeg"
-					if ext == ".png" { mime = "image/png" }
-					w.Header().Set("Content-Type", mime)
-					w.Write(imgData)
-					return
-				}
-			}
-		}
-	}
-
-	slog.Warn("Cover lookup: no cover found, returning default", "path", fpath)
-	
-	// En lugar de dar 404 (que ensucia la consola), devolvemos un GIF transparente de 1x1
-	// Esto hace que el navegador esté feliz y no marque error.
+	// 3. Fallback: No hay carátula. Marcamos como "vacío" para no reintentar
+	os.WriteFile(cachePath, transparentPixel, 0644)
 	w.Header().Set("Content-Type", "image/gif")
-	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache breve para no re-escanear tanto
-	w.WriteHeader(http.StatusOK)
 	w.Write(transparentPixel)
 }

@@ -40,9 +40,9 @@
 </script>
 
 <div class="artists-view" in:fade>
-  <header class="view-header">
+  <header class="section-header">
     <div class="texts">
-      <h1 class="responsive-title">Artists</h1>
+      <h1>Artists</h1>
       <p class="subtitle">{artists.length} creators in your collection.</p>
     </div>
   </header>
@@ -81,21 +81,14 @@
 <style>
   .artists-view { width: 100%; max-width: 1400px; margin: 0 auto; }
 
-  .view-header {
+  .section-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-end;
-    margin-bottom: 3.5rem;
-    gap: 2rem;
+    align-items: center;
+    margin-bottom: 2.5rem;
   }
 
-  .responsive-title { 
-    font-size: clamp(2.5rem, 6vw, 4.5rem); 
-    font-weight: 950; 
-    margin: 0; 
-    letter-spacing: -0.04em;
-    line-height: 1;
-  }
+  h1 { font-size: 2.5rem; font-weight: 950; letter-spacing: -1.5px; margin: 0; color: var(--text-main); }
 
   .subtitle { color: var(--text-muted); font-size: 1.1rem; font-weight: 500; margin-top: 0.5rem; }
 
@@ -151,7 +144,7 @@
   .empty-state { padding: 8rem 2rem; text-align: center; color: var(--text-muted); display: flex; flex-direction: column; align-items: center; gap: 1.5rem; }
 
   @media (max-width: 900px) {
-    .view-header { flex-direction: column; align-items: flex-start; gap: 1.5rem; }
+    .section-header { flex-direction: column; align-items: flex-start; gap: 1.5rem; }
     .artist-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1rem; }
     .artist-card { padding: 1.2rem; border-radius: 24px; }
     .avatar-container { width: 100px; height: 100px; }

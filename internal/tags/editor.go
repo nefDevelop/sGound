@@ -309,6 +309,35 @@ func moveSidecars(oldPath, newPath string) {
 	}
 }
 
+// EmbedCover incrusta físicamente una imagen en el archivo de audio
+func (e *Editor) EmbedCover(trackID string, imgData []byte, mimeType string) error {
+	var path string
+	err := e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+	if err != nil { return err }
+
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".mp3" {
+		tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
+		if err != nil { return err }
+		defer tag.Close()
+
+		pic := id3v2.PictureFrame{
+			Encoding:    id3v2.EncodingUTF8,
+			MimeType:    mimeType,
+			PictureType: id3v2.PTFrontCover,
+			Description: "Front Cover",
+			Picture:     imgData,
+		}
+		tag.AddAttachedPicture(pic)
+		return tag.Save()
+	} else if ext == ".flac" {
+		// FLAC picture embedding requires a specific subpackage or manual block construction.
+		// For now, we skip physical embedding for FLAC to keep the server running.
+		return nil
+	}
+	return fmt.Errorf("format not supported for embedding covers: %s", ext)
+}
+
 func (e *Editor) UpdateLyrics(trackID string, lyrics string) error {
 	var path string
 	err := e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
