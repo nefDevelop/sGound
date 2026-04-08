@@ -89,9 +89,9 @@
       <div class="welcome-header">
         <h1>Welcome back, <span>User</span></h1>
         {#if $inboxCount > 0}
-          <button class="inbox-badge" onclick={onselectInbox} aria-label="View Inbox">
-            <Icon name="zap" size={14} />
-            <span>{$inboxCount} pending</span>
+          <button class="inbox-notification-badge" onclick={onselectInbox} title="View pending tracks">
+            <Icon name="inbox" size={18} />
+            <span class="badge-number">{$inboxCount}</span>
           </button>
         {/if}
       </div>
@@ -115,6 +115,7 @@
     </section>
 
     <!-- Health Tile -->
+    {#if health.missingTags > 0 || health.orphanCount > 0 || health.duplicateCount > 0}
     <section class="bento-item health-tile">
       <div class="tile-header">
         <Icon name="shield" size={18} color="var(--secondary)" />
@@ -132,8 +133,10 @@
       </div>
       <button class="maint-btn" onclick={onselectMaintenance}>Manage <Icon name="settings" size={12} /></button>
     </section>
+    {/if}
 
     <!-- Top Plays Tile -->
+    {#if stats.mostPlayed && stats.mostPlayed.length > 0}
     <section class="bento-item most-played-tile">
       <div class="tile-header">
         <Icon name="activity" size={20} color="var(--secondary)" />
@@ -157,13 +160,12 @@
             <span class="play-count">{(top.playCount || 0)} <small>plays</small></span>
           </button>
         {/each}
-        {#if !stats.mostPlayed || stats.mostPlayed.length === 0}
-          <div class="empty">Start listening to see your trends</div>
-        {/if}
       </div>
     </section>
+    {/if}
 
     <!-- Gems Tile -->
+    {#if stats.forgottenGems && stats.forgottenGems.length > 0}
     <section class="bento-item gems-tile">
       <div class="tile-header">
           <Icon name="archive" size={20} color="var(--primary)" />
@@ -186,8 +188,10 @@
         {/each}
       </div>
     </section>
+    {/if}
 
     <!-- Discovery Tile -->
+    {#if stats.discovery && stats.discovery.length > 0}
     <section class="bento-item discovery-tile">
       <div class="tile-header">
         <Icon name="compass" size={20} color="var(--tertiary)" />
@@ -195,8 +199,7 @@
       </div>
       <div class="discovery-visual">
         <div class="mosaic-grid">
-          {#if stats.discovery && stats.discovery.length > 0}
-            {#each stats.discovery as album, i}
+          {#each stats.discovery as album, i}
               <div class={`mosaic-item i${i}`}>
                 <img 
                   src={`/api/cover/${album.id}`} 
@@ -218,20 +221,13 @@
                 </button>
               </div>
             {/each}
-          {:else}
-            <!-- Fallback to placeholders -->
-            <div class="mosaic-item i0 placeholder"><div style="opacity: 0.1"><Icon name="disc" size={48} /></div></div>
-            <div class="mosaic-item i1 placeholder"></div>
-            <div class="mosaic-item i2 placeholder"></div>
-            <div class="mosaic-item i3 placeholder"></div>
-            <div class="mosaic-item i4 placeholder"></div>
-            <div class="mosaic-item i5 placeholder"></div>
-          {/if}
         </div>
       </div>
     </section>
+    {/if}
 
     <!-- Trends Tile -->
+    {#if stats.totalGenres > 0}
     <section class="bento-item trends-tile">
       <div class="tile-header">
         <Icon name="flame" size={20} color="var(--tertiary)" />
@@ -252,6 +248,7 @@
         </div>
       </div>
     </section>
+    {/if}
   </div>
 
   <ContextMenu 
@@ -303,18 +300,62 @@
   /* Welcome Tile */
   .welcome-tile { grid-column: span 3; background: linear-gradient(135deg, var(--surface-container) 0%, var(--surface-container-high) 100%); overflow: hidden; }
   .welcome-tile::after { content: ''; position: absolute; top: -50%; right: -20%; width: 280px; height: 280px; background: var(--primary-10); filter: blur(60px); border-radius: 50%; z-index: 0; }
-  .welcome-tile  h1 { 
+  .welcome-tile h1 { 
     font-size: clamp(2rem, 5vw, 3rem); 
     font-weight: 950; 
     letter-spacing: -0.04em; 
-    margin: 0 0 2.5rem 0; 
+    margin: 0; 
     color: var(--text-main); 
   }
-  .welcome-header { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; position: relative; z-index: 1; }
+  .welcome-header { 
+    display: flex; 
+    flex-direction: row; 
+    align-items: center; 
+    justify-content: space-between;
+    width: 100%;
+    flex-wrap: nowrap;
+    gap: 1.5rem; 
+    margin-bottom: 2.5rem;
+    position: relative; 
+    z-index: 1; 
+  }
   .welcome-tile h1 span { color: var(--primary); }
 
-  .inbox-badge { background: var(--tertiary-10); color: var(--tertiary); border: 1px solid var(--tertiary-30); padding: 0.35rem 0.8rem; border-radius: 100px; display: flex; align-items: center; gap: 0.45rem; font-size: 0.72rem; font-weight: 800; cursor: pointer; transition: all 0.2s; }
-  .inbox-badge:hover { background: var(--tertiary-20); transform: translateY(-1px); border-color: var(--tertiary); }
+  .inbox-notification-badge { 
+    background: var(--surface-container-highest); 
+    color: var(--text-main); 
+    border: 1px solid var(--border-color); 
+    width: 42px;
+    height: 42px;
+    border-radius: 12px; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    cursor: pointer; 
+    transition: all 0.2s; 
+    position: relative; 
+    box-shadow: none;
+  }
+  .inbox-notification-badge:hover { background: var(--surface-container-high); transform: scale(1.05); border-color: var(--primary); }
+  
+  .badge-number { 
+    position: absolute; 
+    top: -8px; 
+    right: -8px; 
+    background: #ff4d4f; 
+    color: white;
+    font-size: 0.65rem;
+    font-weight: 950;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 4px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--surface-container-high);
+    box-shadow: none;
+  }
 
   /* Top Plays Tile */
   .most-played-tile { grid-column: span 1; grid-row: span 2; }

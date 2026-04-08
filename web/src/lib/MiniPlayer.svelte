@@ -190,7 +190,7 @@
   <div class="controls-container">
     <div class="main-controls">
       <button class="icon-btn" onclick={skipBack} title="Previous"><Icon name="skipBack" size={28} /></button>
-      <button class="play-btn" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause().catch(() => {})} title="Play/Pause">
+      <button class="play-btn" onclick={() => audioRef?.paused ? audioRef.play().catch(() => {}) : audioRef?.pause()} title="Play/Pause">
         <Icon name={$isPlaying ? 'pause' : 'play'} size={28} />
       </button>
       <button class="icon-btn" onclick={skipNext} title="Next"><Icon name="skipForward" size={28} /></button>

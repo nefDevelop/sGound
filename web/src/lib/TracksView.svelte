@@ -97,7 +97,6 @@
           <th class="col-rating">Rating</th>
           <th class="col-album">Album</th>
           <th class="col-genre">Genre</th>
-          <th class="col-actions">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -136,10 +135,6 @@
             </td>
             <td class="col-album">{track.album}</td>
             <td class="col-genre"><span class="genre-tag">{track.genre || '-'}</span></td>
-            <td class="actions col-actions">
-              <button class="btn-icon" onclick={() => onplay?.(track)} title="Play"><Icon name="play" size={14} /></button>
-              <button class="btn-icon" onclick={() => onedit?.(track)} title="Edit Tags"><Icon name="edit" size={14} /></button>
-            </td>
           </tr>
         {/each}
       </tbody>
@@ -180,8 +175,6 @@
   .title-text { font-weight: 700; color: var(--text-main); }
   .genre-tag { color: var(--secondary); font-size: 0.75rem; font-weight: 800; background: var(--secondary-10); padding: 0.25rem 0.6rem; border-radius: 6px; text-transform: uppercase; }
   
-  .btn-icon { background: transparent; border: none; color: var(--text-muted); padding: 0.6rem; border-radius: 10px; cursor: pointer; transition: all 0.2s; }
-  .btn-icon:hover { color: var(--primary); background: var(--primary-10); }
   
   .mobile-subtitle { display: none; font-size: 0.8rem; color: var(--text-muted); font-weight: 600; }
 
@@ -190,7 +183,6 @@
   .col-album { width: 20%; }
   .col-rating { width: 130px; }
   .col-genre { width: 15%; }
-  .col-actions { width: 110px; text-align: right; }
 
   @media (max-width: 1200px) {
     .col-genre, .col-rating { display: none; }

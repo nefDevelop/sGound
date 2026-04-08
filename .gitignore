@@ -16,6 +16,8 @@ yarn-error.log*
 # Base de datos SQLite
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 *.sqlite
 sgound.db
 

@@ -508,10 +508,7 @@
   }
 
   .checkbox-row input {
-    width: 20px !important;
-    height: 20px !important;
     margin: 0;
-    cursor: pointer;
   }
 
   .checkbox-row span {
