@@ -3,12 +3,13 @@
   import Icon from './Icon.svelte';
   import TracksView from './TracksView.svelte';
   import { fade } from 'svelte/transition';
+  import { inboxCount } from './stores.js';
 
   const dispatch = createEventDispatcher();
   
-  let tracks = [];
-  let loading = true;
-  let selectedTracks = [];
+  let tracks = $state([]);
+  let loading = $state(true);
+  let selectedTracks = $state([]);
 
   onMount(fetchInbox);
 
@@ -18,6 +19,7 @@
       const res = await fetch('/api/library/inbox');
       if (res.ok) {
         tracks = (await res.json()) || [];
+        inboxCount.set(tracks.length);
       }
     } catch (e) {
       console.error(e);
@@ -68,6 +70,7 @@
         // Refresh
         await fetchInbox();
         selectedTracks = [];
+        dispatch('rejected');
       }
     } catch (e) {
       console.error(e);
@@ -163,7 +166,7 @@
   .btn.ghost { background: var(--surface-container-high); color: var(--text-main); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-  .content { flex: 1; overflow: hidden; }
+  .content { flex: 1; overflow-y: auto; }
 
   .empty {
     display: flex;

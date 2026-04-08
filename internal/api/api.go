@@ -132,6 +132,9 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	return mux
 }
 
+type dbKey string
+const databaseKey dbKey = "database"
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -183,16 +186,23 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	username := r.URL.Query().Get("username")
-	if username == "" {
-		http.Error(w, "Username required", http.StatusBadRequest)
+	
+	if username == "" || username == "check" {
+		count, _ := s.MasterDB.GetUserCount()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"setupRequired": count == 0,
+			"global":        true,
+		})
 		return
 	}
 
 	// Check if user is in AllowedUsers in config
 	perms, allowed := s.Config.AllowedUsers[username]
 	if !allowed {
-		http.Error(w, "User not authorized in server config", http.StatusForbidden)
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{"error": "User not authorized in server config"})
 		return
 	}
 
@@ -233,36 +243,41 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hash, _ := auth.HashPassword(body.Password)
+	
+	// Definir la ruta de la DB específica de este usuario
+	userDBPath := filepath.Join(filepath.Dir(s.Config.DBPath), "library_"+body.Username+".db")
+
 	// Create user with perms from config
-	err := s.MasterDB.CreateUser(body.Username, hash, perms, s.Config.DBPath)
+	err := s.MasterDB.CreateUser(body.Username, hash, perms, userDBPath)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Trigger initial scan in background for the new user
-	userDBPath := filepath.Join(filepath.Dir(s.Config.DBPath), "library_"+body.Username+".db")
+	initialStatus := &ScanStatus{Scanning: true, Processed: 0}
+	s.scanStatuses.Store(body.Username, initialStatus)
+
 	go func() {
 		slog.Info("Starting initial background scan for auto-configuration", "user", body.Username, "path", s.Config.MusicPath)
 		uDB, err := db.Connect(userDBPath)
 		if err == nil {
-			status := &ScanStatus{Scanning: true, Processed: 0}
-			s.scanStatuses.Store(body.Username, status)
-
 			sc := scanner.NewScanner(uDB)
 			sc.OnProgress = func(path string, count int) {
-				status.Processed = count
-				s.scanStatuses.Store(body.Username, status)
+				initialStatus.Processed = count
+				s.scanStatuses.Store(body.Username, initialStatus)
 			}
 			
 			defer func() {
-				status.Scanning = false
-				s.scanStatuses.Store(body.Username, status)
+				initialStatus.Scanning = false
+				s.scanStatuses.Store(body.Username, initialStatus)
 			}()
 
 			sc.ScanDirectory(s.Config.MusicPath)
 		} else {
 			slog.Error("Auto-scan failed: could not connect to user DB", "user", body.Username, "error", err)
+			initialStatus.Scanning = false
+			s.scanStatuses.Store(body.Username, initialStatus)
 		}
 	}()
 
@@ -376,27 +391,38 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 
+		// 4. Database Connection Guard
+		// Intentamos obtener/conectar a la DB del usuario aquí de forma centralizada
+		userDB := s.connectUserDB(user)
+		if userDB == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"error": "User database is temporarily unavailable (might be indexing)"})
+			return
+		}
+
 		ctx := context.WithValue(r.Context(), userKey, user)
+		ctx = context.WithValue(ctx, databaseKey, userDB)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	}
 }
 
-func (s *Server) getDB(r *http.Request) *db.Database {
-	user, ok := r.Context().Value(userKey).(*db.User)
-	if !ok {
-		return nil
-	}
+// connectUserDB manages the pool of active user databases
+func (s *Server) connectUserDB(user *db.User) *db.Database {
 	s.dbMutex.RLock()
 	d, ok := s.activeDBs[user.DBPath]
 	s.dbMutex.RUnlock()
 	if ok {
 		return d
 	}
+	
 	s.dbMutex.Lock()
 	defer s.dbMutex.Unlock()
+	// Double check pattern
 	if d, ok := s.activeDBs[user.DBPath]; ok {
 		return d
 	}
+
 	newDB, err := db.Connect(user.DBPath)
 	if err != nil {
 		slog.Error("Failed to connect user DB", "path", user.DBPath, "err", err)
@@ -404,6 +430,11 @@ func (s *Server) getDB(r *http.Request) *db.Database {
 	}
 	s.activeDBs[user.DBPath] = newDB
 	return newDB
+}
+
+func (s *Server) getDB(r *http.Request) *db.Database {
+	d, _ := r.Context().Value(databaseKey).(*db.Database)
+	return d
 }
 
 func (s *Server) extractID(r *http.Request, prefix string) string {
@@ -1085,15 +1116,17 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	stats := make(map[string]interface{})
 	
 	// Contadores básicos - Filtrando por status='active'
-	var tTracks, tAlbums, tArtists, tPlaylists int
+	var tTracks, tAlbums, tArtists, tPlaylists, tGenres int
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active'").Scan(&tTracks)
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT album_id) FROM tracks WHERE status = 'active'").Scan(&tAlbums)
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT ar.id) FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id WHERE t.status = 'active'").Scan(&tArtists)
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM playlists").Scan(&tPlaylists)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT genre) FROM tracks WHERE status = 'active' AND genre != ''").Scan(&tGenres)
 	stats["totalTracks"] = tTracks
 	stats["totalAlbums"] = tAlbums
 	stats["totalArtists"] = tArtists
 	stats["totalPlaylists"] = tPlaylists
+	stats["totalGenres"] = tGenres
 
 	// Inbox count (pendientes de aprobar)
 	var pendingCount int
@@ -1171,9 +1204,8 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLibraryHealth(w http.ResponseWriter, r *http.Request) {
 	health := make(map[string]interface{})
 
-	// Pistas sin género o año
 	var incomplete int
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE genre IS NULL OR genre = ''").Scan(&incomplete)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE (genre IS NULL OR genre = '') AND status = 'active'").Scan(&incomplete)
 	health["missingTags"] = incomplete
 
 	// Duplicados

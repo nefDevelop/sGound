@@ -3,16 +3,18 @@
   import Icon from './Icon.svelte';
   import { showToast } from './stores.js';
   
-  export let isOpen = false;
-  export let track = { id: '', title: '', artist: '', album: '' };
+  let { 
+    isOpen = $bindable(false), 
+    track = $bindable({ id: '', title: '', artist: '', album: '' }),
+    onclose = null
+  } = $props();
   
-  const dispatch = createEventDispatcher();
-  let loading = false;
-  let saveSuccess = false;
-  let searchResults = [];
-  let lyricSearchResults = []; 
-  let suggestions = [];
-  let activeSuggestionField = "";
+  let loading = $state(false);
+  let saveSuccess = $state(false);
+  let searchResults = $state([]);
+  let lyricSearchResults = $state([]); 
+  let suggestions = $state([]);
+  let activeSuggestionField = $state("");
 
   async function handleSave() {
     loading = true;
@@ -156,28 +158,28 @@
 
   function closeModal() {
     isOpen = false;
-    dispatch('close');
+    if (onclose) onclose();
   }
 </script>
 
 {#if isOpen}
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="modal-backdrop" on:click={closeModal}>
-  <div class="modal glass" on:click|stopPropagation>
+<div class="modal-backdrop" onclick={closeModal}>
+  <div class="modal glass" onclick={(e) => e.stopPropagation()}>
     <div class="modal-header">
       <div class="title-with-btn">
         <h2>Edit Track Tags</h2>
         <div class="header-actions">
-          <button type="button" class="auto-btn mb" on:click={suggestMusicBrainz} title="Auto-tag with MusicBrainz">
+          <button type="button" class="auto-btn mb" onclick={suggestMusicBrainz} title="Auto-tag with MusicBrainz">
             <Icon name="music" size={16} color="white" /> Auto-Tag MB
           </button>
-          <button type="button" class="auto-btn" on:click={autoSearchTags} title="Search Metadata">
+          <button type="button" class="auto-btn" onclick={autoSearchTags} title="Search Metadata">
             <Icon name="zap" size={16} color="#1e293b" /> Search
           </button>
         </div>
       </div>
-      <button class="close-btn" on:click={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
+      <button class="close-btn" onclick={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
     </div>
 
     {#if searchResults.length > 0}
@@ -188,7 +190,7 @@
         </div>
         <div class="results-list">
           {#each searchResults as res}
-            <button class="result-item" on:click={() => applyMetadata(res)}>
+            <button class="result-item" onclick={() => applyMetadata(res)}>
               <img src={res.artwork} alt="" />
               <div class="res-info">
                 <span class="res-title">{res.title}</span>
@@ -197,10 +199,10 @@
             </button>
           {/each}
         </div>
-        <button class="cancel-btn block-btn" on:click={() => searchResults = []}>Back to editor</button>
+        <button class="cancel-btn block-btn" onclick={() => searchResults = []}>Back to editor</button>
       </div>
     {:else}
-      <form class="tag-form" on:submit|preventDefault={handleSave}>
+      <form class="tag-form" onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
         <div class="form-scroll">
           <div class="editor-hero">
             <div class="cover-canvas">
@@ -222,11 +224,11 @@
 
           <label class="relative">
             <span>Artist</span>
-            <input type="text" bind:value={track.artist} on:input={(e) => fetchSuggestions('artist', e.currentTarget.value)} required />
+            <input type="text" bind:value={track.artist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} required />
             {#if suggestions.length > 0 && activeSuggestionField === 'artist'}
               <div class="suggestions">
                 {#each suggestions as s}
-                  <button type="button" on:click={() => selectSuggestion(s)}>{s}</button>
+                  <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
                 {/each}
               </div>
             {/if}
@@ -234,11 +236,11 @@
 
           <label class="relative">
             <span>Album</span>
-            <input type="text" bind:value={track.album} on:input={(e) => fetchSuggestions('album', e.currentTarget.value)} required />
+            <input type="text" bind:value={track.album} oninput={(e) => fetchSuggestions('album', e.currentTarget.value)} required />
             {#if suggestions.length > 0 && activeSuggestionField === 'album'}
               <div class="suggestions">
                 {#each suggestions as s}
-                  <button type="button" on:click={() => selectSuggestion(s)}>{s}</button>
+                  <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
                 {/each}
               </div>
             {/if}
@@ -251,11 +253,11 @@
             </label>
             <label class="relative">
               <span>Genre</span>
-              <input type="text" bind:value={track.genre} on:input={(e) => fetchSuggestions('genre', e.currentTarget.value)} />
+              <input type="text" bind:value={track.genre} oninput={(e) => fetchSuggestions('genre', e.currentTarget.value)} />
               {#if suggestions.length > 0 && activeSuggestionField === 'genre'}
                 <div class="suggestions">
                   {#each suggestions as s}
-                    <button type="button" on:click={() => selectSuggestion(s)}>{s}</button>
+                    <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
                   {/each}
                 </div>
               {/if}
@@ -292,13 +294,13 @@
         <label class="lyrics-label">
           <div class="label-header">
             <span>Lyrics</span>
-            <button type="button" class="mini-btn" on:click={searchLyrics}><Icon name="search" size={14} /> Search Online</button>
+            <button type="button" class="mini-btn" onclick={searchLyrics}><Icon name="search" size={14} /> Search Online</button>
           </div>
           
           {#if lyricSearchResults.length > 0}
             <div class="lyric-chips">
               {#each lyricSearchResults as res}
-                <button type="button" class="lyric-chip {res.syncedLyrics ? 'sync' : ''}" on:click={() => selectLyric(res)}>
+                <button type="button" class="lyric-chip {res.syncedLyrics ? 'sync' : ''}" onclick={() => selectLyric(res)}>
                    <Icon name={res.syncedLyrics ? "zap" : "fileText"} size={12} color={res.syncedLyrics ? "#1e293b" : "#94a3b8"} />
                    <span>{res.syncedLyrics ? 'SYNC' : 'Plain'}</span>
                 </button>
@@ -311,7 +313,7 @@
       </div>
 
       <div class="actions">
-        <button type="button" class="cancel-btn" on:click={closeModal}>Cancel</button>
+        <button type="button" class="cancel-btn" onclick={closeModal}>Cancel</button>
         <button type="submit" class="save-btn" disabled={loading}>
           {loading ? 'Saving...' : saveSuccess ? 'Saved ✓' : 'Save Tags & Lyrics'}
         </button>
@@ -649,15 +651,6 @@
   .picker-header h3 { margin: 0; color: white; font-size: 1.2rem; }
   .picker-header p { margin: 0.3rem 0; font-size: 0.85rem; color: #94a3b8; }
 
-  .lyric-icon-wrap {
-      width: 40px;
-      height: 40px;
-      background: rgba(255,255,255,0.05);
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-  }
 
   .lyric-chips {
       display: flex;

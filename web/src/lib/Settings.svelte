@@ -8,6 +8,8 @@
   let loading = $state(false);
   let saveSuccess = $state(false);
 
+  let { onscan } = $props();
+
   // Derivamos la paleta automáticamente de la semilla
   let palette = $derived(generatePalette(config.themeColor));
 
@@ -205,6 +207,19 @@
         {#if saveSuccess}<Icon name="check" size={16} color="#10b981" />{/if}
       </button>
     </div>
+  </div>
+
+  <div class="settings-card" style="margin-top: 2rem;">
+    <section class="setting-item">
+      <div class="info">
+        <h3>Library Actions</h3>
+        <p>Trigger a full scan of your music folder to pick up new files or metadata changes.</p>
+      </div>
+      <button class="scan-btn" onclick={onscan}>
+         <Icon name="refresh" size={18} />
+         Scan Library Now
+      </button>
+    </section>
   </div>
 
   <div class="settings-card" style="margin-top: 2rem;">
@@ -433,4 +448,19 @@
     background: var(--surface-container-high); border: 1px solid var(--border-color); 
     color: var(--text-main); padding: 0.8rem 1.2rem; border-radius: 12px; outline: none; font-weight: 700;
   }
+
+  .scan-btn {
+    background: var(--surface-container-highest);
+    color: var(--primary);
+    border: 1px solid var(--primary-30);
+    padding: 1rem 2rem;
+    border-radius: 100px;
+    font-weight: 800;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    transition: all 0.2s;
+  }
+  .scan-btn:hover { background: var(--primary-10); border-color: var(--primary); transform: translateY(-2px); }
 </style>

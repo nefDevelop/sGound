@@ -1,15 +1,16 @@
 <script>
   import Icon from './Icon.svelte';
   
-  /** @type {number} */
-  export let rating = 0;
-  export let interactive = true;
-  export let size = 16;
+  let { 
+    rating = $bindable(0), 
+    interactive = true, 
+    size = 16 
+  } = $props();
   
   import { createEventDispatcher } from 'svelte';
   const dispatch = createEventDispatcher();
 
-  let hoverRating = 0;
+  let hoverRating = $state(0);
 
   function setRating(val) {
     if (!interactive) return;

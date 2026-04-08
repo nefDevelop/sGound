@@ -51,7 +51,7 @@ clean:
 
 db-reset:
 	@echo "=> Borrando TODAS las bases de datos (maestra y usuarios)..."
-	rm -f sgound.db
+	rm -f sgound.db master.db
 	rm -f library_*.db
 	if [ ! -z "$(SGOUND_DB_PATH)" ]; then rm -f $(SGOUND_DB_PATH); fi
 	@echo "=> Sistema totalmente reseteado con éxito."

@@ -17,6 +17,7 @@ export const currentIndex = writable(-1);
 export const isPlaying = writable(false);
 export const repeatMode = writable('none'); // 'none', 'all', 'one'
 export const isShuffle = writable(false);
+export const inboxCount = writable(0);
 
 export function showToast(message, type = 'info') {
     toast.set({ message, type });

@@ -5,29 +5,47 @@
   import { queue, currentIndex, audioQuality, isPlaying } from './stores.js';
   import { get } from 'svelte/store';
   
-  export let currentPlaying = null;
-  export let progress = 0;
-  export let duration = 0;
-  export let currentTime = 0;
+  let { 
+    currentPlaying = $bindable(null), 
+    progress = $bindable(0), 
+    duration = $bindable(0), 
+    currentTime = $bindable(0), 
+    audioRef = $bindable(null) 
+  } = $props();
 
   const dispatch = createEventDispatcher();
-  let volume = 1;
-  let isMuted = false;
+  let volume = $state(1);
+  let isMuted = $state(false);
 
   // Dual audio elements for gapless
-  let audioA, audioB;
-  let activeAudio = 'A';
-  export let audioRef = null; // Current active audio for external control
+  let audioA = $state(), audioB = $state();
+  let activeAudio = $state('A');
   
-  let nextTrack = null;
-  let preloadedId = null;
+  let nextTrack = $state(null);
+  let preloadedId = $state(null);
 
-  let contextMenu = {
+  let contextMenu = $state({
     visible: false,
     x: 0,
     y: 0,
     items: []
-  };
+  });
+
+  function showContextMenu(e) {
+    if (!currentPlaying) return;
+    e.preventDefault();
+    contextMenu = {
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: 'Editar etiquetas', icon: 'edit', action: () => dispatch('edit', currentPlaying) },
+        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(currentPlaying.title) },
+        { divider: true },
+        { label: 'Eliminar de biblioteca', icon: 'trash', color: 'danger', action: () => dispatch('delete', currentPlaying) }
+      ]
+    };
+  }
 
   onMount(() => {
     audioRef = audioA;
@@ -97,12 +115,14 @@
   }
 
   // Handle manual play from App
-  $: if (currentPlaying && audioRef && audioRef.src.indexOf(currentPlaying.id) === -1 && !preloadedId) {
-     const quality = get(audioQuality);
-     const url = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
-     audioRef.src = url;
-     audioRef.play();
-  }
+  $effect(() => {
+    if (currentPlaying && audioRef && audioRef.src.indexOf(currentPlaying.id) === -1 && !preloadedId) {
+      const quality = get(audioQuality);
+      const url = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
+      audioRef.src = url;
+      audioRef.play();
+    }
+  });
 
   function handleSeek(e) {
     const seekTime = (e.target.value / 100) * duration;
@@ -158,7 +178,7 @@
 <footer class="player glass">
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="now-playing" on:click={() => dispatch('openFull')} on:contextmenu={showContextMenu}>
+  <div class="now-playing" onclick={() => dispatch('openFull')} oncontextmenu={showContextMenu}>
     {#if currentPlaying}
       <img class="cover" src={`/api/cover/${currentPlaying.id}`} alt="Artwork" />
       <div class="track-info">
@@ -176,11 +196,11 @@
   
   <div class="controls-container">
     <div class="main-controls">
-      <button class="icon-btn" on:click={skipBack}><Icon name="skipBack" /></button>
-      <button class="icon-btn play-btn" on:click={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()}>
+      <button class="icon-btn" onclick={skipBack}><Icon name="skipBack" /></button>
+      <button class="icon-btn play-btn" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()}>
         <Icon name={$isPlaying ? 'pause' : 'play'} size={20} color="black" />
       </button>
-      <button class="icon-btn" on:click={skipNext}><Icon name="skipForward" /></button>
+      <button class="icon-btn" onclick={skipNext}><Icon name="skipForward" /></button>
     </div>
     
     <div class="progress-area">
@@ -191,14 +211,14 @@
         min="0" max="100" 
         style="--progress: {progress}%"
         bind:value={progress} 
-        on:input={handleSeek} 
+        oninput={handleSeek} 
       />
       <span class="time">{formatTime(duration)}</span>
     </div>
   </div>
   
   <div class="volume-container">
-    <button class="icon-btn" on:click={toggleMute}>
+    <button class="icon-btn" onclick={toggleMute}>
       <Icon name={isMuted ? 'volumeX' : 'volume2'} size={20} />
     </button>
     <input 
@@ -206,7 +226,7 @@
       class="volume-bar" 
       min="0" max="1" step="0.01" 
       bind:value={volume} 
-      on:input={() => {
+      oninput={() => {
         if (!audioRef) return;
         const gain = currentPlaying?.replay_gain || 0;
         const linearGain = Math.pow(10, gain / 20);
@@ -237,11 +257,10 @@
     grid-area: player;
     background: var(--surface-container);
     display: grid;
-    grid-template-columns: 300px 1fr 300px;
+    grid-template-columns: minmax(180px, 0.8fr) 1.5fr minmax(180px, 0.8fr);
     align-items: center;
-    padding: 0 2rem;
-    height: 100px;
-    margin: 0.5rem 1rem 10px 1rem;
+    padding: 0 1.5rem;
+    margin: 0.5rem 1rem 1rem 1rem;
     border-radius: 28px;
     border: 1px solid var(--border-color);
     box-shadow: 0 8px 32px rgba(0,0,0,0.12);
@@ -377,5 +396,45 @@
     font-weight: 800;
     color: var(--primary);
     border: 1px solid var(--primary-20);
+  }
+  @media (max-width: 1400px) {
+    .player { grid-template-columns: 200px 1fr 200px; padding: 0 1rem; }
+    .main-controls { gap: 1rem; }
+  }
+
+  @media (max-width: 1100px) {
+    .player { 
+      grid-template-columns: 180px 1fr auto; 
+      height: 80px; 
+      padding: 0 1rem;
+      margin-left: 0.5rem;
+      border-radius: 28px;
+    }
+    .volume-bar, .tech-badge { display: none; }
+    .now-playing { gap: 0.8rem; }
+    .cover { width: 44px; height: 44px; }
+    .track-info .title { font-size: 0.95rem; }
+    .track-info .artist { font-size: 0.75rem; }
+  }
+
+  @media (max-width: 768px) {
+    .player {
+      grid-template-columns: 1fr auto;
+      height: 75px;
+      margin: 0.5rem 0.5rem 0 0.5rem;
+      padding: 0 1rem;
+      border-radius: 24px 24px 0 0;
+      gap: 1rem;
+      border-bottom: 1px solid var(--border-color);
+      box-shadow: 0 -10px 30px rgba(0,0,0,0.1);
+    }
+    .progress-area, .volume-container, .tech-badge { display: none !important; }
+    .now-playing { min-width: 0; }
+    .cover { width: 44px; height: 44px; border-radius: 12px; }
+    .track-info .title { font-size: 0.9rem; }
+    .track-info .artist { font-size: 0.75rem; }
+    .main-controls { gap: 0.5rem; }
+    .play-btn { width: 42px; height: 42px; }
+    .icon-btn :global(svg) { width: 20px; height: 20px; }
   }
 </style>

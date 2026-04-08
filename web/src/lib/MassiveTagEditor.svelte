@@ -2,25 +2,27 @@
   import { createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
   
-  export let isOpen = false;
-  export let selectedTracks = [];
+  let { 
+    isOpen = $bindable(false), 
+    selectedTracks = $bindable([]), 
+    onclose = null 
+  } = $props();
   
-  const dispatch = createEventDispatcher();
-  let loading = false;
-  let saveSuccess = false;
-  let processingStatus = "";
+  let loading = $state(false);
+  let saveSuccess = $state(false);
+  let processingStatus = $state("");
   
-  let suggestions = [];
-  let activeSuggestionField = "";
+  let suggestions = $state([]);
+  let activeSuggestionField = $state("");
 
   // Datos globales que se aplicarán a todos
-  let bulkData = {
+  let bulkData = $state({
     artist: '',
     album: '',
     genre: '',
     year: '',
     composer: ''
-  };
+  });
 
   async function fetchSuggestions(field, value) {
     if (value.length < 1) {
@@ -59,14 +61,11 @@
           body: JSON.stringify(payload)
         });
 
-        let p2 = Promise.resolve();
-        if (track.lyrics) {
-          p2 = fetch(`/api/lyrics/${track.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ lyrics: track.lyrics })
-          });
-        }
+        const p2 = track.lyrics ? fetch(`/api/lyrics/${track.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lyrics: track.lyrics })
+        }) : Promise.resolve(null);
 
         return Promise.all([p1, p2]);
       });
@@ -106,7 +105,6 @@
         }
       } catch (e) { console.error(e); }
     }
-    selectedTracks = [...selectedTracks];
     processingStatus = "Auto-search complete";
     loading = false;
   }
@@ -122,7 +120,6 @@
         if (data.lyrics) track.lyrics = data.lyrics;
       } catch (e) { console.error(e); }
     }
-    selectedTracks = [...selectedTracks];
     processingStatus = "Lyrics download complete";
     loading = false;
   }
@@ -131,15 +128,15 @@
     isOpen = false;
     processingStatus = "";
     suggestions = [];
-    dispatch('close');
+    if (onclose) onclose();
   }
 </script>
 
 {#if isOpen}
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="modal-backdrop" on:click={closeModal}>
-  <div class="modal glass" on:click|stopPropagation>
+<div class="modal-backdrop" onclick={closeModal}>
+  <div class="modal glass" onclick={(e) => e.stopPropagation()}>
     <div class="modal-header">
       <div>
         <h2>Bulk Edit: {selectedTracks.length} tracks</h2>
@@ -147,7 +144,7 @@
           <span class="status-badge">{processingStatus}</span>
         {/if}
       </div>
-      <button class="close-btn" on:click={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
+      <button class="close-btn" onclick={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
     </div>
 
     <div class="bulk-layout">
@@ -158,11 +155,11 @@
         <div class="tag-form">
           <label class="relative">
             <span>Artist</span>
-            <input type="text" bind:value={bulkData.artist} on:input={(e) => fetchSuggestions('artist', e.target.value)} />
+            <input type="text" bind:value={bulkData.artist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} />
             {#if suggestions.length > 0 && activeSuggestionField === 'artist'}
               <div class="suggestions">
                 {#each suggestions as s}
-                  <button type="button" on:click={() => selectSuggestion(s)}>{s}</button>
+                  <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
                 {/each}
               </div>
             {/if}
@@ -170,11 +167,11 @@
 
           <label class="relative">
             <span>Album</span>
-            <input type="text" bind:value={bulkData.album} on:input={(e) => fetchSuggestions('album', e.target.value)} />
+            <input type="text" bind:value={bulkData.album} oninput={(e) => fetchSuggestions('album', e.currentTarget.value)} />
             {#if suggestions.length > 0 && activeSuggestionField === 'album'}
               <div class="suggestions">
                 {#each suggestions as s}
-                  <button type="button" on:click={() => selectSuggestion(s)}>{s}</button>
+                  <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
                 {/each}
               </div>
             {/if}
@@ -182,11 +179,11 @@
 
           <label class="relative">
             <span>Genre</span>
-            <input type="text" bind:value={bulkData.genre} on:input={(e) => fetchSuggestions('genre', e.target.value)} />
+            <input type="text" bind:value={bulkData.genre} oninput={(e) => fetchSuggestions('genre', e.currentTarget.value)} />
             {#if suggestions.length > 0 && activeSuggestionField === 'genre'}
               <div class="suggestions">
                 {#each suggestions as s}
-                  <button type="button" on:click={() => selectSuggestion(s)}>{s}</button>
+                  <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
                 {/each}
               </div>
             {/if}
@@ -195,8 +192,8 @@
           <label><span>Year</span><input type="number" bind:value={bulkData.year} /></label>
           
           <div class="bulk-actions">
-            <button class="tool-btn" on:click={autoSearchAll} disabled={loading}><Icon name="zap" size={14} /> Auto-Tag</button>
-            <button class="tool-btn" on:click={downloadAllLyrics} disabled={loading}><Icon name="cloud" size={14} /> Lyrics</button>
+            <button class="tool-btn" onclick={autoSearchAll} disabled={loading}><Icon name="zap" size={14} /> Auto-Tag</button>
+            <button class="tool-btn" onclick={downloadAllLyrics} disabled={loading}><Icon name="cloud" size={14} /> Lyrics</button>
           </div>
         </div>
       </aside>
@@ -232,8 +229,8 @@
     </div>
 
     <div class="footer-actions">
-      <button type="button" class="cancel-btn" on:click={closeModal}>Cancel</button>
-      <button type="button" class="save-btn" on:click={handleBulkSave} disabled={loading}>
+      <button type="button" class="cancel-btn" onclick={closeModal}>Cancel</button>
+      <button type="button" class="save-btn" onclick={handleBulkSave} disabled={loading}>
         {loading ? 'Processing...' : saveSuccess ? 'Saved' : 'Apply Changes'}
         {#if saveSuccess}<Icon name="check" size={16} color="#10b981" />{/if}
       </button>

@@ -2,6 +2,7 @@
   import { onMount, createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
+  import { inboxCount } from './stores.js';
   
   const dispatch = createEventDispatcher();
   let stats = $state({
@@ -9,6 +10,7 @@
     totalAlbums: 0,
     totalArtists: 0,
     totalPlaylists: 0,
+    totalGenres: 0,
     inboxCount: 0,
     forgottenGems: [],
     mostPlayed: []
@@ -55,6 +57,7 @@
         data.forgottenGems = data.forgottenGems || [];
         data.mostPlayed = data.mostPlayed || [];
         stats = data;
+        inboxCount.set(data.inboxCount);
       }
       if (hRes.ok) health = await hRes.json();
     } catch (e) { console.error(e); }
@@ -70,34 +73,34 @@
   <div class="bento-grid">
     <!-- Welcome Tile -->
     <section class="bento-item welcome-tile">
-      <div class="welcome-content">
+      <div class="welcome-header">
         <h1>Welcome back, <span>User</span></h1>
-        <p>Tu biblioteca tiene {stats.totalTracks} canciones listas para sonar.</p>
+        {#if $inboxCount > 0}
+          <button class="inbox-badge" onclick={() => dispatch('selectInbox')} aria-label="Ver Inbox">
+            <Icon name="zap" size={14} />
+            <span>{$inboxCount} pendientes</span>
+          </button>
+        {/if}
       </div>
-      <div class="quick-stats">
-        <div class="stat"><Icon name="disc" size={14} /> {stats.totalAlbums} Albums</div>
-        <div class="stat"><Icon name="user" size={14} /> {stats.totalArtists} Artists</div>
-        <div class="stat"><Icon name="list" size={14} /> {stats.totalPlaylists} Playlists</div>
+      <div class="welcome-chips">
+        <button class="chip primary" onclick={() => dispatch('selectView', 'tracks')} title="Canciones">
+          <Icon name="music" size={14} /> {stats.totalTracks}
+        </button>
+        <button class="chip secondary" onclick={() => dispatch('selectView', 'artists')} title="Artistas">
+          <Icon name="user" size={14} /> {stats.totalArtists}
+        </button>
+        <button class="chip tertiary" onclick={() => dispatch('selectView', 'albums')} title="Álbumes">
+          <Icon name="disc" size={14} /> {stats.totalAlbums}
+        </button>
+        <button class="chip primary" onclick={() => dispatch('selectView', 'genres')} title="Géneros">
+          <Icon name="hash" size={14} /> {stats.totalGenres}
+        </button>
+        <button class="chip secondary" onclick={() => dispatch('selectView', 'playlists')} title="Playlists">
+          <Icon name="list" size={14} /> {stats.totalPlaylists}
+        </button>
       </div>
     </section>
 
-    <!-- Inbox Tile -->
-    <button 
-      class="bento-item inbox-tile" 
-      class:has-pending={stats.inboxCount > 0} 
-      onclick={() => dispatch('selectInbox')}
-      aria-label="Ir al Inbox"
-    >
-      <div class="tile-header">
-        <Icon name="zap" size={24} color={stats.inboxCount > 0 ? 'var(--tertiary)' : 'var(--text-muted)'} />
-        <h3>Inbox</h3>
-      </div>
-      <div class="inbox-content">
-        <span class="count">{stats.inboxCount}</span>
-        <span class="label">{stats.inboxCount === 1 ? 'Pendiente' : 'Pendientes'}</span>
-      </div>
-      <div class="action-hint">Revisar <Icon name="chevronRight" size={14} /></div>
-    </button>
 
     <!-- Health Tile -->
     <section class="bento-item health-tile">
@@ -169,17 +172,34 @@
         <h3>Descubrir</h3>
       </div>
       <div class="discovery-visual">
-        <div class="asymmetric-covers">
-          <div class="disco-cover dc1"></div>
-          <div class="disco-cover dc2"></div>
-          <div class="disco-cover dc3"></div>
-        </div>
-        <div class="discovery-chips">
-          <button class="chip primary">Inspiración</button>
-          <button class="chip">Chill</button>
-          <button class="chip secondary">Recuerdos</button>
-          <button class="chip tertiary">Focus</button>
-          <button class="chip">Clásicos</button>
+        <div class="mosaic-grid">
+          {#if stats.mostPlayed && stats.mostPlayed.length >= 5}
+            {#each stats.mostPlayed.slice(0, 5) as track, i}
+              <div class={`mosaic-item i${i}`}>
+                <img src={`/api/cover/${track.id}`} alt="" />
+                {#if i === 0}
+                  <button class="overlay-chip bottom-left tertiary" onclick={() => dispatch('smartAlbums')}>Asignar a álbumes</button>
+                {:else if i === 2}
+                  <button class="overlay-chip bottom-right primary" onclick={() => dispatch('smartSearch')}>Sugerencias</button>
+                {:else if i === 4}
+                   <button class="overlay-chip center" onclick={() => dispatch('cleanupLibrary')}>Limpieza</button>
+                {/if}
+              </div>
+            {/each}
+          {:else}
+            <!-- Placeholders si no hay suficientes datos -->
+            <div class="mosaic-item i0 placeholder">
+              <button class="overlay-chip bottom-left tertiary" onclick={() => dispatch('smartAlbums')}>Asignar a álbumes</button>
+            </div>
+            <div class="mosaic-item i1 placeholder"></div>
+            <div class="mosaic-item i2 placeholder">
+              <button class="overlay-chip bottom-right primary" onclick={() => dispatch('smartSearch')}>Sugerencias</button>
+            </div>
+            <div class="mosaic-item i3 placeholder"></div>
+            <div class="mosaic-item i4 placeholder">
+              <button class="overlay-chip center" onclick={() => dispatch('cleanupLibrary')}>Limpieza</button>
+            </div>
+          {/if}
         </div>
       </div>
     </section>
@@ -217,7 +237,13 @@
 </div>
 
 <style>
-  .dashboard { padding: 1rem 0; animation: fadeIn 0.5s ease; }
+  .dashboard { 
+    padding: 1rem 1.5rem; 
+    max-width: 100%;
+    box-sizing: border-box;
+    animation: fadeIn 0.5s ease;
+    overflow-x: hidden;
+  }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
   .bento-grid {
@@ -226,6 +252,7 @@
     grid-auto-rows: minmax(180px, auto);
     gap: 1.5rem;
   }
+
 
   .bento-item {
     background: var(--surface-container-high);
@@ -241,29 +268,21 @@
     font-family: inherit;
   }
   .bento-item:not(button) { cursor: default; }
-  button.bento-item { cursor: pointer; }
   .bento-item:hover { border-color: var(--primary-30); transform: translateY(-4px); }
 
   .tile-header { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1.2rem; }
   .tile-header h3 { margin: 0; font-size: 1.1rem; font-weight: 800; letter-spacing: -0.2px; }
 
   /* Welcome Tile */
-  .welcome-tile { grid-column: span 2; background: linear-gradient(135deg, var(--surface-container-high) 0%, var(--surface-container-highest) 100%); position: relative; }
+  .welcome-tile { grid-column: span 3; background: linear-gradient(135deg, var(--surface-container-high) 0%, var(--surface-container-highest) 100%); position: relative; }
   .welcome-tile::after { content: ''; position: absolute; top: -50%; right: -20%; width: 280px; height: 280px; background: var(--primary-10); filter: blur(60px); border-radius: 50%; z-index: 0; }
   .welcome-content { position: relative; z-index: 1; }
   .welcome-tile h1 { font-size: 2.1rem; font-weight: 900; letter-spacing: -1.2px; margin: 0 0 0.5rem; }
   .welcome-tile h1 span { color: var(--primary); }
-  .welcome-tile p { color: var(--text-muted); font-weight: 600; font-size: 0.95rem; margin: 0; }
-  .quick-stats { margin-top: auto; display: flex; gap: 0.8rem; position: relative; z-index: 1; }
-  .stat { font-size: 0.75rem; font-weight: 800; color: var(--text-main); background: rgba(255,255,255,0.05); padding: 0.4rem 0.8rem; border-radius: 100px; display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
 
-  /* Inbox Tile */
-  .inbox-tile.has-pending { background: linear-gradient(135deg, var(--surface-container-highest) 0%, var(--tertiary-10) 100%); border-color: var(--tertiary-30); }
-  .inbox-content { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; }
-  .inbox-content .count { font-size: 3rem; font-weight: 950; color: var(--tertiary); line-height: 1; }
-  .inbox-content .label { font-size: 0.75rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 0.4rem; }
-  .action-hint { font-size: 0.7rem; font-weight: 800; color: var(--primary); display: flex; align-items: center; gap: 0.3rem; margin-top: auto; opacity: 0; transform: translateX(-10px); transition: all 0.3s; }
-  .inbox-tile:hover .action-hint { opacity: 1; transform: translateX(0); }
+  .welcome-header { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; position: relative; z-index: 1; }
+  .inbox-badge { background: var(--tertiary-10); color: var(--tertiary); border: 1px solid var(--tertiary-30); padding: 0.35rem 0.8rem; border-radius: 100px; display: flex; align-items: center; gap: 0.45rem; font-size: 0.72rem; font-weight: 800; cursor: pointer; transition: all 0.2s; }
+  .inbox-badge:hover { background: var(--tertiary-20); transform: translateY(-1px); border-color: var(--tertiary); }
 
   /* Top Plays Tile */
   .most-played-tile { grid-column: span 1; grid-row: span 2; }
@@ -286,18 +305,66 @@
   .gem-cover:hover .overlay { opacity: 1; }
 
   /* Discovery Tile */
-  .discovery-visual { flex: 1; display: flex; flex-direction: column; gap: 1rem; }
-  .asymmetric-covers { position: relative; height: 90px; margin-top: 0.5rem; }
-  .disco-cover { position: absolute; width: 64px; height: 64px; border-radius: 14px; background: var(--surface-container-highest); border: 2px solid var(--border-color); box-shadow: 0 8px 16px rgba(0,0,0,0.4); }
-  .dc1 { top: 0; left: 5px; transform: rotate(-8deg); background: linear-gradient(45deg, var(--primary-20), transparent); }
-  .dc2 { top: 10px; left: 40px; transform: rotate(5deg); z-index: 1; background: linear-gradient(45deg, var(--secondary-20), transparent); }
-  .dc3 { top: 5px; left: 75px; transform: rotate(-5deg); background: linear-gradient(45deg, var(--tertiary-20), transparent); }
-  .discovery-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
-  .chip { background: var(--surface-container-highest); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.68rem; font-weight: 800; padding: 0.4rem 0.8rem; border-radius: 100px; cursor: pointer; transition: all 0.2s; }
-  .chip:hover { border-color: var(--primary); transform: scale(1.05); }
-  .chip.primary { background: var(--primary-10); color: var(--primary); }
-  .chip.secondary { background: var(--secondary-10); color: var(--secondary); }
-  .chip.tertiary { background: var(--tertiary-10); color: var(--tertiary); }
+  /* Discovery Mosaic */
+  .discovery-tile { grid-column: span 1; grid-row: span 2; padding: 1.2rem; }
+  .discovery-visual { flex: 1; display: flex; flex-direction: column; }
+  .mosaic-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 0.6rem;
+    flex: 1;
+    min-height: 240px;
+  }
+  .mosaic-item { position: relative; border-radius: 12px; overflow: hidden; background: var(--surface-container-highest); border: 1px solid rgba(255,255,255,0.05); }
+  .mosaic-item img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.4s; }
+  .mosaic-item:hover img { transform: scale(1.1); }
+
+  /* Spans */
+  .mosaic-item.i0 { grid-column: span 2; grid-row: span 2; }
+  .mosaic-item.i1 { grid-column: span 2; grid-row: span 1; }
+  .mosaic-item.i2 { grid-column: span 1; grid-row: span 1; }
+  .mosaic-item.i3 { grid-column: span 1; grid-row: span 1; }
+  .mosaic-item.i4 { grid-column: span 4; grid-row: span 1; }
+
+  /* Overlaid Chips */
+  .overlay-chip {
+    position: absolute;
+    padding: 0.4rem 0.8rem;
+    border-radius: 100px;
+    font-size: 0.65rem;
+    font-weight: 800;
+    border: 1px solid rgba(255,255,255,0.1);
+    color: white;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    background: rgba(0,0,0,0.4);
+    transition: all 0.2s;
+    white-space: nowrap;
+    z-index: 5;
+  }
+  .overlay-chip:hover { transform: scale(1.05); background: rgba(0,0,0,0.6); border-color: var(--primary); }
+  .overlay-chip.primary { color: var(--primary); border-color: var(--primary-30); }
+  .overlay-chip.tertiary { color: var(--tertiary); border-color: var(--tertiary-30); }
+
+  .bottom-left { bottom: 8px; left: 8px; }
+  .bottom-right { bottom: 8px; right: 8px; }
+  .center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+  .center:hover { transform: translate(-50%, -50%) scale(1.05); }
+
+  .empty-mosaic { grid-column: span 4; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; color: var(--text-muted); opacity: 0.5; }
+
+  .placeholder { background: linear-gradient(45deg, var(--surface-container-highest), var(--surface-container-high)); position: relative; }
+  .placeholder::after { content: ''; position: absolute; inset: 0; background: rgba(255,255,255,0.03); }
+
+  .chip { background: var(--surface-container-highest); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.75rem; font-weight: 800; padding: 0.45rem 1rem; border-radius: 100px; cursor: pointer; transition: all 0.2s; white-space: nowrap; display: flex; align-items: center; gap: 0.5rem; }
+  .chip:hover { border-color: var(--primary); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+  .chip.primary { background: var(--primary-10); color: var(--primary); border-color: var(--primary-30); }
+  .chip.secondary { background: var(--secondary-10); color: var(--secondary); border-color: var(--secondary-30); }
+  .chip.tertiary { background: var(--tertiary-10); color: var(--tertiary); border-color: var(--tertiary-30); }
+
+  .welcome-chips { margin-top: auto; padding-top: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap; position: relative; z-index: 1; }
 
   /* Trends Tile */
   .genre-bars { display: flex; flex-direction: column; gap: 0.8rem; }
@@ -320,4 +387,21 @@
   /* Scroll Utility */
   .scroll-shadow::-webkit-scrollbar { width: 4px; }
   .scroll-shadow::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 10px; }
+
+  /* Media Queries - At the end for proper precedence */
+  @media (max-width: 1400px) {
+    .bento-grid { grid-template-columns: repeat(3, 1fr); gap: 1.2rem; }
+    .welcome-tile { grid-column: span 2; }
+  }
+
+  @media (max-width: 1100px) {
+    .bento-grid { grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+    .welcome-tile { grid-column: span 2; }
+  }
+
+  @media (max-width: 768px) {
+    .bento-grid { grid-template-columns: 1fr; gap: 1rem; }
+    .welcome-tile { grid-column: span 1; }
+    .bento-item { padding: 1.2rem; border-radius: 20px; }
+  }
 </style>

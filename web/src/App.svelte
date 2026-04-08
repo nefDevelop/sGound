@@ -15,7 +15,7 @@
   import InboxView from "./lib/InboxView.svelte";
   import Toast from "./lib/Toast.svelte";
   import FullPlayer from "./lib/FullPlayer.svelte";
-  import { showToast, audioQuality, queue, currentIndex, isPlaying } from "./lib/stores.js";
+  import { showToast, audioQuality, queue, currentIndex, isPlaying, inboxCount } from "./lib/stores.js";
   import { get } from "svelte/store";
   import { generatePalette, applyTheme } from "./lib/theme.js";
   import Login from "./lib/Login.svelte";
@@ -24,13 +24,19 @@
   // Global fetch interceptor
   const originalFetch = window.fetch;
   window.fetch = (url, options = {}) => {
-    // Note: Browser automatically sends HttpOnly cookies for same-origin
-    // But for Subsonic or external clients we keep the X-API-Key header support
     const apiKey = localStorage.getItem('apiKey');
     if (typeof url === 'string' && url.startsWith('/api/') && apiKey) {
       options.headers = { ...options.headers, 'X-API-Key': apiKey };
     }
-    return originalFetch(url, options);
+    
+    return originalFetch(url, options).then(response => {
+      // Si recibimos un 401 (No autorizado) y "creemos" que estamos dentro, forzamos logout
+      if (response.status === 401 && isLoggedIn && typeof url === 'string' && url.startsWith('/api/') && !url.includes('/api/auth/login')) {
+         console.warn("Sesión caducada o inválida. Redirigiendo a login...");
+         handleLogout();
+      }
+      return response;
+    });
   };
 
   let setupRequired = $state(false);
@@ -81,6 +87,7 @@
       const wasScanning = scanStatus.scanning;
       const prevProcessed = scanStatus.processed;
       scanStatus = data;
+      inboxCount.set(data.inboxCount);
 
       // If progress increased significantly, refresh views
       if (data.scanning && data.processed > prevProcessed) {
@@ -119,21 +126,27 @@
   }
 
   onMount(async () => {
+    // Escuchar cambios en otras pestañas para sincronizar el logout
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'username' && !e.newValue) {
+        isLoggedIn = false;
+      }
+    });
+
     try {
-      const res = await fetch("/api/auth/status");
-      const data = await res.json();
-      setupRequired = data.setupRequired;
+      // 1. Verificar estado global (solo para loguear errores o debug si fuera necesario)
+      const resStatus = await fetch("/api/auth/status");
+      
+      if (isLoggedIn) {
+        // 2. Si hay sesión aparente, verificarla intentando cargar la config
+        // El interceptor hará el logout si esto falla con 401
+        loadTheme();
+        fetchTracks();
+        fetchPlaylists();
+        checkScanStatus();
+      }
     } catch (e) {
-      console.error("Auth status check failed");
-    }
-
-    // Cargar tema siempre al inicio
-    loadTheme();
-
-    if (!setupRequired) {
-      fetchTracks();
-      fetchPlaylists();
-      checkScanStatus();
+      console.error("Initialization check failed:", e);
     }
   });
 
@@ -276,13 +289,15 @@
 {#if setupRequired}
   <Setup 
     username={setupUsername} 
-    on:complete={() => { 
+    on:complete={async () => { 
       setupRequired = false; 
       isLoggedIn = true; 
+      // Esperar un poco para que el backend asiente el estado de escaneo
+      await new Promise(r => setTimeout(r, 100));
+      loadTheme();
+      checkScanStatus();
       fetchTracks(); 
       fetchPlaylists(); 
-      loadTheme(); 
-      checkScanStatus();
     }} 
   />
 {:else if !isLoggedIn}
@@ -321,10 +336,13 @@
       >
         <div class="nav-icon-wrap">
           <Icon name="grid" size={18} />
+          {#if $inboxCount > 0}
+            <span class="nav-notification-dot"></span>
+          {/if}
         </div>
         <span>Dashboard</span>
-        {#if scanStatus.inboxCount > 0}
-          <span class="nav-badge">{scanStatus.inboxCount}</span>
+        {#if $inboxCount > 0}
+          <span class="nav-badge">{$inboxCount}</span>
         {/if}
       </button>
 
@@ -430,7 +448,6 @@
             Edit ({selectedTracks.length})
           </button>
         {/if}
-        <button class="primary-btn" onclick={triggerScan}>Scan Library</button>
       </div>
     </header>
 
@@ -446,6 +463,10 @@
           on:delete={(e) => handleDelete(e.detail)}
           on:selectInbox={() => currentView = "inbox"}
           on:selectMaintenance={() => currentView = "maintenance"}
+          on:selectView={(e) => {
+            if (e.detail === 'tracks') currentView = 'library';
+            else currentView = e.detail;
+          }}
         />
       {:else if currentView === "library"}
         {#if tracks.length === 0}
@@ -467,7 +488,8 @@
         <InboxView
           on:play={(e) => handlePlay(e.detail)}
           on:edit={(e) => openEditor(e.detail)}
-          on:approved={fetchTracks}
+          on:approved={() => { fetchTracks(); checkScanStatus(); }}
+          on:rejected={checkScanStatus}
         />
       {:else if currentView === "albums"}
         <AlbumsGrid on:selectAlbum={(e) => selectAlbum(e.detail)} />
@@ -497,7 +519,7 @@
           on:queue={(e) => handleQueue(e.detail)}
         />
       {:else if currentView === "settings"}
-        <Settings />
+        <Settings onscan={triggerScan} />
       {:else if currentView === "maintenance"}
         <Maintenance on:fixTags={() => currentView = "library"} />
       {/if}
@@ -519,14 +541,14 @@
 
 <TagEditor
   bind:isOpen={isTagEditorOpen}
-  track={trackToEdit}
-  on:close={fetchTracks}
+  bind:track={trackToEdit}
+  onclose={fetchTracks}
 />
 
 <MassiveTagEditor
   bind:isOpen={isMassiveEditorOpen}
   {selectedTracks}
-  on:close={fetchTracks}
+  onclose={fetchTracks}
 />
 
 <Toast />
@@ -548,7 +570,7 @@
     grid-template-areas: 
       "sidebar content"
       "sidebar player";
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: 280px minmax(0, 1fr);
     grid-template-rows: 1fr auto;
     height: 100vh;
     background: var(--surface);
@@ -632,23 +654,28 @@
 
   .nav-icon-wrap { position: relative; display: flex; align-items: center; justify-content: center; }
   .nav-badge {
-    position: absolute;
-    top: 3px;
-    right: 5px;
+    position: relative;
     background: var(--tertiary);
     color: black;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     font-weight: 950;
-    width: 22px;
-    height: 22px;
+    margin-left: auto;
+    padding: 0.1rem 0.6rem;
+    border-radius: 100px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  }
+
+  .nav-notification-dot {
+    display: none;
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 10px;
+    height: 10px;
+    background: var(--tertiary);
     border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    border: none;
-    z-index: 10;
+    border: 2px solid var(--surface);
+    z-index: 20;
   }
 
   .playlists-scroll {
@@ -676,7 +703,7 @@
   }
 
   .top-bar {
-    padding: 1.2rem 2rem;
+    padding: 1.2rem 1.5rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -764,13 +791,28 @@
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
   /* Responsive Adjustments */
+  @media (max-width: 1400px) {
+    .app-layout { grid-template-columns: 220px minmax(0, 1fr); }
+    .sidebar { padding: 1.5rem 0.8rem; }
+    .brand h2 { font-size: 1.2rem; }
+    .search-box input { width: 220px; }
+  }
+
   @media (max-width: 1100px) {
-    .app-layout { grid-template-columns: 80px 1fr; }
-    .nav-label, .brand h2, .nav-item span, .scan-status-item .info { display: none; }
-    .sidebar { align-items: center; padding: 2rem 0.5rem; }
-    .nav-item { justify-content: center; padding: 1rem; }
-    .search-box input { width: 200px; }
-    .search-box input:focus { width: 250px; }
+    .app-layout { grid-template-columns: 80px minmax(0, 1fr); }
+    .nav-label, .brand h2, .nav-item span, .nav-badge, .scan-status-item .info { display: none; }
+    .brand { justify-content: center; padding: 1rem 0; width: 100%; }
+    .sidebar { align-items: center; padding: 1.5rem 0; width: 80px; }
+    .nav-item { 
+      width: 48px; 
+      height: 48px; 
+      justify-content: center; 
+      padding: 0; 
+      margin: 0.4rem 0;
+      border-radius: 16px; 
+    }
+    .nav-notification-dot { display: block !important; }
+    .content { margin-left: 0.5rem; border-radius: 28px; }
   }
 
   @media (max-width: 768px) {
@@ -778,19 +820,32 @@
       grid-template-areas: "content" "player" "sidebar";
       grid-template-columns: 1fr;
       grid-template-rows: 1fr auto auto;
+      gap: 0;
     }
     .sidebar {
-      height: auto;
-      flex-direction: row;
-      justify-content: space-around;
-      border-right: none;
-      border-top: 1px solid var(--border-color);
-      padding: 0.6rem;
-      border-radius: 20px 20px 0 0;
+      position: static;
+      width: calc(100% - 1rem) !important;
+      height: 65px !important;
+      flex-direction: row !important;
+      justify-content: center !important;
+      align-items: center !important;
+      border: 1px solid var(--border-color);
+      border-top: none;
+      padding: 0 !important;
+      margin: 0 0.5rem 0.5rem 0.5rem !important;
+      border-radius: 0 0 24px 24px;
+      background: var(--surface-container-highest);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
     }
-    .nav-label, .nav-divider, .playlists-scroll, .logout-btn { display: none; }
-    .content { margin: 0.5rem; border-radius: 20px; }
-    .top-bar { padding: 1rem; }
-    .search-box input { width: 100% !important; }
+    nav { 
+      flex-direction: row !important; 
+      width: 100%; 
+      justify-content: space-around; 
+      align-items: center;
+      gap: 0;
+    }
+    .brand, .nav-label, .nav-divider, .playlists-scroll, .logout-btn { display: none !important; }
+    .nav-item { margin: 0; width: 50px; height: 50px; }
+    .content { margin: 0.5rem 0.5rem 0.2rem 0.5rem; border-radius: 24px; }
   }
 </style>

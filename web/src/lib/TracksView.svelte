@@ -4,20 +4,18 @@
   import ContextMenu from './ContextMenu.svelte';
   import StarRating from './StarRating.svelte';
   
-  export let tracks = [];
-  /** @type {any} */
-  export let currentPlaying = null;
+  let { tracks = $bindable([]), currentPlaying = null } = $props();
   
   const dispatch = createEventDispatcher();
-  let selectedIds = new Set();
+  let selectedIds = $state(new Set());
 
-  let contextMenu = {
+  let contextMenu = $state({
     visible: false,
     x: 0,
     y: 0,
     track: null,
     items: []
-  };
+  });
 
   function showContextMenu(track, e) {
     e.preventDefault();
@@ -78,7 +76,6 @@
       });
       if (res.ok) {
         track.rating = rating;
-        tracks = tracks; // trigger reactivity
       }
     } catch (e) { console.error(e); }
   }
@@ -115,8 +112,8 @@
           <td class="num">{track.trackNum || '-'}</td>
           <td class="title-cell">
             <div class="flex-align">
-              <!-- svelte-ignore a11y-missing-attribute -->
-              <img class="mini-cover" src={`/api/cover/${track.id}`} onerror={(e) => { if (e.currentTarget instanceof HTMLImageElement) e.currentTarget.style.display='none'; }} />
+              <!-- svelte-ignore a11y_missing_attribute -->
+              <img class="mini-cover" src={`/api/cover/${track.id}`} alt="" onerror={(e) => { if (e.currentTarget instanceof HTMLImageElement) e.currentTarget.style.display='none'; }} />
               <span class="title-text">{track.title}</span>
             </div>
           </td>

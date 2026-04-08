@@ -18,7 +18,9 @@ type Database struct {
 
 func Connect(dbPath string) (*Database, error) {
 	slog.Info("Connecting to database", "path", dbPath)
-	conn, err := sql.Open("sqlite", dbPath)
+	// Añadimos parámetros para mejorar la concurrencia y evitar bloqueos (Busy Timeout y modo WAL)
+	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", dbPath)
+	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -134,10 +136,11 @@ func (db *Database) GetDuplicates() ([]models.Track, error) {
 	FROM tracks t
 	JOIN albums a ON t.album_id = a.id
 	JOIN artists art ON a.artist_id = art.id
-	WHERE (art.id, a.id, t.title) IN (
+	WHERE t.status = 'active' AND (art.id, a.id, t.title) IN (
 		SELECT a2.artist_id, t2.album_id, t2.title
 		FROM tracks t2
 		JOIN albums a2 ON t2.album_id = a2.id
+		WHERE t2.status = 'active'
 		GROUP BY a2.artist_id, t2.album_id, t2.title
 		HAVING COUNT(*) > 1
 	)
@@ -187,7 +190,7 @@ func (db *Database) GetLowQualityTracks(threshold int) ([]models.Track, error) {
 	FROM tracks t
 	JOIN albums a ON t.album_id = a.id
 	JOIN artists art ON a.artist_id = art.id
-	WHERE t.bit_rate > 0 AND t.bit_rate < ?
+	WHERE t.status = 'active' AND t.bit_rate > 0 AND t.bit_rate < ?
 	ORDER BY t.bit_rate ASC`
 
 	rows, err := db.Conn.Query(query, threshold*1000)
