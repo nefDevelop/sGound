@@ -946,10 +946,30 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, id := range data.IDs {
-		_, err := s.getDB(r).Conn.Exec("UPDATE tracks SET status = 'active' WHERE id = ?", id)
-		if err != nil {
-			slog.Error("Failed to approve track", "id", id, "error", err)
+	for _, oldID := range data.IDs {
+		// Al aprobar, generamos el ID persistente REAL y lo escribimos en el archivo
+		db := s.getDB(r)
+		var path string
+		err := db.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", oldID).Scan(&path)
+		if err != nil { continue }
+
+		newID := tags.GenerateUUID()
+		if err := tags.WritePersistentID(path, newID); err == nil {
+			// Si se escribió correctamente, actualizamos el ID en la DB y lo activamos
+			// Usamos una transacción o simplemente actualizamos por partes
+			_, err = db.Conn.Exec("UPDATE tracks SET id = ?, status = 'active' WHERE id = ?", newID, oldID)
+			if err != nil {
+				slog.Error("Failed to update track ID in DB after physical write", "oldID", oldID, "newID", newID, "err", err)
+			} else {
+				// Si el track tenía tags en AutoRename, lo organizamos ahora que es oficial
+				if s.Config.AutoRename {
+					tags.NewEditor(db).OrganizeFile(newID, s.Config.MusicPath, s.Config.RenamePattern)
+				}
+			}
+		} else {
+			slog.Error("Failed to write persistent ID to file during approval", "path", path, "err", err)
+			// Fallback: lo activamos con el ID antiguo si falla la escritura física (para no perder el track)
+			db.Conn.Exec("UPDATE tracks SET status = 'active' WHERE id = ?", oldID)
 		}
 	}
 
