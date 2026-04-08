@@ -4,18 +4,16 @@
   let { 
     rating = $bindable(0), 
     interactive = true, 
-    size = 16 
+    size = 16,
+    onchange
   } = $props();
   
-  import { createEventDispatcher } from 'svelte';
-  const dispatch = createEventDispatcher();
-
   let hoverRating = $state(0);
 
   function setRating(val) {
     if (!interactive) return;
     rating = val;
-    dispatch('change', rating);
+    onchange?.(rating);
   }
 
   function handleMouseEnter(val) {

@@ -1,11 +1,11 @@
 <script>
-  import { onMount, createEventDispatcher } from 'svelte';
+  import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import TracksView from './TracksView.svelte';
   import { fade } from 'svelte/transition';
   import { inboxCount } from './stores.js';
 
-  const dispatch = createEventDispatcher();
+  let { onplay, onedit, onapproved, onrejected } = $props();
   
   let tracks = $state([]);
   let loading = $state(true);
@@ -48,10 +48,9 @@
         body: JSON.stringify({ ids })
       });
       if (res.ok) {
-        // Refresh
         await fetchInbox();
         selectedTracks = [];
-        dispatch('approved');
+        onapproved?.();
       }
     } catch (e) {
       console.error(e);
@@ -59,7 +58,7 @@
   }
 
   async function rejectIds(ids) {
-    if (!confirm(`¿Estás seguro de que quieres rechazar ${ids.length} pistas? No aparecerán en tu biblioteca.`)) return;
+    if (!confirm(`Are you sure you want to reject ${ids.length} tracks? They will be hidden from library.`)) return;
     try {
       const res = await fetch('/api/tracks/reject', {
         method: 'PUT',
@@ -67,44 +66,39 @@
         body: JSON.stringify({ ids })
       });
       if (res.ok) {
-        // Refresh
         await fetchInbox();
         selectedTracks = [];
-        dispatch('rejected');
+        onrejected?.();
       }
     } catch (e) {
       console.error(e);
     }
-  }
-
-  function handleSelection(e) {
-    selectedTracks = e.detail;
   }
 </script>
 
 <div class="inbox-view" in:fade>
   <header class="view-header">
     <div class="texts">
-      <h1>Bandeja de Entrada</h1>
-      <p class="desc">Estos archivos han sido detectados recientemente. Valídalos para que aparezcan en tu biblioteca principal.</p>
+      <h1>Inbox</h1>
+      <p class="desc">Newly detected files. Approve them to include them in your main library.</p>
     </div>
     
     <div class="actions">
        {#if selectedTracks.length > 0}
          <button class="btn danger" onclick={() => rejectIds(selectedTracks.map(t => t.id))}>
            <Icon name="trash" size={18} />
-           Rechazar ({selectedTracks.length})
+           Reject ({selectedTracks.length})
          </button>
          <button class="btn primary" onclick={approveSelected}>
            <Icon name="zap" size={18} />
-           Aprobar Selección ({selectedTracks.length})
+           Approve Selected ({selectedTracks.length})
          </button>
        {:else}
          <button class="btn ghost" onclick={() => rejectIds(tracks.map(t => t.id))} disabled={tracks.length === 0}>
-           Ignorar Todo
+           Reject All
          </button>
          <button class="btn ghost" onclick={approveAll} disabled={tracks.length === 0}>
-           Aprobar Todo ({tracks.length})
+           Approve All ({tracks.length})
          </button>
        {/if}
     </div>
@@ -112,18 +106,20 @@
 
   <div class="content">
     {#if loading}
-      <div class="loading">Buscando nuevos archivos...</div>
+      <div class="status">Sourcing new files...</div>
     {:else if tracks.length === 0}
       <div class="empty">
         <Icon name="shield" size={64} />
-        <p>Tu bandeja de entrada está vacía. ¡Toda tu música está en orden!</p>
+        <p>Your inbox is pristine. Everything is in choice order.</p>
       </div>
     {:else}
       <TracksView 
         {tracks} 
-        on:selectionChange={handleSelection}
-        on:play
-        on:edit
+        onselectionChange={(sel) => selectedTracks = sel}
+        onplay={onplay}
+        onedit={onedit}
+        onqueue={(track) => {}}
+        ondelete={(track) => {}}
       />
     {/if}
   </div>

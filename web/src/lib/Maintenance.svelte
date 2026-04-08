@@ -1,21 +1,21 @@
 <script>
-  import { onMount, createEventDispatcher } from 'svelte';
+  import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import { showToast } from './stores.js';
   import { fade } from 'svelte/transition';
 
-  const dispatch = createEventDispatcher();
+  let { onfixTags } = $props();
   
-  let health = {
+  let health = $state({
     missingTags: 0,
     duplicateCount: 0,
     orphanCount: 0,
     lowQualityCount: 0
-  };
+  });
   
-  let currentList = [];
-  let currentView = 'overview'; // 'overview', 'duplicates', 'orphans', 'low-quality'
-  let loading = false;
+  let currentList = $state([]);
+  let currentView = $state('overview'); // 'overview', 'duplicates', 'orphans', 'low-quality'
+  let loading = $state(false);
 
   onMount(fetchHealth);
 
@@ -23,9 +23,9 @@
     loading = true;
     try {
       const res = await fetch('/api/library/health');
-      health = await res.json();
+      health = (await res.json()) || health;
     } catch (e) {
-      showToast("Failed to fetch health stats", "error");
+      showToast("Could not source library health", "error");
     } finally {
       loading = false;
     }
@@ -37,20 +37,20 @@
     currentList = [];
     try {
       const res = await fetch(`/api/library/${view}`);
-      currentList = await res.json();
+      currentList = (await res.json()) || [];
     } catch (e) {
-      showToast("Failed to load details", "error");
+      showToast("Detail sourcing failed", "error");
     } finally {
       loading = false;
     }
   }
 
   async function runCleanup() {
-    if (!confirm(`This will remove ${health.orphanCount} entries from database. Continue?`)) return;
+    if (!confirm(`Purge ${health.orphanCount} orphan entries from database?`)) return;
     try {
       const res = await fetch('/api/library/cleanup', { method: 'POST' });
       const data = await res.json();
-      showToast(`Cleaned up ${data.removed} tracks`, "success");
+      showToast(`Purged ${data.removed} stale entries`, "success");
       fetchHealth();
       if (currentView === 'orphans') currentList = [];
     } catch (e) {
@@ -59,166 +59,240 @@
   }
 
   async function deleteTrack(track) {
-    if (!confirm(`Delete "${track.title}"?`)) return;
+    if (!confirm(`Permanently delete "${track.title}" from library?`)) return;
     try {
       const res = await fetch(`/api/tracks/${track.id}`, { method: 'DELETE' });
       if (res.ok) {
         currentList = currentList.filter(t => t.id !== track.id);
         fetchHealth();
-        showToast("Track deleted", "success");
+        showToast("Asset deleted successfully", "success");
       }
     } catch (e) {
-      showToast("Failed to delete", "error");
+      showToast("Deletion failed", "error");
     }
   }
 </script>
 
-<div class="maintenance" in:fade>
+<div class="maintenance-view" in:fade>
   <header class="view-header">
-    {#if currentView !== 'overview'}
-      <button class="back-btn" on:click={() => currentView = 'overview'}>
-        <Icon name="arrowLeft" size={20} />
-      </button>
+    <div class="header-content">
+      {#if currentView !== 'overview'}
+        <button class="icon-btn back-btn" onclick={() => currentView = 'overview'} aria-label="Back to overview">
+          <Icon name="arrowLeft" size={24} />
+        </button>
+      {/if}
+      <h1 class="responsive-title">Library Health</h1>
+    </div>
+    {#if currentView === 'overview'}
+      <p class="subtitle">System tools for library optimization and integrity checks.</p>
     {/if}
-    <h1>Library Maintenance</h1>
   </header>
 
   {#if currentView === 'overview'}
-    <div class="stats-grid">
-      <div class="stat-card" class:warning={health.duplicateCount > 0}>
-        <Icon name="copy" size={32} />
-        <div class="info">
-          <span class="val">{health.duplicateCount}</span>
+    <div class="bento-grid">
+      <div class="bento-card" class:warning={health.duplicateCount > 0}>
+        <div class="card-header">
+          <Icon name="copy" size={32} />
           <span class="lbl">Duplicates</span>
         </div>
-        <button class="action-btn" on:click={() => loadDetail('duplicates')}>Review</button>
+        <span class="val">{health.duplicateCount}</span>
+        <button class="bento-btn" onclick={() => loadDetail('duplicates')}>Inspect Detail</button>
       </div>
 
-      <div class="stat-card" class:danger={health.orphanCount > 0}>
-        <Icon name="trash" size={32} />
-        <div class="info">
-          <span class="val">{health.orphanCount}</span>
+      <div class="bento-card" class:danger={health.orphanCount > 0}>
+        <div class="card-header">
+          <Icon name="trash" size={32} />
           <span class="lbl">Orphans</span>
         </div>
+        <span class="val">{health.orphanCount}</span>
         {#if health.orphanCount > 0}
-          <button class="action-btn danger" on:click={runCleanup}>Clean All</button>
+          <button class="bento-btn danger" onclick={runCleanup}>Purge All</button>
         {:else}
-          <button class="action-btn" on:click={() => loadDetail('orphans')}>Review</button>
+          <button class="bento-btn" onclick={() => loadDetail('orphans')}>Inspect Detail</button>
         {/if}
       </div>
 
-      <div class="stat-card" class:warning={health.lowQualityCount > 0}>
-        <Icon name="trendingDown" size={32} />
-        <div class="info">
-          <span class="val">{health.lowQualityCount}</span>
+      <div class="bento-card" class:warning={health.lowQualityCount > 0}>
+        <div class="card-header">
+          <Icon name="trendingDown" size={32} />
           <span class="lbl">Low Quality</span>
         </div>
-        <button class="action-btn" on:click={() => loadDetail('low-quality')}>Review</button>
+        <span class="val">{health.lowQualityCount}</span>
+        <button class="bento-btn" onclick={() => loadDetail('low-quality')}>Inspect Detail</button>
       </div>
 
-      <div class="stat-card">
-        <Icon name="tag" size={32} />
-        <div class="info">
-          <span class="val">{health.missingTags}</span>
-          <span class="lbl">Missing Tags</span>
+      <div class="bento-card highlight">
+        <div class="card-header">
+          <Icon name="tag" size={32} />
+          <span class="lbl">Missing Metadata</span>
         </div>
-        <button class="action-btn" on:click={() => dispatch('fixTags')}>Fix Now</button>
+        <span class="val">{health.missingTags}</span>
+        <button class="bento-btn primary" onclick={() => onfixTags?.()}>Batch Fix</button>
       </div>
     </div>
   {:else}
-    <div class="detail-view">
-      <h3>{currentView.charAt(0).toUpperCase() + currentView.slice(1).replace('-', ' ')}</h3>
+    <div class="detail-container">
+      <div class="detail-header">
+        <h2>{currentView.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ')}</h2>
+        {#if loading}
+          <div class="loading-spinner"></div>
+        {/if}
+      </div>
       
-      {#if loading}
-        <p>Loading list...</p>
-      {:else if currentList.length === 0}
-        <p class="empty">No issues found in this category.</p>
+      {#if !loading && currentList.length === 0}
+        <div class="empty-state">
+          <Icon name="checkCircle" size={48} color="var(--primary)" />
+          <p>This section is perfectly optimized.</p>
+        </div>
       {:else}
-        <table class="m-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Artist / Album</th>
-              <th>Details</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each currentList as track}
+        <div class="scroll-wrapper">
+          <table class="m-table">
+            <thead>
               <tr>
-                <td>{track.title}</td>
-                <td class="sub">{track.artist}<br/>{track.album}</td>
-                <td>
-                  {#if track.bit_rate}
-                    <span class="badge">{Math.round(track.bit_rate / 1000)}k</span>
-                  {/if}
-                  <span class="path">{track.path}</span>
-                </td>
-                <td>
-                  <button class="icon-btn danger" on:click={() => deleteTrack(track)}>
-                    <Icon name="trash" size={16} />
-                  </button>
-                </td>
+                <th>Composition</th>
+                <th>Attributes</th>
+                <th>Path Integrity</th>
+                <th class="actions-col"></th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {#each currentList as track}
+                <tr>
+                  <td>
+                    <div class="title-cell">
+                      <span class="track-title">{track.title}</span>
+                      <span class="track-sub">{track.artist} • {track.album}</span>
+                    </div>
+                  </td>
+                  <td>
+                    {#if track.bit_rate}
+                      <span class="quality-badge">{Math.round(track.bit_rate / 1000)}kbps</span>
+                    {/if}
+                    <span class="format-badge">{track.format?.toUpperCase() || 'AUDIO'}</span>
+                  </td>
+                  <td>
+                     <code class="path-snippet" title={track.path}>{track.path}</code>
+                  </td>
+                  <td class="actions-col">
+                    <button class="icon-btn danger-hover" onclick={() => deleteTrack(track)} title="Delete asset">
+                      <Icon name="trash" size={18} />
+                    </button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       {/if}
     </div>
   {/if}
 </div>
 
 <style>
-  .maintenance { padding: 1rem 0; }
-  .view-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 2rem; }
-  h1 { font-family: var(--font-headline); margin: 0; }
-
-  .back-btn { background: rgba(255,255,255,0.05); border: none; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: white; cursor: pointer; }
-
-  .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1.5rem; }
+  .maintenance-view { padding: 0; width: 100%; max-width: 1400px; margin: 0 auto; }
   
-  .stat-card {
-    background: var(--surface-container-high);
+  .view-header { margin-bottom: 3.5rem; }
+  .header-content { display: flex; align-items: center; gap: 1.5rem; margin-bottom: 0.5rem; }
+  
+  .responsive-title { 
+    font-size: clamp(2.5rem, 6vw, 4.5rem); 
+    font-weight: 900; 
+    margin: 0; 
+    letter-spacing: -0.04em;
+    color: var(--text-main);
+  }
+
+  .subtitle { color: var(--text-muted); font-size: 1.2rem; font-weight: 500; opacity: 0.8; }
+
+  .bento-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 2rem;
+  }
+
+  .bento-card {
+    background: var(--surface-container);
     border: 1px solid var(--border-color);
-    padding: 1.5rem;
-    border-radius: var(--radius);
+    padding: 2.5rem;
+    border-radius: 40px;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 1rem;
-    text-align: center;
-    transition: transform 0.2s;
+    gap: 1.5rem;
+    transition: all 0.4s cubic-bezier(0.2, 0, 0, 1);
+    position: relative;
+    overflow: hidden;
   }
-  .stat-card:hover { transform: translateY(-5px); border-color: var(--primary); }
-  .stat-card.warning { border-color: var(--tertiary); }
-  .stat-card.danger { border-color: var(--secondary); }
-
-  .stat-card .val { font-size: 2.5rem; font-weight: 900; color: var(--primary); font-family: var(--font-headline); display: block; }
-  .stat-card .lbl { color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 0.8rem; }
-
-  .action-btn {
-    width: 100%;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid var(--border-color);
-    color: white;
-    padding: 0.6rem;
-    border-radius: 100px;
-    font-weight: 700;
-    cursor: pointer;
-  }
-  .action-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
-  .action-btn.danger:hover { background: var(--secondary); border-color: var(--secondary); }
-
-  .detail-view { background: var(--surface-container-high); border-radius: var(--radius); padding: 2rem; border: 1px solid var(--border-color); }
+  .bento-card:hover { transform: translateY(-8px); border-color: var(--primary-40); box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
   
-  .m-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-  .m-table th { text-align: left; padding: 1rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; }
-  .m-table td { padding: 1rem; border-bottom: 1px solid rgba(255,255,255,0.02); }
-  .m-table .sub { font-size: 0.85rem; color: var(--text-muted); line-height: 1.4; }
-  .badge { background: var(--primary-10); color: var(--primary); padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 800; }
-  .path { font-size: 0.7rem; color: var(--text-muted); display: block; margin-top: 0.4rem; opacity: 0.5; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+  .bento-card.warning { border-left: 6px solid var(--tertiary); }
+  .bento-card.danger { border-left: 6px solid #ff4444; }
+  .bento-card.highlight { background: var(--surface-container-high); border: 2px solid var(--primary-20); }
 
-  .icon-btn { background: transparent; border: none; padding: 0.5rem; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
-  .icon-btn.danger { color: #f87171; }
-  .icon-btn.danger:hover { background: rgba(248, 113, 113, 0.1); }
+  .card-header { display: flex; align-items: center; gap: 1.2rem; color: var(--text-muted); }
+  .card-header .lbl { text-transform: uppercase; font-size: 0.9rem; font-weight: 800; letter-spacing: 0.1em; }
+
+  .bento-card .val { font-size: 4rem; font-weight: 950; color: var(--text-main); line-height: 1; letter-spacing: -0.05em; }
+
+  .bento-btn {
+    width: 100%;
+    background: var(--surface-container-highest);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 1.2rem;
+    border-radius: 24px;
+    font-weight: 850;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-size: 1rem;
+  }
+  .bento-btn:hover { background: var(--text-main); color: var(--surface-container); }
+  .bento-btn.primary { background: var(--primary); color: white; border: none; }
+  .bento-btn.danger { background: #ff444415; color: #ff4444; border-color: #ff444430; }
+  .bento-btn.danger:hover { background: #ff4444; color: white; }
+
+  .detail-container { 
+    background: var(--surface-container); 
+    border-radius: 48px; 
+    padding: 3rem; 
+    border: 1px solid var(--border-color); 
+    animation: slideUp 0.4s ease-out;
+  }
+
+  .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2.5rem; }
+  .detail-header h2 { font-size: 2.2rem; font-weight: 900; margin: 0; letter-spacing: -0.02em; }
+
+  .scroll-wrapper { overflow-x: auto; margin: 0 -1rem; padding: 0 1rem; }
+
+  .m-table { width: 100%; border-collapse: separate; border-spacing: 0 0.8rem; }
+  .m-table th { text-align: left; padding: 1rem 1.5rem; color: var(--text-muted); font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+  .m-table td { background: var(--surface-container-high); padding: 1.5rem; border-top: 1px solid var(--white-05); border-bottom: 1px solid var(--white-05); }
+  .m-table td:first-child { border-radius: 20px 0 0 20px; border-left: 1px solid var(--white-05); }
+  .m-table td:last-child { border-radius: 0 20px 20px 0; border-right: 1px solid var(--white-05); }
+
+  .title-cell { display: flex; flex-direction: column; gap: 0.3rem; }
+  .track-title { font-weight: 800; font-size: 1.1rem; color: var(--text-main); }
+  .track-sub { font-size: 0.9rem; color: var(--text-muted); font-weight: 600; opacity: 0.7; }
+
+  .quality-badge { background: var(--primary-15); color: var(--primary); padding: 0.4rem 0.8rem; border-radius: 10px; font-size: 0.8rem; font-weight: 900; margin-right: 0.5rem; }
+  .format-badge { background: var(--surface-container-highest); color: var(--text-muted); padding: 0.4rem 0.8rem; border-radius: 10px; font-size: 0.8rem; font-weight: 800; }
+
+  .path-snippet { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-muted); opacity: 0.6; max-width: 400px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .icon-btn { border: none; background: var(--surface-container-highest); color: var(--text-muted); width: 44px; height: 44px; border-radius: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
+  .icon-btn:hover { background: var(--surface-container-highest-hover); color: var(--text-main); transform: scale(1.05); }
+  .icon-btn.danger-hover:hover { background: #ff444415; color: #ff4444; }
+
+  .actions-col { width: 60px; text-align: center; }
+
+  @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  @media (max-width: 900px) {
+    .bento-grid { grid-template-columns: 1fr; }
+    .detail-container { padding: 1.5rem; border-radius: 32px; }
+    .m-table th { display: none; }
+    .m-table td { display: block; padding: 1rem; }
+    .m-table td:first-child { border-radius: 20px 20px 0 0; border-right: 1px solid var(--white-05); }
+    .m-table td:last-child { border-radius: 0 0 20px 20px; border-left: 1px solid var(--white-05); text-align: right; }
+    .path-snippet { max-width: 100%; }
+  }
 </style>

@@ -1,5 +1,5 @@
 <script>
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
   import { queue, currentIndex, audioQuality, isPlaying } from './stores.js';
@@ -10,10 +10,12 @@
     progress = $bindable(0), 
     duration = $bindable(0), 
     currentTime = $bindable(0), 
-    audioRef = $bindable(null) 
+    audioRef = $bindable(null),
+    onopenFull,
+    onedit,
+    ondelete
   } = $props();
 
-  const dispatch = createEventDispatcher();
   let volume = $state(1);
   let isMuted = $state(false);
 
@@ -21,7 +23,6 @@
   let audioA = $state(), audioB = $state();
   let activeAudio = $state('A');
   
-  let nextTrack = $state(null);
   let preloadedId = $state(null);
 
   let contextMenu = $state({
@@ -39,10 +40,10 @@
       x: e.clientX,
       y: e.clientY,
       items: [
-        { label: 'Editar etiquetas', icon: 'edit', action: () => dispatch('edit', currentPlaying) },
-        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(currentPlaying.title) },
+        { label: 'Edit Tags', icon: 'edit', action: () => onedit?.(currentPlaying) },
+        { label: 'Copy Title', icon: 'fileText', action: () => navigator.clipboard.writeText(currentPlaying.title) },
         { divider: true },
-        { label: 'Eliminar de biblioteca', icon: 'trash', color: 'danger', action: () => dispatch('delete', currentPlaying) }
+        { label: 'Remove from Library', icon: 'trash', color: 'danger', action: () => ondelete?.(currentPlaying) }
       ]
     };
   }
@@ -67,9 +68,8 @@
     el.onpause = () => isPlaying.set(false);
   }
 
-  // Preload logic: when 90% done, start loading next
   function checkPreload() {
-    if (duration > 0 && currentTime / duration > 0.8) {
+    if (duration > 0 && currentTime / duration > 0.85) {
       const q = get(queue);
       const idx = get(currentIndex);
       if (idx < q.length - 1) {
@@ -81,7 +81,6 @@
           nextEl.src = url;
           nextEl.load();
           preloadedId = next.id;
-          console.log("Preloading next track:", next.title);
         }
       }
     }
@@ -103,24 +102,21 @@
     activeAudio = activeAudio === 'A' ? 'B' : 'A';
     audioRef = activeAudio === 'A' ? audioA : audioB;
     
-    // Smooth transition
     prevAudio.pause();
     audioRef.play().catch(e => console.error("Play failed", e));
     
-    // Sync currentPlaying with App (via store or prop)
     const q = get(queue);
     const idx = get(currentIndex);
     currentPlaying = q[idx];
-    preloadedId = null; // Reset for next cycle
+    preloadedId = null;
   }
 
-  // Handle manual play from App
   $effect(() => {
     if (currentPlaying && audioRef && audioRef.src.indexOf(currentPlaying.id) === -1 && !preloadedId) {
       const quality = get(audioQuality);
       const url = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
       audioRef.src = url;
-      audioRef.play();
+      audioRef.play().catch(() => {});
     }
   });
 
@@ -142,13 +138,12 @@
       currentIndex.set(idx + 1);
       const next = q[idx + 1];
       currentPlaying = next;
-      // If already preloaded, switch. Else, load fresh
       if (preloadedId === next.id) {
          switchAudio();
       } else {
          const quality = get(audioQuality);
          audioRef.src = `/api/stream/${next.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
-         audioRef.play();
+         audioRef.play().catch(() => {});
          preloadedId = null;
       }
     }
@@ -162,7 +157,7 @@
       currentPlaying = q[idx-1];
       const quality = get(audioQuality);
       audioRef.src = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
-      audioRef.play();
+      audioRef.play().catch(() => {});
       preloadedId = null;
     }
   }
@@ -175,10 +170,8 @@
   }
 </script>
 
-<footer class="player glass">
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="now-playing" onclick={() => dispatch('openFull')} oncontextmenu={showContextMenu}>
+<footer class="player">
+  <div class="now-playing" onclick={onopenFull} oncontextmenu={showContextMenu} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && onopenFull?.()}>
     {#if currentPlaying}
       <img class="cover" src={`/api/cover/${currentPlaying.id}`} alt="Artwork" />
       <div class="track-info">
@@ -188,31 +181,34 @@
     {:else}
       <div class="cover-placeholder"></div>
       <div class="track-info">
-        <span class="title">No Track</span>
-        <span class="artist">Select a song</span>
+        <span class="title">No Active Track</span>
+        <span class="artist">Select something to play</span>
       </div>
     {/if}
   </div>
   
   <div class="controls-container">
     <div class="main-controls">
-      <button class="icon-btn" onclick={skipBack}><Icon name="skipBack" /></button>
-      <button class="icon-btn play-btn" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()}>
-        <Icon name={$isPlaying ? 'pause' : 'play'} size={20} color="black" />
+      <button class="icon-btn" onclick={skipBack} title="Previous"><Icon name="skipBack" size={28} /></button>
+      <button class="play-btn" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause().catch(() => {})} title="Play/Pause">
+        <Icon name={$isPlaying ? 'pause' : 'play'} size={28} />
       </button>
-      <button class="icon-btn" onclick={skipNext}><Icon name="skipForward" /></button>
+      <button class="icon-btn" onclick={skipNext} title="Next"><Icon name="skipForward" size={28} /></button>
     </div>
     
     <div class="progress-area">
       <span class="time">{formatTime(currentTime)}</span>
-      <input 
-        type="range" 
-        class="progress-bar" 
-        min="0" max="100" 
-        style="--progress: {progress}%"
-        bind:value={progress} 
-        oninput={handleSeek} 
-      />
+      <div class="modern-slider-container">
+        <input 
+          type="range" 
+          class="progress-bar" 
+          min="0" max="100" 
+          style="--progress: {progress}%"
+          bind:value={progress} 
+          oninput={handleSeek} 
+        />
+        <div class="progress-fill" style="width: {progress}%"></div>
+      </div>
       <span class="time">{formatTime(duration)}</span>
     </div>
   </div>
@@ -244,10 +240,9 @@
     x={contextMenu.x}
     y={contextMenu.y}
     items={contextMenu.items}
-    on:close={() => contextMenu.visible = false}
+    onclose={() => contextMenu.visible = false}
   />
 
-  <!-- Dual hidden audio elements managed by parent or here -->
   <audio bind:this={audioA} style="display:none"></audio>
   <audio bind:this={audioB} style="display:none"></audio>
 </footer>
@@ -257,87 +252,154 @@
     grid-area: player;
     background: var(--surface-container);
     display: grid;
-    grid-template-columns: minmax(180px, 0.8fr) 1.5fr minmax(180px, 0.8fr);
+    grid-template-columns: minmax(220px, 1fr) 2fr minmax(220px, 1fr);
     align-items: center;
-    padding: 0 1.5rem;
-    margin: 0.5rem 1rem 1rem 1rem;
-    border-radius: 28px;
+    padding: 0 2.5rem;
+    height: 110px;
+    margin: 0.5rem 1.5rem 1.5rem 1.5rem;
+    border-radius: 40px;
     border: 1px solid var(--border-color);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+    backdrop-filter: blur(20px);
+    z-index: 1000;
   }
 
   .now-playing {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 1.2rem;
     cursor: pointer;
+    min-width: 0;
+    transition: transform 0.2s;
   }
+  .now-playing:hover { transform: translateX(4px); }
 
   .cover, .cover-placeholder {
-    width: 56px;
-    height: 56px;
-    border-radius: 8px;
-    background: #1e293b;
+    width: 68px;
+    height: 68px;
+    border-radius: 16px;
+    background: var(--surface-container-high);
     object-fit: cover;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   }
 
   .track-info {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    gap: 2px;
   }
 
   .track-info .title { 
-    font-weight: 700; 
+    font-weight: 850; 
     color: var(--text-main);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 1.05rem;
+    font-size: 1.1rem;
+    letter-spacing: -0.3px;
   }
-  .track-info .artist { font-size: 0.85rem; color: var(--text-muted); font-weight: 500; }
+  .track-info .artist { font-size: 0.9rem; color: var(--text-muted); font-weight: 600; opacity: 0.8; }
 
   .controls-container {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.3rem;
+    gap: 0.8rem;
+    width: 100%;
   }
 
   .main-controls {
     display: flex;
-    gap: 1.5rem;
+    gap: 2rem;
     align-items: center;
   }
 
   .play-btn {
     background: var(--primary) !important;
     color: white !important;
-    width: 48px;
-    height: 48px;
+    width: 64px;
+    height: 64px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.2rem;
-    box-shadow: 0 4px 12px var(--primary-10);
-    transition: transform 0.2s;
+    box-shadow: 0 8px 24px var(--primary-30);
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    border: none;
+    cursor: pointer;
   }
-  .play-btn:hover { transform: scale(1.05); }
+  .play-btn:hover { transform: scale(1.1); box-shadow: 0 12px 32px var(--primary-40); }
+  .play-btn:active { transform: scale(0.95); }
 
   .progress-area {
     width: 100%;
-    max-width: 600px;
+    max-width: 700px;
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 1.2rem;
   }
 
-  .time { font-size: 0.75rem; color: #64748b; min-width: 35px; }
+  .modern-slider-container {
+    position: relative;
+    flex: 1;
+    height: 6px;
+    display: flex;
+    align-items: center;
+  }
 
   .progress-bar {
-    flex: 1;
-    height: 4px;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    appearance: none;
+    background: var(--surface-container-highest);
+    border-radius: 100px;
+    cursor: pointer;
+    z-index: 2;
+    opacity: 0;
+  }
+
+  .progress-fill {
+    position: absolute;
+    height: 100%;
+    background: var(--primary);
+    border-radius: 100px;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  .modern-slider-container::after {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: var(--surface-container-highest);
+    border-radius: 100px;
+    z-index: 0;
+  }
+
+  .progress-bar::-webkit-slider-thumb {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+  }
+
+  .time { font-size: 0.8rem; color: var(--text-muted); font-weight: 700; font-variant-numeric: tabular-nums; width: 45px; }
+
+  .volume-container {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 1.2rem;
+  }
+
+  .volume-bar {
+    width: 100px;
+    height: 5px;
     appearance: none;
     background: var(--surface-container-highest);
     border-radius: 10px;
@@ -345,96 +407,62 @@
     accent-color: var(--primary);
   }
 
-  .progress-bar::-webkit-slider-runnable-track {
-    background: linear-gradient(to right, var(--primary) var(--progress, 0%), var(--surface-container-highest) var(--progress, 0%));
-    height: 4px;
-    border-radius: 10px;
-  }
-
-  .progress-bar::-webkit-slider-thumb {
-    appearance: none;
-    width: 12px;
-    height: 12px;
-    background: var(--text-main);
-    border-radius: 50%;
-    margin-top: -4px;
-    box-shadow: 0 0 10px rgba(0,0,0,0.5);
-  }
-
-  .volume-container {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 1rem;
-  }
-
-  .volume-bar {
-    width: 100px;
-    height: 4px;
-    accent-color: var(--primary);
-  }
-
   .icon-btn {
     background: transparent;
     border: none;
     color: var(--text-muted);
-    font-size: 1.2rem;
     cursor: pointer;
     transition: all 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 8px;
+    border-radius: 12px;
   }
-
-  .icon-btn:hover { color: var(--text-main); transform: scale(1.1); }
+  .icon-btn:hover { color: var(--text-main); background: var(--surface-container-high); transform: scale(1.1); }
 
   .tech-badge {
     background: var(--primary-10);
-    padding: 0.2rem 0.5rem;
-    border-radius: 4px;
+    padding: 0.3rem 0.6rem;
+    border-radius: 8px;
     font-size: 0.7rem;
     font-weight: 800;
     color: var(--primary);
     border: 1px solid var(--primary-20);
+    letter-spacing: 0.5px;
   }
+
   @media (max-width: 1400px) {
-    .player { grid-template-columns: 200px 1fr 200px; padding: 0 1rem; }
-    .main-controls { gap: 1rem; }
+    .player { grid-template-columns: 240px 1fr 240px; padding: 0 1.5rem; }
   }
 
   @media (max-width: 1100px) {
     .player { 
-      grid-template-columns: 180px 1fr auto; 
-      height: 80px; 
-      padding: 0 1rem;
-      margin-left: 0.5rem;
-      border-radius: 28px;
+      grid-template-columns: 1fr 1.5fr auto; 
+      height: 115px; 
+      padding: 0 1.5rem; 
+      gap: 1rem;
     }
     .volume-bar, .tech-badge { display: none; }
-    .now-playing { gap: 0.8rem; }
-    .cover { width: 44px; height: 44px; }
-    .track-info .title { font-size: 0.95rem; }
-    .track-info .artist { font-size: 0.75rem; }
+    .play-btn { width: 56px; height: 56px; }
+    .controls-container { gap: 0.4rem; }
+    .cover { width: 60px; height: 60px; }
   }
 
   @media (max-width: 768px) {
     .player {
       grid-template-columns: 1fr auto;
-      height: 75px;
-      margin: 0.5rem 0.5rem 0 0.5rem;
-      padding: 0 1rem;
-      border-radius: 24px 24px 0 0;
-      gap: 1rem;
-      border-bottom: 1px solid var(--border-color);
-      box-shadow: 0 -10px 30px rgba(0,0,0,0.1);
+      height: 80px;
+      margin: 0.5rem 1rem 0 1rem;
+      border-radius: 32px 32px 0 0;
+      border-bottom: none;
+      padding: 0 1.5rem;
+      gap: 1.5rem;
     }
     .progress-area, .volume-container, .tech-badge { display: none !important; }
-    .now-playing { min-width: 0; }
-    .cover { width: 44px; height: 44px; border-radius: 12px; }
-    .track-info .title { font-size: 0.9rem; }
-    .track-info .artist { font-size: 0.75rem; }
-    .main-controls { gap: 0.5rem; }
-    .play-btn { width: 42px; height: 42px; }
-    .icon-btn :global(svg) { width: 20px; height: 20px; }
+    .play-btn { width: 52px; height: 52px; }
+    .cover { width: 48px; height: 48px; }
+    .track-info .title { font-size: 1rem; }
+    .main-controls { gap: 1rem; }
   }
 </style>

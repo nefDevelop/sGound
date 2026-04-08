@@ -1,31 +1,34 @@
 <script>
-  import { onMount, tick, createEventDispatcher } from 'svelte';
+  import { tick } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade, fly } from 'svelte/transition';
   import { audioQuality } from './stores.js';
   import ContextMenu from './ContextMenu.svelte';
 
-  export let currentPlaying = null;
-  export let audioRef = null;
-  export let isOpen = false;
-  export let progress = 0;
-  export let duration = 0;
-  export let currentTime = 0;
+  let { 
+    currentPlaying = null, 
+    audioRef = null, 
+    isOpen = $bindable(false), 
+    progress = $bindable(0), 
+    duration = $bindable(0), 
+    currentTime = $bindable(0),
+    onedit,
+    ondelete
+  } = $props();
 
-  const dispatch = createEventDispatcher();
-  let lyrics = "";
-  let parsedLyrics = [];
-  let currentLyricIndex = -1;
-  let lyricContainer;
-  let showLyrics = false; // Toggle for mobile
-  let volume = 1;
+  let lyrics = $state("");
+  let parsedLyrics = $state([]);
+  let currentLyricIndex = $state(-1);
+  let lyricContainer = $state(null);
+  let showLyrics = $state(false);
+  let volume = $state(1);
 
-  let contextMenu = {
+  let contextMenu = $state({
     visible: false,
     x: 0,
     y: 0,
     items: []
-  };
+  });
 
   function showContextMenu(e) {
     if (!currentPlaying) return;
@@ -35,31 +38,35 @@
       x: e.clientX,
       y: e.clientY,
       items: [
-        { label: 'Editar etiquetas', icon: 'edit', action: () => dispatch('edit', currentPlaying) },
+        { label: 'Editar etiquetas', icon: 'edit', action: () => onedit?.(currentPlaying) },
         { divider: true },
         { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(currentPlaying.title) },
-        { label: 'Eliminar de biblioteca', icon: 'xCircle', color: 'danger', action: () => dispatch('delete', currentPlaying) }
+        { label: 'Eliminar de biblioteca', icon: 'xCircle', color: 'danger', action: () => ondelete?.(currentPlaying) }
       ]
     };
   }
 
-  // Sincronizar letras con el tiempo actual
-  $: if (parsedLyrics.length > 0) {
-    const index = parsedLyrics.findIndex((l, i) => {
-      const next = parsedLyrics[i + 1];
-      return currentTime >= l.time && (!next || currentTime < next.time);
-    });
-    if (index !== currentLyricIndex && index !== -1) {
-      currentLyricIndex = index;
-      tick().then(scrollToActive);
+  // Sincronizar letras
+  $effect(() => {
+    if (parsedLyrics.length > 0) {
+      const index = parsedLyrics.findIndex((l, i) => {
+        const next = parsedLyrics[i + 1];
+        return currentTime >= l.time && (!next || currentTime < next.time);
+      });
+      if (index !== currentLyricIndex && index !== -1) {
+        currentLyricIndex = index;
+        tick().then(scrollToActive);
+      }
     }
-  }
+  });
 
-  // Cargar letras cuando cambia la canción
-  $: if (currentPlaying && isOpen) {
-    loadLyrics();
-    if (audioRef) volume = audioRef.volume;
-  }
+  // Cargar letras
+  $effect(() => {
+    if (currentPlaying && isOpen) {
+      loadLyrics();
+      if (audioRef) volume = audioRef.volume;
+    }
+  });
 
   async function loadLyrics() {
     try {
@@ -90,9 +97,9 @@
     });
 
     if (result.length === 0 && lrc.trim()) {
-        parsedLyrics = lrc.split('\n').filter(l => l.trim()).map(text => ({ time: 0, text }));
+      parsedLyrics = lrc.split('\n').filter(l => l.trim()).map(text => ({ time: 0, text }));
     } else {
-        parsedLyrics = result.sort((a, b) => a.time - b.time);
+      parsedLyrics = result.sort((a, b) => a.time - b.time);
     }
   }
 
@@ -113,11 +120,13 @@
   }
 
   function handleSeek(e) {
+    if (!audioRef) return;
     const seekTime = (e.target.value / 100) * duration;
     audioRef.currentTime = seekTime;
   }
 
   function handleVolume(e) {
+    if (!audioRef) return;
     volume = e.target.value;
     audioRef.volume = volume;
   }
@@ -126,19 +135,19 @@
 {#if isOpen && currentPlaying}
 <div class="full-player" in:fly={{ y: '100%', duration: 400 }} out:fly={{ y: '100%', duration: 300 }}>
   <!-- Background blur -->
-  <div class="bg-blur" style="background-image: url(/api/cover/${currentPlaying.id})"></div>
+  <div class="bg-blur" style="background-image: url(/api/cover/{currentPlaying.id})"></div>
   <div class="vignette"></div>
   
   <div class="main-content">
     <header class="player-header">
-      <button class="icon-btn" on:click={() => isOpen = false} title="Close">
+      <button class="icon-btn" onclick={() => isOpen = false} title="Close">
         <Icon name="chevronDown" size={28} />
       </button>
       <div class="header-info">
-        <span class="playing-from">En reproduccion</span>
+        <span class="playing-from">Now Playing</span>
         <span class="album-name">{currentPlaying.album}</span>
       </div>
-      <button class="icon-btn mobile-only" on:click={() => showLyrics = !showLyrics}>
+      <button class="icon-btn mobile-only" onclick={() => showLyrics = !showLyrics}>
         <Icon name={showLyrics ? 'music' : 'list'} size={24} />
       </button>
       <div class="desktop-only" style="width: 28px"></div>
@@ -150,7 +159,7 @@
           <img src="/api/cover/{currentPlaying.id}" alt="Cover" />
         </div>
         
-        <div class="track-meta" on:contextmenu={showContextMenu}>
+        <div class="track-meta" oncontextmenu={showContextMenu} role="button" tabindex="0">
           <div class="meta-texts">
             <div class="title-row">
               <h1>{currentPlaying.title}</h1>
@@ -173,7 +182,7 @@
           <div class="timeline">
             <span class="time">{formatTime(currentTime)}</span>
             <div class="progress-container">
-               <input type="range" class="full-progress" min="0" max="100" bind:value={progress} on:input={handleSeek} />
+               <input type="range" class="full-progress" min="0" max="100" bind:value={progress} oninput={handleSeek} />
                <div class="progress-fill" style="width: {progress}%"></div>
             </div>
             <span class="time">{formatTime(duration)}</span>
@@ -181,22 +190,22 @@
 
           <div class="main-btns">
             <button class="sub-btn" class:active={false}><Icon name="shuffle" size={20} /></button>
-            <button class="main-btn"><Icon name="skipBack" size={32} /></button>
-            <button class="play-btn" on:click={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()}>
+            <button class="main-btn" onclick={() => { /* skipBack logic if needed */ }}><Icon name="skipBack" size={32} /></button>
+            <button class="play-btn" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()}>
               <Icon name={audioRef?.paused ? 'play' : 'pause'} size={32} color="black" />
             </button>
-            <button class="main-btn"><Icon name="skipForward" size={32} /></button>
+            <button class="main-btn" onclick={() => { /* skipNext logic if needed */ }}><Icon name="skipForward" size={32} /></button>
             <button class="sub-btn" class:active={false}><Icon name="repeat" size={20} /></button>
           </div>
 
           <div class="extra-controls">
             <div class="volume-control">
                <Icon name={volume == 0 ? 'volumeX' : 'volume2'} size={18} />
-               <input type="range" min="0" max="1" step="0.01" value={volume} on:input={handleVolume} />
+               <input type="range" min="0" max="1" step="0.01" bind:value={volume} oninput={handleVolume} />
             </div>
             <div class="speed-control">
-               <button class="text-btn" on:click={() => audioRef.playbackRate = audioRef.playbackRate >= 2 ? 1 : audioRef.playbackRate + 0.5}>
-                 {audioRef?.playbackRate}x
+               <button class="text-btn" onclick={() => audioRef && (audioRef.playbackRate = audioRef.playbackRate >= 2 ? 1 : audioRef.playbackRate + 0.5)}>
+                 {audioRef?.playbackRate || 1}x
                </button>
             </div>
           </div>
@@ -208,20 +217,18 @@
           {#if parsedLyrics.length > 0}
             <div class="lyrics-list">
               {#each parsedLyrics as line, i}
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <p 
+                <button 
                   class="lyric-line" 
                   class:active={i === currentLyricIndex}
-                  on:click={() => line.time > 0 && (audioRef.currentTime = line.time)}
+                  onclick={() => line.time > 0 && audioRef && (audioRef.currentTime = line.time)}
                 >
                   {line.text}
-                </p>
+                </button>
               {/each}
             </div>
           {:else}
             <div class="no-lyrics">
-                <Icon name="music" size={64} color="rgba(255,255,255,0.05)" />
+                <Icon name="music" size={64} />
                 <p>Instrumental o sin letra</p>
             </div>
           {/if}
@@ -235,7 +242,7 @@
     x={contextMenu.x}
     y={contextMenu.y}
     items={contextMenu.items}
-    on:close={() => contextMenu.visible = false}
+    onclose={() => contextMenu.visible = false}
   />
 </div>
 {/if}
@@ -245,7 +252,7 @@
     position: fixed;
     top: 0; left: 0; width: 100vw; height: 100vh;
     background: #000;
-    z-index: 200;
+    z-index: 2000;
     color: white;
     overflow: hidden;
   }
@@ -273,19 +280,23 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    padding: 1.5rem 5vw; /* Reducido padding superior */
+    padding: 1.5rem 5vw;
     max-width: 1400px;
     margin: 0 auto;
-    overflow: hidden; /* Evitar scroll en el contenedor principal */
+    overflow: hidden;
   }
 
   .player-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1rem; /* Reducido de 2rem */
-    flex-shrink: 0; /* No se encoge */
+    margin-bottom: 1rem;
+    flex-shrink: 0;
   }
+
+  .header-info { text-align: center; }
+  .playing-from { display: block; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 2px; opacity: 0.5; margin-bottom: 0.2rem; }
+  .album-name { font-weight: 800; font-size: 0.9rem; }
 
   .player-body {
     flex: 1;
@@ -293,14 +304,14 @@
     grid-template-columns: 1fr 1fr;
     gap: 4vw;
     align-items: center;
-    min-height: 0; /* Crítico para que los hijos respeten el flex-grow */
+    min-height: 0;
     transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .left-side {
     display: flex;
     flex-direction: column;
-    gap: 1.5rem; /* Reducido de 3rem */
+    gap: 1.5rem;
     align-items: center;
     justify-content: center;
     height: 100%;
@@ -310,12 +321,23 @@
   .cover-wrapper {
     aspect-ratio: 1;
     width: 100%;
-    max-width: 400px; /* Reducido un poco */
-    max-height: 45vh; /* Se adapta a la altura de la pantalla */
-    border-radius: 24px;
+    height: auto;
+    max-width: min(85vw, 400px);
+    max-height: 45vh;
+    border-radius: 28px;
     overflow: hidden;
-    box-shadow: 0 30px 60px -12px rgba(0,0,0,0.7);
-    flex-shrink: 1; /* Permite que la portada se haga más pequeña si no hay sitio */
+    box-shadow: 0 40px 80px -15px rgba(0,0,0,0.8);
+    flex-shrink: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-container-high);
+  }
+
+  .cover-wrapper img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
   
   .track-meta {
@@ -328,10 +350,9 @@
   }
 
   .meta-texts h1 { 
-    font-family: var(--font-headline);
-    font-size: clamp(1.5rem, 5vh, var(--font-size-h1)); 
-    font-weight: var(--font-weight-h1);
-    letter-spacing: var(--letter-spacing-h1);
+    font-size: clamp(1.5rem, 5vh, 3rem); 
+    font-weight: 950;
+    letter-spacing: -1.5px;
     margin: 0; 
   }
 
@@ -345,7 +366,7 @@
   .quality-badge {
     background: rgba(255,255,255,0.08);
     padding: 0.25rem 0.7rem;
-    border-radius: calc(var(--radius) / 4);
+    border-radius: 8px;
     font-size: 0.7rem;
     font-weight: 900;
     color: rgba(255,255,255,0.5);
@@ -356,22 +377,24 @@
   .quality-badge.transcoded {
     background: var(--primary-10);
     color: var(--primary);
-    border-color: rgba(255, 51, 102, 0.3);
   }
+
+  .artist-name { font-size: 1.2rem; font-weight: 700; opacity: 0.6; margin-top: 0.3rem; }
 
   .playback-controls {
     width: 100%;
     max-width: 450px;
     display: flex;
     flex-direction: column;
-    gap: 1rem; /* Reducido */
+    gap: 1.5rem;
     flex-shrink: 0;
   }
 
-  .favorite-btn.active { color: var(--secondary); filter: drop-shadow(0 0 10px rgba(194, 112, 133, 0.3)); }
-  .favorite-btn.active :global(svg) { fill: var(--secondary); }
-
-  .sub-btn.active { color: var(--primary); opacity: 1; }
+  .timeline { display: flex; align-items: center; gap: 1rem; }
+  .progress-container { flex: 1; position: relative; height: 6px; display: flex; align-items: center; }
+  .full-progress { width: 100%; appearance: none; background: rgba(255,255,255,0.1); height: 100%; border-radius: 10px; cursor: pointer; z-index: 2; opacity: 0; }
+  .progress-fill { position: absolute; height: 100%; background: white; border-radius: 10px; z-index: 1; pointer-events: none; }
+  .progress-container::after { content: ''; position: absolute; width:100%; height:100%; background: rgba(255,255,255,0.1); border-radius: 10px; }
 
   .main-btns {
     display: flex;
@@ -381,8 +404,8 @@
   }
 
   .play-btn {
-    width: clamp(56px, 8vh, 72px);
-    height: clamp(56px, 8vh, 72px);
+    width: clamp(64px, 10vh, 80px);
+    height: clamp(64px, 10vh, 80px);
     background: white;
     border: none;
     border-radius: 50%;
@@ -390,77 +413,56 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
+    transition: transform 0.2s;
   }
+  .play-btn:hover { transform: scale(1.05); }
 
-  /* Ajuste de letras para que ocupen el máximo alto sin romper el layout */
+  .extra-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; opacity: 0.6; }
+  .volume-control { display: flex; align-items: center; gap: 0.8rem; }
+  .volume-control input { width: 80px; accent-color: white; }
+
   .right-side {
-    height: 100%; /* Usa el alto del flex parent */
+    height: 100%;
     overflow-y: auto;
     scrollbar-width: none;
     mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
-    padding: 0 1rem;
+    padding: 2rem 1rem;
+    display: flex;
+    flex-direction: column;
   }
 
   .lyric-line {
-    font-size: clamp(1.5rem, 5vh, 2.8rem); /* Fuente elástica según altura */
+    font-size: clamp(1.5rem, 5vh, 2.8rem);
     font-weight: 800;
-    margin: 1.5rem 0;
-    color: rgba(255,255,255,0.15);
-    transition: all 0.5s ease;
+    margin: 1.2rem 0;
+    color: rgba(255,255,255,0.2);
+    transition: all 0.4s ease;
     cursor: pointer;
     line-height: 1.1;
     letter-spacing: -1.5px;
-    transform-origin: left center;
+    text-align: left;
+    background: none; border: none; padding: 0;
   }
 
   .lyric-line.active {
     color: white;
-    transform: scale(1.08);
-    opacity: 1;
-    filter: drop-shadow(0 0 20px rgba(255,255,255,0.2));
-  }
-
-  .no-lyrics {
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 1.5rem;
-      opacity: 0.4;
+    transform: scale(1.05);
+    filter: drop-shadow(0 0 20px rgba(255,255,255,0.3));
   }
 
   .mobile-only { display: none; }
+  .icon-btn { background: transparent; border: none; color: white; cursor: pointer; opacity: 0.8; transition: 0.2s; }
+  .icon-btn:hover { opacity: 1; transform: scale(1.1); }
 
   @media (max-width: 1000px) {
-    .main-content { padding: 2rem 1.5rem; }
-    .player-body { 
-        display: block; 
-        position: relative;
-    }
-    
-    .left-side {
-        display: flex;
-        opacity: 1;
-        transition: opacity 0.4s;
-    }
-
-    .right-side {
-        position: absolute;
-        top: 0; left: 0; width: 100%; height: 100%;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.4s;
-    }
-
+    .player-body { display: block; position: relative; }
+    .left-side { opacity: 1; transition: opacity 0.4s; height: auto; padding: 2rem 0; }
+    .right-side { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; transition: opacity 0.4s; }
     .player-body.show-lyrics .left-side { opacity: 0; pointer-events: none; }
     .player-body.show-lyrics .right-side { opacity: 1; pointer-events: auto; }
-
     .mobile-only { display: block; }
     .desktop-only { display: none; }
-
-    .meta-texts h1 { font-size: 2rem; }
-    .lyric-line { font-size: 1.8rem; margin: 1.5rem 0; }
+    .lyric-line { font-size: 1.8rem; }
     .cover-wrapper { max-width: 320px; }
   }
 </style>

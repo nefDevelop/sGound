@@ -1170,6 +1170,59 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	stats["mostPlayed"] = topPlays
 
+	// Recientemente añadidos con Lógica de Discovery (Moods/Energy)
+	recentAlbums := make([]map[string]interface{}, 0)
+	rows3, err := s.getDB(r).Conn.Query(`
+		SELECT a.id, a.title, art.name, MAX(t.created_at) as added_at, 
+		       COALESCE(MAX(t.genre), '') as genre, MAX(t.bit_rate) as bitrate, MAX(t.play_count) as pc
+		FROM albums a
+		JOIN artists art ON a.artist_id = art.id
+		JOIN tracks t ON a.id = t.album_id
+		WHERE t.status = 'active'
+		GROUP BY a.id, a.title, art.name
+		ORDER BY added_at DESC LIMIT 6
+	`)
+	if err == nil {
+		defer rows3.Close()
+		for rows3.Next() {
+			var id, title, artist, addedAt, genre string
+			var br, pc int
+			rows3.Scan(&id, &title, &artist, &addedAt, &genre, &br, &pc)
+			
+			// Algoritmo de Mood/Tag Refinado
+			tag := "Recuerdo"
+			color := "tertiary"
+			g := strings.ToLower(genre)
+			
+			if pc == 0 {
+				tag = "Descubrir"
+				color = "secondary"
+			} else if strings.Contains(g, "rock") || strings.Contains(g, "pop") || strings.Contains(g, "electronic") || strings.Contains(g, "metal") {
+				tag = "Energy"
+				color = "primary"
+			} else if strings.Contains(g, "jazz") || strings.Contains(g, "classical") {
+				tag = "Inspiración"
+				color = "secondary"
+			} else if strings.Contains(g, "chill") || strings.Contains(g, "ambient") || strings.Contains(g, "lo-fi") || strings.Contains(g, "blues") {
+				tag = "Chill"
+				color = "tertiary"
+			} else if br > 1000000 {
+				tag = "Premium"
+				color = "primary"
+			}
+
+			recentAlbums = append(recentAlbums, map[string]interface{}{
+				"id": id, 
+				"title": title, 
+				"artist": artist, 
+				"addedAt": addedAt,
+				"tag": tag,
+				"tagColor": color,
+			})
+		}
+	}
+	stats["discovery"] = recentAlbums
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
 }

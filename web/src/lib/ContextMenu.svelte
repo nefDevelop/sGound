@@ -1,50 +1,53 @@
 <script>
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import { fade, scale } from 'svelte/transition';
   import Icon from './Icon.svelte';
 
-  export let x = 0;
-  export let y = 0;
-  export let items = []; // { label, icon, action, color }
-  export let visible = false;
+  let { x = 0, y = 0, items = [], visible = $bindable(false), onclose } = $props();
 
-  const dispatch = createEventDispatcher();
-  let menuElement;
+  let menuElement = $state();
+  let adjustedX = $state(0);
+  let adjustedY = $state(0);
+
+  $effect(() => {
+    adjustedX = x;
+    adjustedY = y;
+  });
 
   onMount(() => {
     const handleClick = (e) => {
       if (visible && menuElement && !menuElement.contains(e.target)) {
-        dispatch('close');
+        visible = false;
+        onclose?.();
       }
     };
     window.addEventListener('click', handleClick);
     return () => window.removeEventListener('click', handleClick);
   });
 
-  // Ajustar posición para que no se salga de la pantalla
-  let adjustedX = x;
-  let adjustedY = y;
+  $effect(() => {
+    if (visible && menuElement) {
+      const rect = menuElement.getBoundingClientRect();
+      const padding = 10;
+      
+      if (x + rect.width > window.innerWidth) {
+        adjustedX = window.innerWidth - rect.width - padding;
+      } else {
+        adjustedX = x;
+      }
 
-  $: if (visible && menuElement) {
-    const rect = menuElement.getBoundingClientRect();
-    const padding = 10;
-    
-    if (x + rect.width > window.innerWidth) {
-      adjustedX = window.innerWidth - rect.width - padding;
-    } else {
-      adjustedX = x;
+      if (y + rect.height > window.innerHeight) {
+        adjustedY = window.innerHeight - rect.height - padding;
+      } else {
+        adjustedY = y;
+      }
     }
-
-    if (y + rect.height > window.innerHeight) {
-      adjustedY = window.innerHeight - rect.height - padding;
-    } else {
-      adjustedY = y;
-    }
-  }
+  });
 
   function handleItemClick(item) {
     if (item.action) item.action();
-    dispatch('close');
+    visible = false;
+    onclose?.();
   }
 </script>
 
@@ -66,7 +69,7 @@
               type="button"
               class="menu-item" 
               class:danger={item.color === 'danger'}
-              on:click|stopPropagation={() => handleItemClick(item)}
+              onclick={(e) => { e.stopPropagation(); handleItemClick(item); }}
               role="menuitem"
             >
               <div class="icon">

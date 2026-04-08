@@ -5,16 +5,16 @@
   import { showToast } from './stores.js';
   
   const dispatch = createEventDispatcher();
-  let playlists = [];
-  let loading = true;
+  let playlists = $state([]);
+  let loading = $state(true);
 
-  let contextMenu = {
+  let contextMenu = $state({
     visible: false,
     x: 0,
     y: 0,
     playlist: null,
     items: []
-  };
+  });
 
   onMount(fetchPlaylists);
 
@@ -37,28 +37,28 @@
       y: e.clientY,
       playlist,
       items: [
-        { label: 'Reproducir', icon: 'play', action: () => dispatch('selectPlaylist', playlist) },
+        { label: 'Play', icon: 'play', action: () => dispatch('selectPlaylist', playlist) },
         { divider: true },
-        { label: 'Eliminar playlist', icon: 'trash', color: 'danger', action: () => deletePlaylist(playlist.id) }
+        { label: 'Delete playlist', icon: 'trash', color: 'danger', action: () => deletePlaylist(playlist.id) }
       ]
     };
   }
 
   async function deletePlaylist(id) {
-    if (!confirm("¿Eliminar esta lista de reproducción?")) return;
+    if (!confirm("Delete this playlist?")) return;
     try {
       const res = await fetch(`/api/playlists/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        showToast("Playlist eliminada", "success");
+        showToast("Playlist deleted", "success");
         fetchPlaylists();
       }
     } catch (e) {
-      showToast("Error al eliminar", "error");
+      showToast("Delete failed", "error");
     }
   }
 
   function createPlaylist() {
-    const name = prompt("Nombre de la nueva playlist:");
+    const name = prompt("New playlist name:");
     if (!name) return;
     
     fetch('/api/playlists', {
@@ -74,63 +74,59 @@
 <div class="playlists-view">
   <header class="section-header">
     <h1>Playlists</h1>
-    <button class="create-btn" on:click={createPlaylist}>
+    <button class="create-btn" onclick={createPlaylist}>
       <Icon name="plus" size={18} />
-      Nueva Playlist
+      <span>New Playlist</span>
     </button>
   </header>
 
   <section class="smart-playlists">
-    <h2>Smart Playlists</h2>
+    <h2>Smart Collections</h2>
     <div class="smart-grid">
-      <button class="smart-card glass" on:click={() => dispatch('selectSmart', { type: 'recently-played', name: 'Recién escuchadas', icon: 'clock' })}>
-        <div class="smart-icon"><Icon name="clock" size={24} /></div>
-        <span>Recién escuchadas</span>
+      <button class="smart-card" onclick={() => dispatch('selectSmart', { type: 'recently-played', name: 'Recently Played', icon: 'clock' })}>
+        <div class="smart-icon" style="background: var(--primary-10); color: var(--primary);"><Icon name="clock" size={24} /></div>
+        <span>Recently Played</span>
       </button>
-      <button class="smart-card glass quality" on:click={() => dispatch('selectSmart', { type: 'high-quality', name: 'Pura Calidad', icon: 'award' })}>
-        <div class="smart-icon"><Icon name="award" size={24} /></div>
-        <span>Pura Calidad</span>
+      <button class="smart-card" onclick={() => dispatch('selectSmart', { type: 'high-quality', name: 'High Fidelity', icon: 'award' })}>
+        <div class="smart-icon" style="background: rgba(214, 184, 92, 0.1); color: #d4b85c;"><Icon name="award" size={24} /></div>
+        <span>High Fidelity</span>
       </button>
-      <button class="smart-card glass" on:click={() => dispatch('selectSmart', { type: 'recently-added', name: 'Recientes', icon: 'plus' })}>
-        <div class="smart-icon"><Icon name="plus" size={24} /></div>
-        <span>Recientes</span>
+      <button class="smart-card" onclick={() => dispatch('selectSmart', { type: 'recently-added', name: 'New Additions', icon: 'plus' })}>
+        <div class="smart-icon" style="background: var(--secondary-10); color: var(--secondary);"><Icon name="plus" size={24} /></div>
+        <span>New Additions</span>
       </button>
-      <button class="smart-card glass decades" on:click={() => dispatch('selectSmart', { type: 'decade', name: 'Décadas', icon: 'calendar' })}>
-        <div class="smart-icon"><Icon name="calendar" size={24} /></div>
-        <span>Décadas</span>
-      </button>
-      <button class="smart-card glass genres" on:click={() => dispatch('selectSmart', { type: 'genre', name: 'Géneros', icon: 'layers' })}>
-        <div class="smart-icon"><Icon name="layers" size={24} /></div>
-        <span>Géneros</span>
+      <button class="smart-card" onclick={() => dispatch('selectSmart', { type: 'decade', name: 'Decades', icon: 'calendar' })}>
+        <div class="smart-icon" style="background: rgba(194, 112, 133, 0.1); color: #c27085;"><Icon name="calendar" size={24} /></div>
+        <span>Decades</span>
       </button>
     </div>
   </section>
 
   {#if loading}
-    <div class="loading">Cargando playlists...</div>
+    <div class="status">Sourcing playlists...</div>
   {:else if playlists.length === 0}
     <div class="empty-state">
       <div class="empty-icon"><Icon name="list" size={64} /></div>
-      <p>No tienes listas de reproducción aún.</p>
-      <button class="secondary-btn" on:click={createPlaylist}>Crear la primera</button>
+      <p>Your collection is empty.</p>
+      <button class="secondary-btn" onclick={createPlaylist}>Create First Playlist</button>
     </div>
   {:else}
     <div class="playlists-grid">
       {#each playlists as playlist}
         <button 
-          class="playlist-card glass" 
-          on:click={() => dispatch('selectPlaylist', playlist)}
-          on:contextmenu={(e) => showContextMenu(playlist, e)}
+          class="playlist-card" 
+          onclick={() => dispatch('selectPlaylist', playlist)}
+          oncontextmenu={(e) => showContextMenu(playlist, e)}
         >
           <div class="playlist-art">
             <Icon name="music" size={40} />
+            <div class="play-overlay">
+              <Icon name="play" size={24} color="black" />
+            </div>
           </div>
           <div class="playlist-info">
             <h3>{playlist.name}</h3>
-            <p>{playlist.trackCount || 0} canciones</p>
-          </div>
-          <div class="play-overlay">
-            <Icon name="play" size={24} color="black" />
+            <p>{playlist.trackCount || 0} tracks</p>
           </div>
         </button>
       {/each}
@@ -142,12 +138,12 @@
     x={contextMenu.x}
     y={contextMenu.y}
     items={contextMenu.items}
-    on:close={() => contextMenu.visible = false}
+    onclose={() => contextMenu.visible = false}
   />
 </div>
 
 <style>
-  .playlists-view { animation: fadeIn 0.4s ease; }
+  .playlists-view { width: 100%; padding: 0 0 3rem 0; animation: fadeIn 0.4s ease-out; }
   
   .section-header {
     display: flex;
@@ -156,20 +152,12 @@
     margin-bottom: 2.5rem;
   }
 
-  h1 { 
-    font-family: var(--font-headline);
-    font-size: var(--font-size-h1);
-    font-weight: var(--font-weight-h1);
-    letter-spacing: var(--letter-spacing-h1);
-    margin: 0;
-  }
+  h1 { font-size: 2.5rem; font-weight: 900; letter-spacing: -1.5px; margin: 0; color: var(--text-main); }
 
-  .smart-playlists {
-    margin-bottom: 4rem;
-  }
-
+  .smart-playlists { margin-bottom: 4rem; }
   .smart-playlists h2 {
-    font-size: 1.2rem;
+    font-size: 1.1rem;
+    font-weight: 800;
     color: var(--text-muted);
     margin-bottom: 1.5rem;
     text-transform: uppercase;
@@ -186,139 +174,114 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1rem;
-    padding: 2rem 1rem;
-    border-radius: var(--radius);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1px solid rgba(255,255,255,0.05);
+    gap: 1.2rem;
+    padding: 2.5rem 1rem;
+    background: var(--surface-container);
+    border-radius: 32px;
+    border: 1px solid var(--border-color);
+    transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+    cursor: pointer;
+    border: 1px solid transparent;
   }
 
-  .smart-card:hover {
-    background: rgba(255,255,255,0.08);
-    transform: translateY(-5px);
-    border-color: var(--primary);
-  }
+  .smart-card:hover { transform: translateY(-8px); background: var(--surface-container-high); border-color: var(--primary); }
 
   .smart-icon {
-    width: 56px;
-    height: 56px;
-    background: var(--primary-10);
-    color: var(--primary);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    width: 64px; height: 64px;
+    border-radius: 20px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.2);
   }
 
-  .smart-card.quality .smart-icon { background: rgba(214, 184, 92, 0.1); color: var(--tertiary); }
-  .smart-card.quality:hover { border-color: var(--tertiary); }
-
-  .smart-card.decades .smart-icon { background: rgba(194, 112, 133, 0.1); color: var(--secondary); }
-  .smart-card.decades:hover { border-color: var(--secondary); }
-
-  .smart-card span {
-    font-weight: 700;
-    font-size: 0.9rem;
-    text-align: center;
-  }
+  .smart-card span { font-weight: 800; font-size: 0.95rem; color: var(--text-main); }
 
   .create-btn {
     background: var(--primary);
     color: white;
-    padding: 0.8rem 1.5rem;
+    padding: 1rem 2rem;
     border-radius: 100px;
-    font-weight: 700;
+    font-weight: 900;
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    box-shadow: 0 10px 20px var(--primary-10);
+    gap: 0.8rem;
+    box-shadow: 0 10px 30px var(--primary-20);
+    transition: all 0.3s ease;
+    cursor: pointer;
+    border: none;
   }
+  .create-btn:hover { transform: translateY(-4px); box-shadow: 0 15px 40px var(--primary-30); }
 
   .playlists-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 2rem;
   }
 
   .playlist-card {
-    position: relative;
-    padding: 1.5rem;
-    border-radius: var(--radius);
-    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+    padding: 12px;
+    background: transparent;
+    border-radius: 32px;
     transition: all 0.3s ease;
+    border: 1px solid transparent;
     cursor: pointer;
-    border: 1px solid rgba(255,255,255,0.05);
+    text-align: left;
   }
 
   .playlist-card:hover {
+    background: var(--surface-container);
+    border-color: var(--border-color);
     transform: translateY(-8px);
-    background: rgba(255,255,255,0.05);
-    border-color: var(--primary);
   }
 
   .playlist-art {
     aspect-ratio: 1;
-    background: linear-gradient(135deg, #1e293b, #0f172a);
-    border-radius: calc(var(--radius) / 2);
+    background: var(--surface-container-highest);
+    border-radius: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-bottom: 1.2rem;
-    color: var(--primary);
-    box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-  }
-
-  .playlist-info h3 {
-    margin: 0;
-    font-size: 1.2rem;
-    font-weight: 700;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .playlist-info p {
-    margin: 0.4rem 0 0;
+    position: relative;
     color: var(--text-muted);
-    font-size: 0.9rem;
+    overflow: hidden;
   }
 
   .play-overlay {
     position: absolute;
-    top: 1.5rem;
-    right: 1.5rem;
+    bottom: 1rem;
+    right: 1rem;
     width: 48px;
     height: 48px;
-    background: white;
+    background: var(--primary);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     opacity: 0;
-    transform: translateY(10px);
-    transition: all 0.3s ease;
-    box-shadow: 0 10px 20px rgba(0,0,0,0.4);
+    transform: scale(0.8) translateY(10px);
+    transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
   }
 
-  .playlist-card:hover .play-overlay {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  .playlist-card:hover .play-overlay { opacity: 1; transform: scale(1) translateY(0); }
 
-  .empty-state {
-    text-align: center;
-    padding: 5rem 0;
-    color: var(--text-muted);
-  }
+  .playlist-info h3 { margin: 0; font-size: 1.1rem; font-weight: 800; color: var(--text-main); }
+  .playlist-info p { margin: 0.2rem 0 0; color: var(--text-muted); font-size: 0.85rem; font-weight: 600; }
 
-  .empty-icon { margin-bottom: 1.5rem; opacity: 0.2; }
+  .status { text-align: center; padding: 4rem; color: var(--text-muted); }
+  .empty-state { text-align: center; padding: 5rem 0; color: var(--text-muted); }
+  .secondary-btn { margin-top: 1.5rem; padding: 1rem 2.5rem; border: 2px solid var(--primary); border-radius: 100px; color: var(--primary); font-weight: 900; background: transparent; cursor: pointer; transition: all 0.2s; }
+  .secondary-btn:hover { background: var(--primary); color: white; }
 
-  .secondary-btn {
-    margin-top: 1.5rem;
-    padding: 0.8rem 2rem;
-    border: 1px solid var(--primary);
-    border-radius: 100px;
-    color: var(--primary);
-    font-weight: 700;
+  @media (max-width: 768px) {
+    h1 { font-size: 2rem; }
+    .smart-grid { grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+    .playlists-grid { grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+    .smart-card { padding: 1.5rem 0.5rem; border-radius: 24px; }
+    .playlist-card { border-radius: 24px; }
+    .create-btn span { display: none; }
+    .create-btn { padding: 1rem; }
   }
 </style>

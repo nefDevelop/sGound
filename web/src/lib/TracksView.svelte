@@ -1,12 +1,18 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
   import StarRating from './StarRating.svelte';
   
-  let { tracks = $bindable([]), currentPlaying = null } = $props();
+  let { 
+    tracks = $bindable([]), 
+    currentPlaying = null, 
+    onplay, 
+    onedit, 
+    onselectionChange, 
+    onqueue, 
+    ondelete 
+  } = $props();
   
-  const dispatch = createEventDispatcher();
   let selectedIds = $state(new Set());
 
   let contextMenu = $state({
@@ -25,14 +31,14 @@
       y: e.clientY,
       track,
       items: [
-        { label: 'Reproducir', icon: 'play', action: () => dispatch('play', { track, tracks }) },
-        { label: 'Añadir a cola', icon: 'plus', action: () => dispatch('queue', track) },
+        { label: 'Play', icon: 'play', action: () => onplay?.(track) },
+        { label: 'Add to queue', icon: 'plus', action: () => onqueue?.(track) },
         { divider: true },
-        { label: 'Editar etiquetas', icon: 'edit', action: () => dispatch('edit', track) },
-        { label: 'Organizar archivo', icon: 'folder', action: () => handleOrganize(track.id) },
+        { label: 'Edit tags', icon: 'edit', action: () => onedit?.(track) },
+        { label: 'Organize file', icon: 'folder', action: () => handleOrganize(track.id) },
         { divider: true },
-        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(track.title) },
-        { label: 'Eliminar de biblioteca', icon: 'xCircle', color: 'danger', action: () => dispatch('delete', track) }
+        { label: 'Copy title', icon: 'fileText', action: () => navigator.clipboard.writeText(track.title) },
+        { label: 'Remove from library', icon: 'xCircle', color: 'danger', action: () => ondelete?.(track) }
       ]
     };
   }
@@ -43,8 +49,8 @@
     } else {
       selectedIds.add(id);
     }
-    selectedIds = selectedIds; 
-    dispatch('selectionChange', Array.from(selectedIds).map(sid => tracks.find(t => t.id === sid)));
+    selectedIds = new Set(selectedIds); 
+    onselectionChange?.(Array.from(selectedIds).map(sid => tracks.find(t => t.id === sid)));
   }
 
   function toggleAll() {
@@ -53,17 +59,15 @@
     } else {
       tracks.forEach(t => selectedIds.add(t.id));
     }
-    selectedIds = selectedIds;
-    dispatch('selectionChange', Array.from(selectedIds).map(sid => tracks.find(t => t.id === sid)));
+    selectedIds = new Set(selectedIds);
+    onselectionChange?.(Array.from(selectedIds).map(sid => tracks.find(t => t.id === sid)));
   }
 
   async function handleOrganize(id) {
     try {
       const res = await fetch(`/api/tracks/organize?id=${encodeURIComponent(id)}`, { method: 'POST' });
       const data = await res.json();
-      if (res.ok) {
-        alert("File organized to: " + data.newPath);
-      }
+      if (res.ok) alert("File organized to: " + data.newPath);
     } catch (e) { alert("Failed to organize"); }
   }
 
@@ -74,89 +78,130 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: track.id, rating })
       });
-      if (res.ok) {
-        track.rating = rating;
-      }
+      if (res.ok) track.rating = rating;
     } catch (e) { console.error(e); }
   }
 </script>
 
 <div class="tracks-view">
-  <table class="tracks-table">
-    <thead>
-      <tr>
-        <th class="checkbox-cell">
-          <input type="checkbox" onchange={toggleAll} checked={selectedIds.size === tracks.length && tracks.length > 0} />
-        </th>
-        <th>#</th>
-        <th>Title</th>
-        <th>Artist</th>
-        <th>Rating</th>
-        <th>Album</th>
-        <th>Genre</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each tracks as track}
-        <tr 
-          class="track-row" 
-          class:active={currentPlaying && currentPlaying.id === track.id}
-          class:selected={selectedIds.has(track.id)}
-          ondblclick={() => dispatch('play', { track, tracks })}
-          oncontextmenu={(e) => showContextMenu(track, e)}
-        >
-          <td class="checkbox-cell">
-            <input type="checkbox" checked={selectedIds.has(track.id)} onchange={(e) => toggleSelect(track.id, e)} />
-          </td>
-          <td class="num">{track.trackNum || '-'}</td>
-          <td class="title-cell">
-            <div class="flex-align">
-              <!-- svelte-ignore a11y_missing_attribute -->
-              <img class="mini-cover" src={`/api/cover/${track.id}`} alt="" onerror={(e) => { if (e.currentTarget instanceof HTMLImageElement) e.currentTarget.style.display='none'; }} />
-              <span class="title-text">{track.title}</span>
-            </div>
-          </td>
-          <td>{track.artist}</td>
-          <td>
-            <StarRating rating={track.rating || 0} on:change={(e) => handleRate(track, e.detail)} />
-          </td>
-          <td>{track.album}</td>
-          <td><span class="genre-tag">{track.genre || '-'}</span></td>
-          <td class="actions">
-            <button class="btn-icon" onclick={() => dispatch('play', { track, tracks })} title="Play"><Icon name="play" size={14} /></button>
-            <button class="btn-icon" onclick={() => dispatch('edit', track)} title="Edit Tags"><Icon name="edit" size={14} /></button>
-            <button class="btn-icon" onclick={() => handleOrganize(track.id)} title="Organize File"><Icon name="folder" size={14} /></button>
-          </td>
+  <div class="table-container">
+    <table class="tracks-table">
+      <thead>
+        <tr>
+          <th class="checkbox-cell">
+            <input type="checkbox" onchange={toggleAll} checked={selectedIds.size === tracks.length && tracks.length > 0} />
+          </th>
+          <th class="col-num">#</th>
+          <th>Title</th>
+          <th class="col-artist">Artist</th>
+          <th class="col-rating">Rating</th>
+          <th class="col-album">Album</th>
+          <th class="col-genre">Genre</th>
+          <th class="col-actions">Actions</th>
         </tr>
-      {/each}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {#each tracks as track}
+          <tr 
+            class="track-row" 
+            class:active={currentPlaying && currentPlaying.id === track.id}
+            class:selected={selectedIds.has(track.id)}
+            ondblclick={() => onplay?.(track)}
+            oncontextmenu={(e) => showContextMenu(track, e)}
+          >
+            <td class="checkbox-cell">
+              <input type="checkbox" checked={selectedIds.has(track.id)} onchange={(e) => toggleSelect(track.id, e)} />
+            </td>
+            <td class="num col-num">{track.trackNum || '-'}</td>
+            <td class="title-cell">
+              <div class="flex-align">
+                <img 
+                  class="mini-cover" 
+                  src={`/api/cover/${track.id}`} 
+                  alt="" 
+                  onerror={(e) => { 
+                    const target = e.currentTarget;
+                    if (target instanceof HTMLImageElement) target.style.display='none'; 
+                  }} 
+                />
+                <div class="info-stack">
+                  <span class="title-text">{track.title}</span>
+                  <span class="mobile-subtitle">{track.artist}</span>
+                </div>
+              </div>
+            </td>
+            <td class="col-artist">{track.artist}</td>
+            <td class="col-rating">
+              <StarRating rating={track.rating || 0} onchange={(rating) => handleRate(track, rating)} />
+            </td>
+            <td class="col-album">{track.album}</td>
+            <td class="col-genre"><span class="genre-tag">{track.genre || '-'}</span></td>
+            <td class="actions col-actions">
+              <button class="btn-icon" onclick={() => onplay?.(track)} title="Play"><Icon name="play" size={14} /></button>
+              <button class="btn-icon" onclick={() => onedit?.(track)} title="Edit Tags"><Icon name="edit" size={14} /></button>
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </div>
 
   <ContextMenu 
     bind:visible={contextMenu.visible}
     x={contextMenu.x}
     y={contextMenu.y}
     items={contextMenu.items}
-    on:close={() => contextMenu.visible = false}
+    onclose={() => contextMenu.visible = false}
   />
 </div>
 
 <style>
-  .tracks-view { width: 100%; overflow-x: auto; }
-  .tracks-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
-  .tracks-table th { text-align: left; padding: 1rem; color: #64748b; border-bottom: 1px solid rgba(255,255,255,0.05); text-transform: uppercase; font-size: 0.8rem; }
+  .tracks-view { width: 100%; padding: 0 0 2rem 0; }
+  .table-container { width: 100%; overflow-x: hidden; }
+  .tracks-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; table-layout: fixed; }
+  .tracks-table th { text-align: left; padding: 1rem; color: var(--text-muted); border-bottom: 1px solid var(--border-color); text-transform: uppercase; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; }
+  
   .track-row { transition: background 0.2s; cursor: default; }
-  .track-row:hover { background: rgba(255, 255, 255, 0.03); }
-  .track-row.selected { background: rgba(255, 51, 102, 0.1); }
-  .track-row.active .title-text { color: #ff3366; font-weight: 600; }
-  .tracks-table td { padding: 0.8rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.02); color: #cbd5e1; }
-  .checkbox-cell { width: 40px; text-align: center; }
-  .num { width: 40px; color: #64748b; }
-  .title-cell { color: white; }
+  .track-row:hover { background: var(--surface-container-high); }
+  .track-row.selected { background: var(--primary-10); }
+  .track-row.active .title-text { color: var(--primary); font-weight: 800; }
+  
+  .tracks-table td { padding: 0.8rem 1rem; border-bottom: 1px solid var(--border-color); color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  
+  .checkbox-cell { width: 60px; text-align: center; }
+  .col-num { width: 50px; color: var(--text-muted); font-weight: 700; }
+  .title-cell { color: white; width: 40%; }
+  
   .flex-align { display: flex; align-items: center; gap: 1rem; }
-  .mini-cover { width: 32px; height: 32px; border-radius: 4px; background: #1e293b; object-fit: cover; }
-  .genre-tag { color: #ff3366; font-size: 0.85rem; }
-  .btn-icon { background: transparent; border: none; color: #64748b; font-size: 1rem; padding: 0.4rem; border-radius: 4px; cursor: pointer; }
-  .btn-icon:hover { color: white; background: rgba(255,255,255,0.1); }
+  .info-stack { display: flex; flex-direction: column; overflow: hidden; gap: 2px; }
+  
+  .mini-cover { width: 40px; height: 40px; border-radius: 10px; background: var(--surface-container-highest); object-fit: cover; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+  
+  .title-text { font-weight: 700; color: var(--text-main); }
+  .genre-tag { color: var(--secondary); font-size: 0.75rem; font-weight: 800; background: var(--secondary-10); padding: 0.25rem 0.6rem; border-radius: 6px; text-transform: uppercase; }
+  
+  .btn-icon { background: transparent; border: none; color: var(--text-muted); padding: 0.6rem; border-radius: 10px; cursor: pointer; transition: all 0.2s; }
+  .btn-icon:hover { color: var(--primary); background: var(--primary-10); }
+  
+  .mobile-subtitle { display: none; font-size: 0.8rem; color: var(--text-muted); font-weight: 600; }
+
+  /* Table Column Widths */
+  .col-artist { width: 20%; }
+  .col-album { width: 20%; }
+  .col-rating { width: 130px; }
+  .col-genre { width: 15%; }
+  .col-actions { width: 110px; text-align: right; }
+
+  @media (max-width: 1200px) {
+    .col-genre, .col-rating { display: none; }
+    .title-cell { width: 50%; }
+  }
+
+  @media (max-width: 768px) {
+    .col-artist, .col-album, .col-num { display: none; }
+    .title-cell { width: 100%; }
+    .mobile-subtitle { display: block; }
+    .tracks-table th { padding: 0.5rem 1rem; }
+    .tracks-table td { padding: 0.6rem 1rem; }
+  }
 </style>

@@ -1,19 +1,20 @@
 <script>
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
   
-  const dispatch = createEventDispatcher();
-  let albums = [];
-  let loading = true;
+  let { artistId = null, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum } = $props();
+  
+  let albums = $state([]);
+  let loading = $state(true);
 
-  let contextMenu = {
+  let contextMenu = $state({
     visible: false,
     x: 0,
     y: 0,
     album: null,
     items: []
-  };
+  });
 
   function showContextMenu(album, e) {
     e.preventDefault();
@@ -23,47 +24,59 @@
       y: e.clientY,
       album,
       items: [
-        { label: 'Reproducir álbum', icon: 'play', action: () => dispatch('playAlbum', album.id) },
-        { label: 'Añadir álbum a cola', icon: 'plus', action: () => dispatch('queueAlbum', album.id) },
+        { label: 'Play Album', icon: 'play', action: () => onplayAlbum?.(album.id) },
+        { label: 'Queue Album', icon: 'plus', action: () => onqueueAlbum?.(album.id) },
         { divider: true },
-        { label: 'Editar metadatos', icon: 'edit', action: () => dispatch('editAlbum', album) },
-        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(album.title) }
+        { label: 'Edit Tags', icon: 'edit', action: () => oneditAlbum?.(album) },
+        { label: 'Copy Title', icon: 'fileText', action: () => navigator.clipboard.writeText(album.title) }
       ]
     };
   }
 
-  onMount(async () => {
+  $effect(() => {
+    fetchAlbums(artistId);
+  });
+
+  async function fetchAlbums(id) {
+    loading = true;
     try {
-      const res = await fetch('/api/albums');
-      albums = await res.json() || [];
+      const url = id ? `/api/artists/${id}/albums` : '/api/albums';
+      const res = await fetch(url);
+      albums = (await res.json()) || [];
     } catch (e) {
       console.error(e);
     } finally {
       loading = false;
     }
-  });
+  }
 </script>
 
 <div class="albums-container">
+  <h1>Albums</h1>
   {#if loading}
-    <p class="status">Loading albums...</p>
+    <div class="status">Curating your library...</div>
   {:else if albums.length === 0}
-    <p class="status">No albums found in your library.</p>
+    <div class="status">Nothing here yet. Try scanning your music.</div>
   {:else}
     <div class="albums-grid">
       {#each albums as album}
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <div 
+        <button 
           class="album-card" 
-          on:click={() => dispatch('selectAlbum', album.id)}
-          on:contextmenu={(e) => showContextMenu(album, e)}
+          onclick={() => onselectAlbum?.(album.id)}
+          oncontextmenu={(e) => showContextMenu(album, e)}
         >
           <div class="cover-wrapper">
-            <img class="cover" src={`/api/cover/${album.coverId}`} alt={album.title} 
-                 on:error={(e) => (e.currentTarget.src = 'https://placehold.co/300x300?text=Album')} />
+            <img 
+              class="cover" 
+              src={`/api/cover/${album.coverId}`} 
+              alt={album.title} 
+              onerror={(e) => {
+                const target = e.currentTarget;
+                if (target instanceof HTMLImageElement) target.src = 'https://placehold.co/300x300?text=Album';
+              }} 
+            />
             <div class="play-overlay">
-              <div class="play-pill"><Icon name="play" color="white" size={20} /></div>
+              <div class="play-pill"><Icon name="play" size={24} /></div>
             </div>
           </div>
           <div class="album-info">
@@ -73,7 +86,7 @@
               <span class="year">{album.year}</span>
             {/if}
           </div>
-        </div>
+        </button>
       {/each}
     </div>
   {/if}
@@ -83,36 +96,39 @@
     x={contextMenu.x}
     y={contextMenu.y}
     items={contextMenu.items}
-    on:close={() => contextMenu.visible = false}
+    onclose={() => contextMenu.visible = false}
   />
 </div>
 
 <style>
-  .albums-container { width: 100%; padding: 1rem 0; }
+  .albums-container { width: 100%; padding: 0 0 3rem 0; animation: fadeIn 0.4s ease-out; }
+  h1 { font-size: 2.5rem; font-weight: 900; letter-spacing: -1px; margin: 0.5rem 0 2.5rem 0; color: var(--text-main); }
   
-  .status { color: #64748b; text-align: center; margin-top: 4rem; }
+  .status { color: var(--text-muted); text-align: center; margin-top: 5rem; font-weight: 700; font-size: 1.2rem; }
 
   .albums-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 2rem;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1.5rem;
   }
 
   /* MD3 + GNOME Style Album Card */
   .album-card {
     background: transparent;
     cursor: pointer;
-    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-    padding: 12px;
-    border-radius: 32px; /* MD3 Expressive Corners */
+    gap: 0.8rem;
+    padding: 10px;
+    border-radius: 24px;
+    border: 1px solid transparent;
   }
 
   .album-card:hover {
-    transform: translateY(-8px);
-    background: rgba(255, 255, 255, 0.05); /* GNOME surface hover */
+    transform: translateY(-6px);
+    background: var(--surface-container-high);
+    border-color: var(--border-color);
   }
 
   .cover-wrapper {
@@ -176,14 +192,25 @@
   }
 
   .artist {
-    color: #94a3b8;
+    color: var(--text-muted);
     font-size: 0.9rem;
     font-weight: 500;
   }
 
   .year {
-    color: #64748b;
+    color: var(--text-muted);
     font-size: 0.8rem;
     margin-top: 2px;
+    opacity: 0.7;
+  }
+
+  @media (max-width: 768px) {
+    .albums-grid {
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 1rem;
+    }
+    .album-card { border-radius: 20px; padding: 6px; }
+    .cover-wrapper { border-radius: 16px; }
+    .title { font-size: 1rem; }
   }
 </style>

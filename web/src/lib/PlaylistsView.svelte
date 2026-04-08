@@ -1,20 +1,18 @@
 <script>
-  import { onMount, createEventDispatcher } from 'svelte';
+  import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade } from 'svelte/transition';
   import TracksView from './TracksView.svelte';
 
-  export let playlist = { id: '', name: '' };
-  export let currentPlaying = null;
+  let { playlist = { id: '', name: '' }, currentPlaying = null, onplay, onedit, onselectionChange, onqueue, ondelete } = $props();
   
-  const dispatch = createEventDispatcher();
-  let tracks = [];
-  let loading = true;
-  let error = null;
+  let tracks = $state([]);
+  let loading = $state(true);
+  let error = $state(null);
 
-  $: if (playlist) {
-    fetchPlaylistTracks();
-  }
+  $effect(() => {
+    if (playlist?.id) fetchPlaylistTracks();
+  });
 
   async function fetchPlaylistTracks() {
     loading = true;
@@ -30,27 +28,24 @@
   }
 
   function handlePlayAll() {
-    if (tracks.length > 0) {
-       dispatch('play', tracks[0]);
-    }
+    if (tracks.length > 0) onplay?.(tracks[0]);
   }
 </script>
 
 <div class="playlist-view" in:fade>
   {#if playlist}
     <div class="playlist-header">
-      <div class="playlist-cover glass">
-          <Icon name="list" size={64} color="rgba(255,255,255,0.2)" />
+      <div class="playlist-cover">
+          <Icon name="list" size={80} />
       </div>
       <div class="playlist-info">
         <span class="type-label">Playlist</span>
         <h1>{playlist.name}</h1>
-        <p class="stats">{tracks.length} tracks</p>
-        
-        <div class="actions">
-          <button class="play-btn" on:click={handlePlayAll}>
+        <div class="meta-row">
+          <p class="stats">{tracks.length} tracks</p>
+          <button class="play-btn" onclick={handlePlayAll}>
             <Icon name="play" size={20} color="black" />
-            Play
+            Play All
           </button>
         </div>
       </div>
@@ -58,22 +53,23 @@
 
     <div class="tracks-list">
       {#if loading}
-        <p>Loading tracks...</p>
+        <div class="status">Sourcing tracks...</div>
       {:else if error}
         <p class="error">{error}</p>
       {:else if tracks.length === 0}
         <div class="empty">
-            <p>No tracks in this playlist.</p>
+            <Icon name="music" size={48} />
+            <p>This playlist is empty.</p>
         </div>
       {:else}
         <TracksView 
           {tracks} 
           {currentPlaying} 
-          on:play 
-          on:edit 
-          on:selectionChange 
-          on:queue
-          on:delete
+          onplay={onplay}
+          onedit={onedit}
+          onselectionChange={onselectionChange}
+          onqueue={onqueue}
+          ondelete={ondelete}
         />
       {/if}
     </div>
@@ -81,77 +77,86 @@
 </div>
 
 <style>
-  .playlist-view {
-    padding: 0;
-  }
-
+  .playlist-view { width: 100%; padding: 0 0 2rem 0; }
+  
   .playlist-header {
     display: flex;
-    gap: 2rem;
-    align-items: flex-end;
-    margin-bottom: 3rem;
+    gap: 3rem;
+    align-items: center;
+    margin-bottom: 4rem;
   }
 
   .playlist-cover {
-    width: 230px;
-    height: 230px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg, #333 0%, #111 100%);
-    border-radius: 24px;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.4);
+    width: 240px; height: 240px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface-container-high);
+    border-radius: 32px;
+    box-shadow: 0 30px 60px rgba(0,0,0,0.4);
+    color: var(--primary);
+    border: 1px solid var(--border-color);
   }
 
-  .playlist-info h1 {
-    font-size: 4rem;
-    margin: 0.5rem 0;
-    font-weight: 900;
-    font-family: var(--font-headline);
-    letter-spacing: -2px;
+  h1 { 
+    font-family: var(--font-headline); 
+    font-size: clamp(2.5rem, 6vw, 4rem); 
+    margin: 0; 
+    letter-spacing: -0.04em; 
+    font-weight: 950;
+    line-height: 1;
   }
-
   .type-label {
     text-transform: uppercase;
     font-size: 0.8rem;
-    font-weight: 700;
-    letter-spacing: 1px;
+    font-weight: 900;
+    letter-spacing: 2px;
     color: var(--primary);
   }
 
+  .meta-row { display: flex; align-items: center; gap: 2rem; }
+
   .stats {
     color: var(--text-muted);
-    margin-bottom: 1.5rem;
-    font-weight: 600;
+    font-weight: 800;
+    font-size: 1.1rem;
+    margin: 0;
   }
 
   .play-btn {
     background: var(--primary);
     color: white;
     border: none;
-    padding: 0.8rem 2.5rem;
+    padding: 1.2rem 3rem;
     border-radius: 100px;
-    font-weight: 800;
+    font-weight: 900;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.8rem;
     cursor: pointer;
-    transition: transform 0.2s, background 0.2s;
-    box-shadow: 0 4px 15px var(--primary-10);
+    transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+    box-shadow: 0 10px 30px var(--primary-20);
   }
-  .play-btn:hover { transform: scale(1.05); background: var(--primary-80); }
+  .play-btn:hover { transform: translateY(-4px); box-shadow: 0 15px 40px var(--primary-30); }
 
-  .tracks-list {
-    margin-top: 1rem;
-  }
+  .tracks-list { margin-top: 1rem; }
+
+  .status { padding: 4rem; text-align: center; color: var(--text-muted); font-weight: 700; }
 
   .empty {
     text-align: center;
     padding: 4rem;
     color: var(--text-muted);
-    background: rgba(255,255,255,0.02);
-    border-radius: var(--radius);
+    background: var(--surface-container-low);
+    border-radius: 32px;
     border: 1px dashed var(--border-color);
+    display: flex; flex-direction: column; align-items: center; gap: 1rem;
+  }
+
+  @media (max-width: 900px) {
+    .playlist-header { flex-direction: column; gap: 2rem; align-items: center; text-align: center; }
+    .playlist-cover { width: 180px; height: 180px; }
+    .playlist-info h1 { font-size: 2.5rem; }
+    .meta-row { flex-direction: column; gap: 1.5rem; width: 100%; }
+    .play-btn { width: 100%; justify-content: center; }
   }
 </style>
 

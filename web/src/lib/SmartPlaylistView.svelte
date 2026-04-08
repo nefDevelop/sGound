@@ -1,33 +1,30 @@
 <script>
-  import { onMount, createEventDispatcher } from 'svelte';
+  import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade } from 'svelte/transition';
   import TracksView from './TracksView.svelte';
 
-  export let type = "";
-  export let name = "";
-  export let icon = "list";
-  export let currentPlaying = null;
+  let { type = "", name = "", icon = "list", currentPlaying = null, onback, onplay, onedit, onselectionChange } = $props();
 
-  const dispatch = createEventDispatcher();
-  let tracks = [];
-  let loading = true;
-  let filterValue = "";
-  
-  let options = []; // Para décadas o géneros
+  let tracks = $state([]);
+  let loading = $state(true);
+  let filterValue = $state("");
+  let options = $state([]);
 
-  $: if (type) {
-    if (type === 'decade' || type === 'genre') {
-        fetchOptions();
-    } else {
-        fetchTracks();
+  $effect(() => {
+    if (type) {
+      if (type === 'decade' || type === 'genre') {
+          fetchOptions();
+      } else {
+          fetchTracks();
+      }
     }
-  }
+  });
 
   async function fetchOptions() {
       try {
           const res = await fetch('/api/library/metadata');
-          if (!res.ok) throw new Error("API responded with " + res.status);
+          if (!res.ok) throw new Error("API error");
           const data = await res.json();
           
           if (type === 'decade') {
@@ -53,7 +50,6 @@
       
       const res = await fetch(url);
       if (!res.ok) {
-          console.error("Smart playlist failed", res.status);
           tracks = [];
       } else {
           tracks = await res.json() || [];
@@ -73,120 +69,121 @@
 
 <div class="smart-view" in:fade>
   <header class="view-header">
-    <button class="back-btn" on:click={() => dispatch('back')}>
-      <Icon name="arrowLeft" size={24} />
-    </button>
+    <div class="top-nav">
+      <button class="back-btn" onclick={onback}>
+        <Icon name="arrowLeft" size={24} />
+      </button>
+
+      {#if type === 'decade' || type === 'genre'}
+        <div class="filter-box">
+          <span>Filter by {type === 'decade' ? 'Decade' : 'Genre'}</span>
+          <select bind:value={filterValue} onchange={handleFilterChange} class="modern-select">
+            {#each options as opt}
+              <option value={opt}>{type === 'decade' ? opt + 's' : opt}</option>
+            {/each}
+          </select>
+        </div>
+      {/if}
+    </div>
     
     <div class="header-content">
-      <div class="icon-box" class:quality={type === 'high-quality'} class:decades={type === 'decade'}>
-        <Icon name={icon} size={48} />
+      <div class="icon-box">
+        <Icon name={icon} size={64} />
       </div>
       <div class="texts">
+        <span class="type-label">Smart Selection</span>
         <h1>{name}</h1>
-        <p class="desc">Lista generada automáticamente basada en tu biblioteca.</p>
+        <p class="desc">Automatically generated from your library.</p>
       </div>
     </div>
-
-    {#if type === 'decade' || type === 'genre'}
-      <div class="filter-box">
-        <span>Filtrar por {type === 'decade' ? 'Década' : 'Género'}:</span>
-        <select bind:value={filterValue} on:change={handleFilterChange} class="glass-select">
-          {#each options as opt}
-            <option value={opt}>{type === 'decade' ? opt + 's' : opt}</option>
-          {/each}
-        </select>
-      </div>
-    {/if}
   </header>
 
   <div class="content">
     {#if loading}
-      <div class="loading-state">Calculando lista...</div>
+      <div class="status">Compiling your list...</div>
     {:else}
       <TracksView 
         {tracks} 
         {currentPlaying} 
-        on:play 
-        on:edit 
-        on:selectionChange 
+        onselectionChange={onselectionChange}
+        onplay={onplay}
+        onedit={onedit}
+        onqueue={(track) => {}}
+        ondelete={(track) => {}}
       />
     {/if}
   </div>
 </div>
 
 <style>
-  .smart-view { animation: slideIn 0.3s ease; }
+  .smart-view { width: 100%; animation: slideIn 0.3s ease-out; }
   
   .view-header {
     display: flex;
     flex-direction: column;
-    gap: 2rem;
-    margin-bottom: 3rem;
+    gap: 3rem;
+    margin-bottom: 4rem;
   }
 
+  .top-nav { display: flex; justify-content: space-between; align-items: center; }
+
   .back-btn {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.05);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
+    width: 48px; height: 48px; border-radius: 50%;
+    background: var(--surface-container-high);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); cursor: pointer; border: 1px solid var(--border-color);
+    transition: all 0.2s;
   }
-  .back-btn:hover { color: white; background: rgba(255,255,255,0.1); }
+  .back-btn:hover { color: var(--primary); background: var(--surface-container-highest); transform: translateX(-4px); }
 
   .header-content {
     display: flex;
     align-items: center;
-    gap: 2rem;
+    gap: 3rem;
   }
 
   .icon-box {
-    width: 120px;
-    height: 120px;
-    background: var(--primary-10);
+    width: 140px; height: 140px;
+    background: var(--surface-container-high);
+    border-radius: 32px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    border: 1px solid var(--border-color);
     color: var(--primary);
-    border-radius: var(--radius);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.2);
   }
 
-  .icon-box.quality { background: rgba(214, 184, 92, 0.1); color: var(--tertiary); }
-  .icon-box.decades { background: rgba(194, 112, 133, 0.1); color: var(--secondary); }
-
-  h1 { 
-    font-family: var(--font-headline);
-    font-size: 3.5rem;
-    margin: 0;
-    letter-spacing: -2px;
+  .type-label {
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    font-weight: 900;
+    letter-spacing: 2px;
+    color: var(--primary);
   }
 
-  .desc { color: var(--text-muted); font-size: 1.1rem; margin-top: 0.5rem; }
+  h1 { font-size: 3.5rem; margin: 0.5rem 0; font-weight: 900; letter-spacing: -2px; color: var(--text-main); }
+  .desc { color: var(--text-muted); font-size: 1.1rem; font-weight: 600; }
 
   .filter-box {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 1rem 1.5rem;
-    background: rgba(255,255,255,0.03);
-    border-radius: 100px;
-    align-self: flex-start;
+    display: flex; align-items: center; gap: 1rem;
+    padding: 0.6rem 1.2rem; background: var(--surface-container);
+    border-radius: 100px; border: 1px solid var(--border-color);
+  }
+  .filter-box span { font-weight: 800; font-size: 0.9rem; color: var(--text-muted); }
+
+  .modern-select {
+    background: transparent; border: none; color: var(--primary);
+    font-weight: 800; font-size: 1rem; outline: none; cursor: pointer;
   }
 
-  .glass-select {
-    background: #1e293b;
-    border: 1px solid rgba(255,255,255,0.1);
-    color: white;
-    padding: 0.4rem 1rem;
-    border-radius: 8px;
-    font-weight: 700;
-    outline: none;
-  }
+  .status { text-align: center; padding: 5rem; color: var(--text-muted); font-weight: 700; }
 
-  .loading-state { text-align: center; padding: 5rem; color: var(--text-muted); font-style: italic; }
+  @media (max-width: 768px) {
+    .header-content { flex-direction: column; text-align: center; gap: 2rem; }
+    .icon-box { width: 120px; height: 120px; }
+    h1 { font-size: 2.5rem; }
+    .top-nav { flex-direction: column-reverse; gap: 1.5rem; align-items: flex-start; }
+    .filter-box { width: 100%; justify-content: space-between; }
+  }
 
   @keyframes slideIn {
     from { transform: translateX(20px); opacity: 0; }

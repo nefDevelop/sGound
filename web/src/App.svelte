@@ -6,6 +6,7 @@
   import Icon from "./lib/Icon.svelte";
   import TracksView from "./lib/TracksView.svelte";
   import AlbumsGrid from "./lib/AlbumsGrid.svelte";
+  import ArtistsView from "./lib/ArtistsView.svelte";
   import Playlists from "./lib/Playlists.svelte";
   import PlaylistsView from "./lib/PlaylistsView.svelte";
   import Maintenance from "./lib/Maintenance.svelte";
@@ -54,6 +55,7 @@
   let isMassiveEditorOpen = $state(false);
   let trackToEdit = $state({ id: "", title: "", artist: "", album: "" });
   let selectedTracks = $state([]);
+  let selectedArtistId = $state(null);
 
   let currentPlaying = $state(null);
   let audioRef = $state(null);
@@ -272,6 +274,30 @@
     }
   }
 
+  function handleSelectArtist(artist) {
+    selectedArtistId = artist.id;
+    currentView = "albums";
+  }
+
+  async function handlePlayAlbum(albumId) {
+    try {
+      const res = await fetch(`/api/albums/${albumId}/tracks`);
+      const albumTracks = (await res.json()) || [];
+      if (albumTracks.length > 0) {
+        handlePlay({ track: albumTracks[0], tracks: albumTracks });
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  async function handleQueueAlbum(albumId) {
+    try {
+      const res = await fetch(`/api/albums/${albumId}/tracks`);
+      const albumTracks = (await res.json()) || [];
+      albumTracks.forEach(t => handleQueue(t));
+      showToast(`${albumTracks.length} tracks added to queue`, "success");
+    } catch (e) { console.error(e); }
+  }
+
   function selectPlaylist(playlist) {
     selectedPlaylist = playlist;
     currentView = "playlist";
@@ -366,7 +392,7 @@
       <button
         class="nav-item"
         class:active={currentView === "artists"}
-        onclick={() => (currentView = "artists")}
+        onclick={() => { selectedArtistId = null; currentView = "artists"; }}
       >
         <Icon name="users" size={18} />
         <span>Artists</span>
@@ -457,16 +483,24 @@
       {:else if currentView === "dashboard"}
         <Dashboard 
           bind:this={dashRef}
-          on:play={(e) => handlePlay(e.detail)} 
-          on:edit={(e) => openEditor(e.detail)}
-          on:queue={(e) => handleQueue(e.detail)}
-          on:delete={(e) => handleDelete(e.detail)}
-          on:selectInbox={() => currentView = "inbox"}
-          on:selectMaintenance={() => currentView = "maintenance"}
-          on:selectView={(e) => {
-            if (e.detail === 'tracks') currentView = 'library';
-            else currentView = e.detail;
+          onplay={handlePlay}
+          onedit={openEditor}
+          onqueue={handleQueue}
+          ondelete={handleDelete}
+          onselectInbox={() => currentView = "inbox"}
+          onselectMaintenance={() => currentView = "maintenance"}
+          onselectPlaylist={selectPlaylist}
+          onselectView={(view, id) => {
+            if (view === 'tracks') currentView = 'library';
+            else if (view === 'albums' && id) selectAlbum(id);
+            else {
+              selectedArtistId = null;
+              currentView = view;
+            }
           }}
+          onsmartAlbums={() => { /* logic */ }}
+          onsmartSearch={() => { /* logic */ }}
+          oncleanupLibrary={() => { /* logic */ }}
         />
       {:else if currentView === "library"}
         {#if tracks.length === 0}
@@ -477,22 +511,32 @@
           <TracksView
             {tracks}
             {currentPlaying}
-            on:play={(e) => handlePlay(e.detail)}
-            on:edit={(e) => openEditor(e.detail)}
-            on:selectionChange={(e) => handleSelectionChange(e.detail)}
-            on:queue={(e) => handleQueue(e.detail)}
-            on:delete={(e) => handleDelete(e.detail)}
+            onplay={(track) => handlePlay(track)}
+            onedit={(track) => openEditor(track)}
+            onselectionChange={(selection) => handleSelectionChange(selection)}
+            onqueue={(track) => handleQueue(track)}
+            ondelete={(track) => handleDelete(track)}
           />
         {/if}
       {:else if currentView === "inbox"}
         <InboxView
-          on:play={(e) => handlePlay(e.detail)}
-          on:edit={(e) => openEditor(e.detail)}
-          on:approved={() => { fetchTracks(); checkScanStatus(); }}
-          on:rejected={checkScanStatus}
+          onplay={(track) => handlePlay(track)}
+          onedit={(track) => openEditor(track)}
+          onapproved={() => { fetchTracks(); checkScanStatus(); }}
+          onrejected={checkScanStatus}
         />
       {:else if currentView === "albums"}
-        <AlbumsGrid on:selectAlbum={(e) => selectAlbum(e.detail)} />
+        <AlbumsGrid 
+          artistId={selectedArtistId}
+          onselectAlbum={(id) => selectAlbum(id)} 
+          onplayAlbum={(id) => handlePlayAlbum(id)}
+          onqueueAlbum={(id) => handleQueueAlbum(id)}
+          oneditAlbum={(album) => openEditor(album)}
+        />
+      {:else if currentView === "artists"}
+        <ArtistsView
+          onselectArtist={handleSelectArtist}
+        />
       {:else if currentView === "playlists"}
         <Playlists 
           on:selectPlaylist={(e) => selectPlaylist(e.detail)} 
@@ -501,27 +545,26 @@
       {:else if currentView === "smart-playlist"}
         <SmartPlaylistView 
           {...selectedSmart}
-          {currentPlaying}
-          on:back={() => currentView = "playlists"}
-          on:play={(e) => handlePlay(e.detail)}
-          on:edit={(e) => openEditor(e.detail)}
-          on:delete={(e) => handleDelete(e.detail)}
-          on:queue={(e) => handleQueue(e.detail)}
+          currentPlaying={currentPlaying}
+          onback={() => currentView = "playlists"}
+          onplay={(track) => handlePlay(track)}
+          onedit={(track) => openEditor(track)}
+          onselectionChange={(selection) => handleSelectionChange(selection)}
         />
       {:else if currentView === "playlist"}
         <PlaylistsView
           playlist={selectedPlaylist}
-          {currentPlaying}
-          on:play={(e) => handlePlay(e.detail)}
-          on:edit={(e) => openEditor(e.detail)}
-          on:selectionChange={(e) => handleSelectionChange(e.detail)}
-          on:delete={(e) => handleDelete(e.detail)}
-          on:queue={(e) => handleQueue(e.detail)}
+          currentPlaying={currentPlaying}
+          onplay={(track) => handlePlay(track)}
+          onedit={(track) => openEditor(track)}
+          onselectionChange={(selection) => handleSelectionChange(selection)}
+          ondelete={(track) => handleDelete(track)}
+          onqueue={(track) => handleQueue(track)}
         />
       {:else if currentView === "settings"}
         <Settings onscan={triggerScan} />
       {:else if currentView === "maintenance"}
-        <Maintenance on:fixTags={() => currentView = "library"} />
+        <Maintenance onfixTags={() => { /* logic to open tag editor */ }} />
       {/if}
     </div>
   </section>
@@ -532,9 +575,9 @@
     bind:progress
     bind:duration
     bind:currentTime
-    on:openFull={() => (isFullPlayerOpen = true)}
-    on:edit={(e) => openEditor(e.detail)}
-    on:delete={(e) => handleDelete(e.detail)}
+    onopenFull={() => (isFullPlayerOpen = true)}
+    onedit={(track) => openEditor(track)}
+    ondelete={(track) => handleDelete(track)}
   />
 </main>
 {/if}
@@ -560,8 +603,8 @@
   bind:progress
   bind:duration
   bind:currentTime
-  on:edit={(e) => openEditor(e.detail)}
-  on:delete={(e) => handleDelete(e.detail)}
+  onedit={(track) => openEditor(track)}
+  ondelete={(track) => handleDelete(track)}
 />
 
 <style>
@@ -707,9 +750,11 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: var(--surface-container);
     border-bottom: 1px solid var(--border-color);
-    z-index: 10;
+  }
+
+  @media (max-width: 768px) {
+    .top-bar { padding: 1rem !important; }
   }
 
   .search-box input {
@@ -742,10 +787,17 @@
   .scroll-view {
     flex: 1;
     overflow-y: auto;
-    padding: 2rem;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
-  .scroll-view::-webkit-scrollbar { width: 6px; }
-  .scroll-view::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 10px; }
+  .scroll-view::-webkit-scrollbar { display: none; }
+  
+  @media (max-width: 768px) {
+    .scroll-view { padding: 1rem; }
+  }
   .scroll-view::-webkit-scrollbar-track { background: transparent; }
 
   .error { color: #f87171; background: rgba(248, 113, 113, 0.1); padding: 1rem; border-radius: 12px; margin: 1rem; }
@@ -824,7 +876,7 @@
     }
     .sidebar {
       position: static;
-      width: calc(100% - 1rem) !important;
+      width: auto !important;
       height: 65px !important;
       flex-direction: row !important;
       justify-content: center !important;
@@ -832,8 +884,8 @@
       border: 1px solid var(--border-color);
       border-top: none;
       padding: 0 !important;
-      margin: 0 0.5rem 0.5rem 0.5rem !important;
-      border-radius: 0 0 24px 24px;
+      margin: 0 1rem 1.5rem 1rem !important;
+      border-radius: 0 0 32px 32px !important;
       background: var(--surface-container-highest);
       box-shadow: 0 10px 30px rgba(0,0,0,0.3);
     }
@@ -846,6 +898,6 @@
     }
     .brand, .nav-label, .nav-divider, .playlists-scroll, .logout-btn { display: none !important; }
     .nav-item { margin: 0; width: 50px; height: 50px; }
-    .content { margin: 0.5rem 0.5rem 0.2rem 0.5rem; border-radius: 24px; }
+    .content { margin: 1rem 1rem 0.5rem 1rem !important; border-radius: 24px; }
   }
 </style>
