@@ -1,8 +1,9 @@
 <script>
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
-  import { audioQuality } from './stores.js';
+  import { audioQuality, showToast } from './stores.js';
   import { generatePalette, applyTheme } from './theme.js';
+  import Modal from './Modal.svelte';
   
   let config = $state({ musicPath: '', autoRename: false, renamePattern: '', themeColor: '#ff3366', replayGainEnabled: false });
   let loading = $state(false);
@@ -29,6 +30,9 @@
   let newKeyLabel = $state('');
   let newKeyPerms = $state('r');
   let myPerms = $derived(localStorage.getItem('permissions') || 'r');
+  
+  let newlyCreatedKey = $state(null);
+  let showKeyModal = $state(false);
 
   async function fetchAPIKeys() {
     const res = await fetch('/api/auth/apikeys');
@@ -43,8 +47,14 @@
       body: JSON.stringify({ label: newKeyLabel, permissions: newKeyPerms })
     });
     if (res.ok) {
+      const data = await res.json();
+      newlyCreatedKey = data.key;
+      showKeyModal = true;
       newKeyLabel = '';
       fetchAPIKeys();
+      showToast("API Key generated successfully", "success");
+    } else {
+      showToast("Failed to generate API Key", "error");
     }
   }
 
@@ -81,7 +91,7 @@
     if (res.ok) {
       pollOrganizeStatus();
     } else {
-      alert("Failed to start organization");
+      showToast("Failed to start organization", "error");
     }
   }
 
@@ -94,11 +104,15 @@
         body: JSON.stringify(config)
       });
       if (res.ok) {
+        showToast("Configuration saved", "success");
         saveSuccess = true;
         setTimeout(() => saveSuccess = false, 2000);
       }
-    } catch (e) { alert("Failed to save config"); }
-    finally { loading = false; }
+    } catch (e) { 
+      showToast("Failed to save config", "error"); 
+    } finally { 
+      loading = false; 
+    }
   }
 </script>
 
@@ -182,7 +196,7 @@
         <section class="setting-item">
           <div class="info">
             <h3>Rename Pattern</h3>
-            <p>Use placeholders: <b>{`{artist}, {album}, {title}, {year}, {genre}, {track}, {bitrate}`}</b></p>
+            <p>Use placeholders: <b>&#123;artist&#125;, &#123;album&#125;, &#123;title&#125;, &#123;year&#125;, &#123;genre&#125;, &#123;track&#125;, &#123;bitrate&#125;</b></p>
           </div>
           <input type="text" bind:value={config.renamePattern} placeholder="{artist}/{album}/{track} - {title}" />
           
@@ -244,12 +258,12 @@
           {#each apiKeys as key}
             <div class="key-item">
               <div class="key-info">
-                <span class="key-label">{key.Label}</span>
-                <span class="badge {key.Permissions}">{key.Permissions}</span>
+                <span class="key-label">{key.label}</span>
+                <span class="badge {key.permissions}">{key.permissions}</span>
               </div>
               <div class="key-actions">
-                <button class="icon-btn" onclick={() => navigator.clipboard.writeText(key.Key)} title="Copy"><Icon name="copy" size={16} /></button>
-                <button class="icon-btn delete" onclick={() => deleteAPIKey(key.Key)}><Icon name="trash" size={16} /></button>
+                <button class="icon-btn" onclick={() => navigator.clipboard.writeText(key.key)} title="Copy"><Icon name="copy" size={16} /></button>
+                <button class="icon-btn delete" onclick={() => deleteAPIKey(key.key)}><Icon name="trash" size={16} /></button>
               </div>
             </div>
           {/each}
@@ -257,6 +271,10 @@
 
         <div class="add-key-form">
           <input type="text" placeholder="Device name" bind:value={newKeyLabel} />
+          <select bind:value={newKeyPerms} class="perm-select">
+            <option value="r">Read Only</option>
+            <option value="rw" disabled={myPerms === 'r'}>Full Access (RW)</option>
+          </select>
           <button class="add-btn" onclick={createAPIKey}>Generate</button>
         </div>
       </div>
@@ -269,6 +287,19 @@
       {#if saveSuccess}<Icon name="check" size={16} color="white" />{/if}
     </button>
   </div>
+
+  <Modal bind:isOpen={showKeyModal} title="API Key Generated" width="450px">
+    <div class="new-key-display">
+      <p>Please copy your new API key now. You won't be able to see it again easily.</p>
+      <div class="key-box">
+        <code>{newlyCreatedKey}</code>
+        <button class="icon-btn" onclick={() => { navigator.clipboard.writeText(newlyCreatedKey); showToast("Copied to clipboard", "info"); }}>
+          <Icon name="copy" size={20} />
+        </button>
+      </div>
+      <button class="btn-primary-rounded" onclick={() => showKeyModal = false}>Got it</button>
+    </div>
+  </Modal>
 </div>
 
 <style>
@@ -389,7 +420,17 @@
   .badge.rw { background: var(--primary-10); color: var(--primary); }
   
   .add-key-form { margin-top: 1.5rem; display: flex; gap: 0.8rem; }
-  .add-btn { background: var(--secondary); color: white; border: none; padding: 0 1.5rem; border-radius: 12px; font-weight: 700; cursor: pointer; }
+  .perm-select {
+    background: var(--surface-container-low);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 0 1rem;
+    border-radius: 12px;
+    font-weight: 600;
+    outline: none;
+    cursor: pointer;
+  }
+  .add-btn { background: var(--secondary); color: white; border: none; padding: 0.8rem 1.5rem; border-radius: 12px; font-weight: 700; cursor: pointer; }
 
   .global-actions { margin-top: 3rem; display: flex; justify-content: flex-end; }
   .save-btn {
@@ -406,4 +447,23 @@
     .add-key-form { flex-direction: column; }
     .add-btn { padding: 1rem; }
   }
+
+  /* Success Key Modal styles */
+  .new-key-display { display: flex; flex-direction: column; gap: 1.5rem; text-align: center; padding: 1rem 0; }
+  .key-box {
+    background: var(--surface-container-low);
+    padding: 1.2rem;
+    border-radius: 20px;
+    border: 1px solid var(--primary-30);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .key-box code { color: var(--primary); font-family: monospace; font-weight: 800; font-size: 1.1rem; word-break: break-all; }
+  .btn-primary-rounded {
+    background: var(--primary); color: white; border: none; padding: 1rem;
+    border-radius: 100px; font-weight: 800; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-primary-rounded:hover { filter: brightness(1.1); transform: translateY(-2px); }
 </style>

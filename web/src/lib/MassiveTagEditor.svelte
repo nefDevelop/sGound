@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
+  import { showToast } from './stores.js';
   
   let { 
     isOpen = $bindable(false), 
@@ -80,7 +81,7 @@
       }, 1500);
       
     } catch (e) {
-      alert("Error saving bulk tags: " + e.message);
+      showToast("Error saving bulk tags: " + e.message, "error");
     } finally {
       loading = false;
     }

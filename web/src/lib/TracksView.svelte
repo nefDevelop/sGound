@@ -3,6 +3,7 @@
   import ContextMenu from './ContextMenu.svelte';
   import StarRating from './StarRating.svelte';
   import { get } from 'svelte/store';
+  import { showToast } from './stores.js';
   
   let { 
     tracks = $bindable([]), 
@@ -182,8 +183,8 @@
     try {
       const res = await fetch(`/api/tracks/organize?id=${encodeURIComponent(id)}`, { method: 'POST' });
       const data = await res.json();
-      if (res.ok) alert("File organized to: " + data.newPath);
-    } catch (e) { alert("Failed to organize"); }
+      if (res.ok) showToast("File organized to: " + data.newPath, "success");
+    } catch (e) { showToast("Failed to organize", "error"); }
   }
 
   async function handleRate(track, rating) {

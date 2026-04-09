@@ -29,7 +29,7 @@ test:
 
 dev-front:
 	@echo "=> Servidor UI de desarrollo en caliente (Vite en puerto $(VITE_PORT))..."
-	cd web && npx vite --port $(VITE_PORT) --strictPort
+	cd web && npx vite --port $(VITE_PORT) --strictPort --host
 
 dev-back:
 	@echo "=> Ejecutando backend en modo desarrollo (Puerto $(SGOUND_PORT))..."

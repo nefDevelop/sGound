@@ -19,10 +19,10 @@ type User struct {
 }
 
 type APIKeyInfo struct {
-	Key         string
-	Username    string
-	Permissions string
-	Label       string
+	Key         string `json:"key"`
+	Username    string `json:"username"`
+	Permissions string `json:"permissions"`
+	Label       string `json:"label"`
 }
 
 type Settings struct {
