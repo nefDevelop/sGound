@@ -190,7 +190,6 @@
 </script>
 
 <footer class="player">
-  <div class="progress-line" style="width: {progress}%"></div>
   <div class="progress-bg" style="width: {progress}%"></div>
   
   <div class="now-playing" onclick={onopenFull} oncontextmenu={showContextMenu} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && onopenFull?.()}>
@@ -285,21 +284,12 @@
 
   .progress-bg {
     position: absolute;
-    left: 0; top: 0; bottom: 0;
-    background: linear-gradient(to bottom, rgba(var(--primary-rgb), 0.1), rgba(var(--primary-rgb), 0.25));
+    left: 1px; top: 1px; bottom: 1px;
+    background: rgba(var(--primary-rgb), 0.15);
     z-index: -1;
     transition: width 0.3s linear;
   }
 
-  .progress-line {
-    position: absolute;
-    top: 0; left: 0;
-    height: 3px;
-    background: var(--primary);
-    z-index: 10;
-    box-shadow: 0 0 10px var(--primary-40);
-    transition: width 0.3s linear;
-  }
 
   .now-playing {
     display: flex;
@@ -472,7 +462,8 @@
       border-radius: inherit;
       border-bottom: none;
     }
-    .album-name, .progress-bg { display: none; }
+    .album-name { display: none; }
+    .progress-bg { background: rgba(var(--primary-rgb), 0.25); top: 1px; bottom: 1px; left: 1px; }
     .right-actions { gap: 0.6rem; }
     .playback-btns { gap: 0.4rem; }
     .main-play-btn { width: 38px; height: 38px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
