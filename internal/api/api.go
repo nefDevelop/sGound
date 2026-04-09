@@ -359,6 +359,25 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+
+	if r.Method == http.MethodPatch {
+		var body struct {
+			Key    string `json:"key"`
+			Active bool   `json:"active"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid payload", http.StatusBadRequest)
+			return
+		}
+
+		err := s.MasterDB.ToggleAPIKeyStatus(body.Key, user.Username, body.Active)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 }
 
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -386,9 +405,21 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			if apiKey != "" {
 				keyInfo, err := s.MasterDB.GetAPIKeyInfo(apiKey)
 				if err == nil {
+					if !keyInfo.IsActive {
+						http.Error(w, "API Key is blocked", http.StatusForbidden)
+						return
+					}
 					user, _ = s.MasterDB.GetUserByUsername(keyInfo.Username)
 					if user != nil {
 						effectivePerms = keyInfo.Permissions
+						// Extraer IP real (considerando proxies)
+						ip := r.Header.Get("X-Forwarded-For")
+						if ip == "" {
+							ip = r.RemoteAddr
+						}
+						ua := r.Header.Get("User-Agent")
+						// Actualizar uso en segundo plano
+						go s.MasterDB.UpdateAPIKeyUsage(apiKey, ip, ua)
 					}
 				}
 			}

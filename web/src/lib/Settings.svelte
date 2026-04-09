@@ -63,6 +63,39 @@
     fetchAPIKeys();
   }
 
+  async function toggleAPIKeyStatus(key, currentStatus) {
+    const res = await fetch('/api/auth/apikeys', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, active: !currentStatus })
+    });
+    if (res.ok) fetchAPIKeys();
+  }
+
+  function getDeviceInfo(ua) {
+    if (!ua) return { type: 'Unknown', icon: 'helpCircle' };
+    const lowerUA = ua.toLowerCase();
+    if (lowerUA.includes('android') || lowerUA.includes('iphone') || lowerUA.includes('ipad')) {
+      return { type: 'Mobile', icon: 'smartphone' };
+    }
+    if (lowerUA.includes('windows') || lowerUA.includes('macintosh') || lowerUA.includes('linux')) {
+      return { type: 'PC', icon: 'monitor' };
+    }
+    return { type: 'Device', icon: 'sparkles' };
+  }
+
+  function getRelativeTime(dateStr) {
+    if (!dateStr || dateStr === '' || dateStr.startsWith('0001')) return 'Never used';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
+    
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return date.toLocaleDateString();
+  }
+
   // Efecto para aplicar el tema cuando cambia la paleta (Svelte 5)
   $effect(() => {
     applyTheme(palette);
@@ -256,14 +289,41 @@
         
         <div class="api-keys-list">
           {#each apiKeys as key}
-            <div class="key-item">
-              <div class="key-info">
-                <span class="key-label">{key.label}</span>
-                <span class="badge {key.permissions}">{key.permissions}</span>
-              </div>
-              <div class="key-actions">
-                <button class="icon-btn" onclick={() => navigator.clipboard.writeText(key.key)} title="Copy"><Icon name="copy" size={16} /></button>
-                <button class="icon-btn delete" onclick={() => deleteAPIKey(key.key)}><Icon name="trash" size={16} /></button>
+            {@const device = getDeviceInfo(key.user_agent)}
+            <div class="key-item {key.is_active ? '' : 'blocked'}">
+              <div class="key-main">
+                <div class="key-info">
+                  <div class="label-row">
+                    <span class="key-label">{key.label}</span>
+                    <span class="badge {key.permissions}">{key.permissions}</span>
+                    {#if !key.is_active}
+                      <span class="badge blocked">BLOCKED</span>
+                    {/if}
+                  </div>
+                  <div class="monitoring-info">
+                    <div class="mon-item">
+                      <Icon name={device.icon} size={12} color="var(--text-muted)" />
+                      <span>{device.type}</span>
+                    </div>
+                    {#if key.last_ip}
+                      <div class="mon-item">
+                        <Icon name="hash" size={12} color="var(--text-muted)" />
+                        <span>{key.last_ip}</span>
+                      </div>
+                    {/if}
+                    <div class="mon-item">
+                      <Icon name="clock" size={12} color="var(--text-muted)" />
+                      <span>{getRelativeTime(key.last_used_at)}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="key-actions">
+                  <button class="icon-btn" onclick={() => navigator.clipboard.writeText(key.key)} title="Copy"><Icon name="copy" size={16} /></button>
+                  <button class="icon-btn {key.is_active ? '' : 'active'}" onclick={() => toggleAPIKeyStatus(key.key, key.is_active)} title={key.is_active ? "Block" : "Unblock"}>
+                    <Icon name={key.is_active ? "lock" : "eye"} size={16} />
+                  </button>
+                  <button class="icon-btn delete" onclick={() => deleteAPIKey(key.key)} title="Delete"><Icon name="trash" size={16} /></button>
+                </div>
               </div>
             </div>
           {/each}
@@ -411,13 +471,24 @@
 
   .api-keys-list { display: flex; flex-direction: column; gap: 1rem; }
   .key-item { 
-    display: flex; justify-content: space-between; align-items: center; 
     padding: 1.2rem; background: var(--surface-container-low); border-radius: 20px; border: 1px solid var(--border-color);
+    transition: all 0.2s;
   }
-  .key-info { display: flex; flex-direction: column; gap: 0.4rem; }
-  .key-label { font-weight: 800; color: var(--text-main); }
-  .badge { padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.7rem; font-weight: 900; width: fit-content; }
+  .key-item.blocked { opacity: 0.6; background: var(--surface-container-lowest); border-color: rgba(255,255,255,0.05); }
+  .key-main { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+  .key-info { display: flex; flex-direction: column; gap: 0.6rem; flex: 1; min-width: 0; }
+  .label-row { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
+  .key-label { font-weight: 800; color: var(--text-main); font-size: 1.05rem; }
+  .monitoring-info { display: flex; gap: 1.2rem; flex-wrap: wrap; }
+  .mon-item { display: flex; align-items: center; gap: 0.4rem; color: var(--text-muted); font-size: 0.75rem; font-weight: 600; }
+  .mon-item span { white-space: nowrap; }
+  
+  .badge { padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.7rem; font-weight: 900; width: fit-content; text-transform: uppercase; }
   .badge.rw { background: var(--primary-10); color: var(--primary); }
+  .badge.blocked { background: rgba(255,255,255,0.1); color: var(--text-muted); border: 1px solid rgba(255,255,255,0.1); }
+  
+  .key-actions { display: flex; gap: 0.5rem; }
+  .icon-btn.active { color: var(--primary); }
   
   .add-key-form { margin-top: 1.5rem; display: flex; gap: 0.8rem; }
   .perm-select {

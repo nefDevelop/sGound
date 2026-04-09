@@ -563,7 +563,7 @@
     cursor: pointer;
   }
 
-  .tag-form input, .tag-form textarea {
+  .tag-form input:not([type="checkbox"]), .tag-form textarea {
     background: var(--surface-container);
     border: 1px solid var(--border-color);
     color: var(--text-main);
@@ -586,6 +586,17 @@
   .tag-form input:focus, .tag-form textarea:focus {
     border-color: var(--primary);
     background: var(--surface);
+  }
+
+  /* Hide number input spinners */
+  input::-webkit-outer-spin-button,
+  input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
+  }
+  input[type=number] {
+    -moz-appearance: textfield;
   }
 
   .actions {

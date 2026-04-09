@@ -23,6 +23,10 @@ type APIKeyInfo struct {
 	Username    string `json:"username"`
 	Permissions string `json:"permissions"`
 	Label       string `json:"label"`
+	LastIP      string `json:"last_ip"`
+	LastUsedAt  string `json:"last_used_at"`
+	UserAgent   string `json:"user_agent"`
+	IsActive    bool   `json:"is_active"`
 }
 
 type Settings struct {
@@ -57,6 +61,10 @@ func (db *MasterDatabase) initSchema() error {
 		username TEXT NOT NULL,
 		permissions TEXT NOT NULL,
 		label TEXT NOT NULL,
+		last_ip TEXT DEFAULT '',
+		last_used_at DATETIME,
+		user_agent TEXT DEFAULT '',
+		is_active BOOLEAN DEFAULT 1,
 		FOREIGN KEY(username) REFERENCES users(username)
 	);
 	CREATE TABLE IF NOT EXISTS settings (
@@ -71,7 +79,13 @@ func (db *MasterDatabase) initSchema() error {
 	// 2. Migración: Si la columna 'permissions' no existe, añadirla
 	// Intentamos añadirla (si ya existe, el error será ignorado)
 	db.Conn.Exec("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT 'r'")
-	
+
+	// Migraciones para api_keys
+	db.Conn.Exec("ALTER TABLE api_keys ADD COLUMN last_ip TEXT DEFAULT ''")
+	db.Conn.Exec("ALTER TABLE api_keys ADD COLUMN last_used_at DATETIME")
+	db.Conn.Exec("ALTER TABLE api_keys ADD COLUMN user_agent TEXT DEFAULT ''")
+	db.Conn.Exec("ALTER TABLE api_keys ADD COLUMN is_active BOOLEAN DEFAULT 1")
+
 	return nil
 }
 
@@ -94,7 +108,7 @@ func (db *MasterDatabase) CreateAPIKey(key, username, permissions, label string)
 }
 
 func (db *MasterDatabase) GetAPIKeys(username string) ([]APIKeyInfo, error) {
-	rows, err := db.Conn.Query("SELECT key, username, permissions, label FROM api_keys WHERE username = ?", username)
+	rows, err := db.Conn.Query("SELECT key, username, permissions, label, last_ip, IFNULL(last_used_at, ''), user_agent, is_active FROM api_keys WHERE username = ?", username)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +117,7 @@ func (db *MasterDatabase) GetAPIKeys(username string) ([]APIKeyInfo, error) {
 	var keys []APIKeyInfo
 	for rows.Next() {
 		var k APIKeyInfo
-		if err := rows.Scan(&k.Key, &k.Username, &k.Permissions, &k.Label); err != nil {
+		if err := rows.Scan(&k.Key, &k.Username, &k.Permissions, &k.Label, &k.LastIP, &k.LastUsedAt, &k.UserAgent, &k.IsActive); err != nil {
 			continue
 		}
 		keys = append(keys, k)
@@ -116,10 +130,22 @@ func (db *MasterDatabase) DeleteAPIKey(key, username string) error {
 	return err
 }
 
+func (db *MasterDatabase) UpdateAPIKeyUsage(key, ip, ua string) error {
+	_, err := db.Conn.Exec("UPDATE api_keys SET last_ip = ?, last_used_at = CURRENT_TIMESTAMP, user_agent = ? WHERE key = ?",
+		ip, ua, key)
+	return err
+}
+
+func (db *MasterDatabase) ToggleAPIKeyStatus(key, username string, active bool) error {
+	_, err := db.Conn.Exec("UPDATE api_keys SET is_active = ? WHERE key = ? AND username = ?",
+		active, key, username)
+	return err
+}
+
 func (db *MasterDatabase) GetAPIKeyInfo(key string) (*APIKeyInfo, error) {
 	k := &APIKeyInfo{}
-	err := db.Conn.QueryRow("SELECT key, username, permissions, label FROM api_keys WHERE key = ?", key).
-		Scan(&k.Key, &k.Username, &k.Permissions, &k.Label)
+	err := db.Conn.QueryRow("SELECT key, username, permissions, label, last_ip, IFNULL(last_used_at, ''), user_agent, is_active FROM api_keys WHERE key = ?", key).
+		Scan(&k.Key, &k.Username, &k.Permissions, &k.Label, &k.LastIP, &k.LastUsedAt, &k.UserAgent, &k.IsActive)
 	if err != nil {
 		return nil, err
 	}
