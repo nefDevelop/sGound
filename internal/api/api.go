@@ -106,6 +106,8 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/lyrics/", auth(s.handleLyrics))
 	mux.HandleFunc("/api/playlists", auth(s.handlePlaylists))
 	mux.HandleFunc("/api/playlists/", auth(s.handlePlaylistActions))
+	mux.HandleFunc("/api/smart-playlists/", auth(s.handleSmartPlaylists))
+	mux.HandleFunc("/api/library/metadata", auth(s.handleLibraryMetadata))
 
 	// 2. Auth Actions
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
@@ -884,6 +886,16 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		args = []interface{}{}
 	}
 
+	genre := r.URL.Query().Get("genre")
+	if genre != "" {
+		if status == "all" {
+			whereClause += " AND t.genre = ?"
+		} else {
+			whereClause += " AND t.genre = ?"
+		}
+		args = append(args, genre)
+	}
+
 	query := fmt.Sprintf(`
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
 		       a.name as artist, al.title as album, al.year as year,
@@ -1154,6 +1166,45 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	results["albums"] = albums
+	// 4. Search Genres
+	genreRows, err := s.getDB(r).Conn.Query(`
+		SELECT DISTINCT genre 
+		FROM tracks 
+		WHERE genre LIKE ? AND status = 'active'
+		LIMIT 10
+	`, searchTerm)
+	
+	var genres []string
+	if err == nil {
+		defer genreRows.Close()
+		for genreRows.Next() {
+			var g string
+			genreRows.Scan(&g)
+			if g != "" {
+				genres = append(genres, g)
+			}
+		}
+	}
+	results["genres"] = genres
+
+	// 5. Search Playlists
+	playlistRows, err := s.getDB(r).Conn.Query(`
+		SELECT id, name 
+		FROM playlists 
+		WHERE name LIKE ?
+		LIMIT 10
+	`, searchTerm)
+	
+	var playlists []map[string]interface{}
+	if err == nil {
+		defer playlistRows.Close()
+		for playlistRows.Next() {
+			var id, name string
+			playlistRows.Scan(&id, &name)
+			playlists = append(playlists, map[string]interface{}{"id": id, "name": name})
+		}
+	}
+	results["playlists"] = playlists
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)

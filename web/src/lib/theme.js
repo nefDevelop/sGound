@@ -58,7 +58,10 @@ export function generatePalette(seedHex) {
         surfaceContainer,
         surfaceContainerHigh,
         surfaceContainerHighest,
-        primary10: `rgba(${parseInt(seedHex.slice(1, 3), 16)}, ${parseInt(seedHex.slice(3, 5), 16)}, ${parseInt(seedHex.slice(5, 7), 16)}, 0.1)`,
+        primaryRgb: `${parseInt(seedHex.slice(1, 1+2), 16)}, ${parseInt(seedHex.slice(3, 3+2), 16)}, ${parseInt(seedHex.slice(5, 5+2), 16)}`,
+        primary10: `rgba(${parseInt(seedHex.slice(1, 3), 16)}, ${parseInt(seedHex.slice(3, 5), 16)}, ${parseInt(seedHex.slice(5, 7), 16)}, 0.12)`,
+        secondary10: `rgba(${parseInt(secondary.slice(1, 3), 16)}, ${parseInt(secondary.slice(3, 5), 16)}, ${parseInt(secondary.slice(5, 7), 16)}, 0.12)`,
+        tertiary10: `rgba(${parseInt(tertiary.slice(1, 3), 16)}, ${parseInt(tertiary.slice(3, 5), 16)}, ${parseInt(tertiary.slice(5, 7), 16)}, 0.12)`,
         onSurface: '#ffffff',
         onSurfaceVariant: 'rgba(255,255,255,0.7)'
     };
@@ -67,9 +70,12 @@ export function generatePalette(seedHex) {
 export function applyTheme(palette) {
     const root = document.documentElement;
     root.style.setProperty('--primary', palette.primary);
+    root.style.setProperty('--primary-rgb', palette.primaryRgb);
     root.style.setProperty('--primary-10', palette.primary10);
     root.style.setProperty('--secondary', palette.secondary);
+    root.style.setProperty('--secondary-10', palette.secondary10);
     root.style.setProperty('--tertiary', palette.tertiary);
+    root.style.setProperty('--tertiary-10', palette.tertiary10);
     root.style.setProperty('--surface', palette.surface);
     root.style.setProperty('--surface-container', palette.surfaceContainer);
     root.style.setProperty('--surface-container-high', palette.surfaceContainerHigh);

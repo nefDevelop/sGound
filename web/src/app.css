@@ -3,9 +3,12 @@
 :root {
   /* Default MD3 Tonal Palette */
   --primary: #1c71d8;
+  --primary-rgb: 28, 113, 216;
   --primary-10: rgba(28, 113, 216, 0.1);
   --secondary: #5476A0;
+  --secondary-10: rgba(84, 118, 160, 0.12);
   --tertiary: #7F42B2;
+  --tertiary-10: rgba(127, 66, 178, 0.12);
   --neutral: #6A727C;
   --surface: #05070a;
   --surface-container: #12141a;

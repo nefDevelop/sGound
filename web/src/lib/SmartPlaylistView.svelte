@@ -178,11 +178,26 @@
   .status { text-align: center; padding: 5rem; color: var(--text-muted); font-weight: 700; }
 
   @media (max-width: 768px) {
-    .header-content { flex-direction: column; text-align: center; gap: 2rem; }
-    .icon-box { width: 120px; height: 120px; }
-    h1 { font-size: 2.5rem; }
-    .top-nav { flex-direction: column-reverse; gap: 1.5rem; align-items: flex-start; }
-    .filter-box { width: 100%; justify-content: space-between; }
+    .header-content { 
+      flex-direction: row; 
+      text-align: left; 
+      gap: 1.5rem; 
+      align-items: center; 
+    }
+    .icon-box { 
+      width: 80px; 
+      height: 80px; 
+      border-radius: 20px; 
+      flex-shrink: 0;
+    }
+    .icon-box :global(svg) { width: 32px; height: 32px; }
+    h1 { font-size: 1.8rem; letter-spacing: -1px; margin: 0; }
+    .desc { font-size: 0.85rem; }
+    .type-label { font-size: 0.65rem; }
+    .view-header { gap: 1.5rem; margin-bottom: 2rem; }
+    .top-nav { flex-direction: row; justify-content: space-between; align-items: center; }
+    .filter-box { padding: 0.4rem 0.8rem; }
+    .filter-box span { display: none; }
   }
 
   @keyframes slideIn {

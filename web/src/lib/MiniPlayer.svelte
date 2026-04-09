@@ -190,12 +190,13 @@
 </script>
 
 <footer class="player">
+  <div class="progress-line" style="width: {progress}%"></div>
   <div class="progress-bg" style="width: {progress}%"></div>
   
   <div class="now-playing" onclick={onopenFull} oncontextmenu={showContextMenu} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && onopenFull?.()}>
     <div class="cover-container">
       {#if currentPlaying?.id}
-        <img src="/api/tracks/{currentPlaying.id}/cover" alt="Cover" class="cover" />
+        <img src="/api/cover/{currentPlaying.id}" alt="Cover" class="cover" />
       {:else}
         <div class="cover-placeholder"></div>
       {/if}
@@ -285,10 +286,19 @@
   .progress-bg {
     position: absolute;
     left: 0; top: 0; bottom: 0;
-    /* Creating a subtle filling effect with a primary gradient */
-    background: linear-gradient(to bottom, rgba(var(--primary-rgb), 0.1), rgba(var(--primary-rgb), 0.18));
+    background: linear-gradient(to bottom, rgba(var(--primary-rgb), 0.1), rgba(var(--primary-rgb), 0.25));
     z-index: -1;
-    transition: width 0.4s cubic-bezier(0.1, 0.7, 0.1, 1);
+    transition: width 0.3s linear;
+  }
+
+  .progress-line {
+    position: absolute;
+    top: 0; left: 0;
+    height: 3px;
+    background: var(--primary);
+    z-index: 10;
+    box-shadow: 0 0 10px var(--primary-40);
+    transition: width 0.3s linear;
   }
 
   .now-playing {

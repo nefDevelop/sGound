@@ -282,11 +282,6 @@
                 <input type="text" bind:value={track.composer} placeholder="Composer name..." />
               </label>
 
-              <label class="col-span-2">
-                <span>Comment</span>
-                <input type="text" bind:value={track.comment} placeholder="Your notes..." />
-              </label>
-
               <label class="checkbox-row col-span-2">
                 <input type="checkbox" bind:checked={track.instrumental} />
                 <span>Instrumental Track</span>
@@ -310,6 +305,11 @@
                 {/if}
 
                 <textarea bind:value={track.lyrics} placeholder="Paste lyrics or search online..."></textarea>
+              </label>
+
+              <label class="col-span-2">
+                <span>Comment</span>
+                <input type="text" bind:value={track.comment} placeholder="Your notes..." />
               </label>
             </div>
           </div>
@@ -526,6 +526,11 @@
 
   .checkbox-row input {
     margin: 0;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    accent-color: var(--primary);
+    cursor: pointer;
   }
 
   .checkbox-row span {

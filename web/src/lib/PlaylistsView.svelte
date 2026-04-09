@@ -152,11 +152,25 @@
   }
 
   @media (max-width: 900px) {
-    .playlist-header { flex-direction: column; gap: 2rem; align-items: center; text-align: center; }
-    .playlist-cover { width: 180px; height: 180px; }
-    .playlist-info h1 { font-size: 2.5rem; }
-    .meta-row { flex-direction: column; gap: 1.5rem; width: 100%; }
-    .play-btn { width: 100%; justify-content: center; }
+    .playlist-header { 
+      flex-direction: row; 
+      gap: 1.5rem; 
+      align-items: center; 
+      text-align: left; 
+      margin-bottom: 2rem;
+    }
+    .playlist-cover { 
+      width: 100px; 
+      height: 100px; 
+      border-radius: 20px; 
+      flex-shrink: 0;
+    }
+    .playlist-cover :global(svg) { width: 40px; height: 40px; }
+    h1 { font-size: 1.8rem; }
+    .meta-row { flex-direction: row; gap: 1rem; align-items: center; margin-top: 0.5rem; }
+    .play-btn { padding: 0.7rem 1.2rem; font-size: 0.85rem; }
+    .stats { font-size: 0.9rem; }
+    .type-label { font-size: 0.65rem; }
   }
 </style>
 

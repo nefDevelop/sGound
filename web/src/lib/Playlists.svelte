@@ -99,6 +99,10 @@
         <div class="smart-icon" style="background: rgba(194, 112, 133, 0.1); color: #c27085;"><Icon name="calendar" size={24} /></div>
         <span>Decades</span>
       </button>
+      <button class="smart-card" onclick={() => dispatch('selectSmart', { type: 'genre', name: 'By Genre', icon: 'layers' })}>
+        <div class="smart-icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;"><Icon name="layers" size={24} /></div>
+        <span>By Genre</span>
+      </button>
     </div>
   </section>
 

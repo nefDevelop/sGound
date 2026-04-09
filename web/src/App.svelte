@@ -22,6 +22,7 @@
   import { generatePalette, applyTheme } from "./lib/theme.js";
   import Login from "./lib/Login.svelte";
   import Setup from "./lib/Setup.svelte";
+  import Search from "./lib/Search.svelte";
 
   // Global fetch interceptor
   const originalFetch = window.fetch;
@@ -50,7 +51,6 @@
   let selectedPlaylist = $state(null);
   let selectedSmart = $state(null);
   let error = $state(null);
-  let searchQuery = $state("");
 
   let isTagEditorOpen = $state(false);
   let isMassiveEditorOpen = $state(false);
@@ -190,20 +190,51 @@
     }
   }
 
-  async function handleSearch() {
-    if (!searchQuery) {
+  async function handleSearch(query) {
+    if (!query) {
       fetchTracks();
       return;
     }
     try {
       const res = await fetch(
-        `/api/search?q=${encodeURIComponent(searchQuery)}`,
+        `/api/search?q=${encodeURIComponent(query)}`,
       );
       const data = await res.json();
       tracks = data.tracks || [];
+      currentView = "library";
     } catch (e) {
       console.error("Search failed", e);
     }
+  }
+
+  function handleSearchResultSelect(type, item) {
+    if (type === 'track') {
+       handlePlay(item);
+    } else if (type === 'album') {
+       selectAlbum(item.id);
+    } else if (type === 'artist') {
+       handleSelectArtist(item);
+    } else if (type === 'genre') {
+       // Filter tracks by genre
+       fetchTracksByGenre(item);
+    } else if (type === 'playlist') {
+       selectPlaylist(item);
+    }
+  }
+
+  async function fetchTracksByGenre(genre) {
+    try {
+      const res = await fetch(`/api/tracks?genre=${encodeURIComponent(genre)}`);
+      if (!res.ok) throw new Error("Failed to fetch tracks");
+      tracks = (await res.json()) || [];
+      currentView = "library";
+    } catch (e) {
+      console.error("Genre filter failed", e);
+    }
+  }
+
+  function handleSearchResultPlay(item) {
+     handlePlay(item);
   }
 
   async function triggerScan() {
@@ -312,7 +343,46 @@
     document.cookie = "sgound_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
     isLoggedIn = false;
   }
+
+  // --- Dynamic Title ---
+  const viewTitles = {
+    dashboard: "Dashboard",
+    library: "Tracks",
+    inbox: "Inbox",
+    albums: "Albums",
+    artists: "Artists",
+    playlists: "Playlists",
+    "smart-playlist": "Smart Playlist",
+    playlist: "Playlist",
+    settings: "Settings",
+    maintenance: "Maintenance",
+    fullplayer: "Player"
+  };
+
+  let pageTitle = $derived.by(() => {
+    if (setupRequired) return "Setup | Sgound";
+    if (!isLoggedIn) return "Login | Sgound";
+
+    let base = "Sgound";
+    let section = viewTitles[currentView] || "Web";
+    
+    if (currentView === 'playlist' && selectedPlaylist) {
+      section = selectedPlaylist.name;
+    } else if (currentView === 'smart-playlist' && selectedSmart) {
+      section = selectedSmart.name;
+    }
+
+    if ($isPlaying && currentPlaying) {
+      return `▶ ${currentPlaying.artist} - ${currentPlaying.title} | ${section}`;
+    }
+    
+    return `${section} | ${base}`;
+  });
 </script>
+
+<svelte:head>
+  <title>{pageTitle}</title>
+</svelte:head>
 
 {#if setupRequired}
   <Setup 
@@ -460,11 +530,10 @@
   <section class="content {currentView === 'fullplayer' ? 'full-player-view' : ''}">
     <header class="top-bar">
       <div class="search-box">
-        <input
-          type="text"
-          placeholder="Search music..."
-          bind:value={searchQuery}
-          oninput={handleSearch}
+        <Search 
+          onselect={handleSearchResultSelect} 
+          onplay={handleSearchResultPlay}
+          onsearch={handleSearch}
         />
       </div>
       <div class="actions">
@@ -796,18 +865,6 @@
     .top-bar { padding: 1rem !important; }
   }
 
-  .search-box input {
-    background: var(--surface-container-high);
-    border: 1px solid var(--border-color);
-    padding: 0.8rem 1.5rem;
-    border-radius: 100px;
-    color: white;
-    width: 300px;
-    outline: none;
-    font-weight: 600;
-    transition: all 0.4s cubic-bezier(0.2, 0, 0, 1);
-  }
-  .search-box input:focus { border-color: var(--primary); background: var(--surface-container-highest); width: 420px; }
 
   .actions { display: flex; gap: 0.8rem; }
 
@@ -886,7 +943,6 @@
     .app-layout { grid-template-columns: 220px minmax(0, 1fr); }
     .sidebar { padding: 1.5rem 0.8rem; }
     .brand h2 { font-size: 1.2rem; }
-    .search-box input { width: 220px; }
   }
 
   @media (max-width: 1100px) {
