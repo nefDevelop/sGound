@@ -1,0 +1,412 @@
+openapi: 3.0.3
+info:
+  title: Sgound API
+  description: API para la orquestación del backend de Sgound (Music Player) hacia la UI en Svelte.
+  version: 1.2.0
+servers:
+  - url: http://localhost:8088
+    description: Servidor Nativo
+  - url: http://localhost:5177
+    description: Proxy vía Vite (Desarrollo)
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: sgound_token
+  schemas:
+    Artist:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    Album:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        year:
+          type: integer
+    AlbumWithCover:
+      allOf:
+        - $ref: '#/components/schemas/Album'
+        - type: object
+          properties:
+            artist:
+              type: string
+            coverId:
+              type: string
+    Track:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        trackNum:
+          type: integer
+        duration:
+          type: integer
+        genre:
+          type: string
+    Config:
+      type: object
+      properties:
+        musicPath:
+          type: string
+        themeColor:
+          type: string
+        autoRename:
+          type: boolean
+        renamePattern:
+          type: string
+        replayGainEnabled:
+          type: boolean
+
+security:
+  - ApiKeyAuth: []
+  - CookieAuth: []
+
+paths:
+  /api/auth/login:
+    post:
+      summary: Login de usuario
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login exitoso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  username:
+                    type: string
+                  permissions:
+                    type: string
+
+  /api/auth/status:
+    get:
+      summary: Verificar estado de autenticación / setup
+      parameters:
+        - name: username
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Estado del servidor/usuario
+
+  /api/auth/setup:
+    post:
+      summary: Configuración inicial del administrador
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '201':
+          description: Usuario admin creado
+
+  /api/artists:
+    get:
+      summary: Listar todos los artistas
+      responses:
+        '200':
+          description: Lista de artistas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Artist'
+
+  /api/artists/{id}/albums:
+    get:
+      summary: Obtener álbumes de un artista
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista de álbumes del artista
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Album'
+
+  /api/albums:
+    get:
+      summary: Listar todos los álbumes
+      responses:
+        '200':
+          description: Lista de álbumes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AlbumWithCover'
+
+  /api/albums/{id}/tracks:
+    get:
+      summary: Obtener canciones de un álbum
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista de pistas del álbum
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Track'
+
+  /api/tracks:
+    get:
+      summary: Listar todas las canciones
+      responses:
+        '200':
+          description: Lista de canciones
+
+  /api/tracks/{id}/tags:
+    put:
+      summary: Editar metadatos de una canción
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                artist:
+                  type: string
+                album:
+                  type: string
+                year:
+                  type: integer
+      responses:
+        '200':
+          description: Metadatos actualizados
+
+  /api/tracks/{id}:
+    delete:
+      summary: Borrar canción
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Canción eliminada de la DB
+
+  /api/stream/{id}:
+    get:
+      summary: Stream de audio
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: bitrate
+          in: query
+          description: ej. 128k, 192k. Activa transcodificación.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stream binario
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+
+  /api/cover/{id}:
+    get:
+      summary: Obtener carátula
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Imagen de carátula
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+
+  /api/scan:
+    post:
+      summary: Iniciar escaneo de biblioteca
+      responses:
+        '202':
+          description: Escaneo iniciado
+
+  /api/config:
+    get:
+      summary: Obtener configuración del servidor
+      responses:
+        '200':
+          description: Configuración actual
+    put:
+      summary: Actualizar configuración
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Config'
+      responses:
+        '200':
+          description: Configuración actualizada
+
+  /api/dashboard:
+    get:
+      summary: Estadísticas del dashboard
+      responses:
+        '200':
+          description: Estadísticas globales
+
+  /api/search:
+    get:
+      summary: Búsqueda global
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Resultados de búsqueda
+
+  /api/lyrics/{id}:
+    get:
+      summary: Obtener letras
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Letras encontradas
+    put:
+      summary: Guardar letras
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lyrics:
+                  type: string
+      responses:
+        '200':
+          description: Letras guardadas
+
+  /api/playlists:
+    get:
+      summary: Listar playlists
+      responses:
+        '200':
+          description: Lista de playlists
+    post:
+      summary: Crear playlist
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Playlist creada
+
+  /api/library/status:
+    get:
+      summary: Obtener estado del escaneo actual
+      responses:
+        '200':
+          description: Status de escaneo
+
+  /api/library/metadata:
+    get:
+      summary: Obtener géneros y décadas disponibles
+      responses:
+        '200':
+          description: Metadatos de la biblioteca
+
+  /api/autocomplete:
+    get:
+      summary: Sugerencias de autocompletado para búsqueda
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista de sugerencias

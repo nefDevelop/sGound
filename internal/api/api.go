@@ -110,6 +110,8 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/smart-playlists/", auth(s.handleSmartPlaylists))
 	mux.HandleFunc("/api/library/metadata", auth(s.handleLibraryMetadata))
 	mux.HandleFunc("/api/autocomplete", auth(s.handleAutocomplete))
+	mux.HandleFunc("/api/openapi.yaml", s.handleServeOpenAPI)
+	mux.HandleFunc("/api/docs", s.handleServeSwaggerUI)
 
 	// 2. Auth Actions
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
@@ -2029,4 +2031,44 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 	os.WriteFile(cachePath, transparentPixel, 0644)
 	w.Header().Set("Content-Type", "image/gif")
 	w.Write(transparentPixel)
+}
+
+func (s *Server) handleServeOpenAPI(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "openapi.yaml")
+}
+
+func (s *Server) handleServeSwaggerUI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprint(w, `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sgound API Docs</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" >
+    <style>
+      html { box-sizing: border-box; overflow: -moz-scrollbars-vertical; overflow-y: scroll; }
+      *, *:before, *:after { box-sizing: inherit; }
+      body { margin:0; background: #fafafa; }
+    </style>
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"> </script>
+    <script>
+    window.onload = function() {
+      const ui = SwaggerUIBundle({
+        url: "/api/openapi.yaml",
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+        ],
+      })
+      window.ui = ui
+    }
+    </script>
+</body>
+</html>
+`)
 }
