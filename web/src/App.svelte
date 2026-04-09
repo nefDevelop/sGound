@@ -23,6 +23,7 @@
   import Login from "./lib/Login.svelte";
   import Setup from "./lib/Setup.svelte";
   import Search from "./lib/Search.svelte";
+  import ConfirmModal from "./lib/ConfirmModal.svelte";
 
   // Global fetch interceptor
   const originalFetch = window.fetch;
@@ -57,6 +58,7 @@
   let trackToEdit = $state({ id: "", title: "", artist: "", album: "" });
   let selectedTracks = $state([]);
   let selectedArtistId = $state(null);
+  let playerSubView = $state("cover"); // "cover", "lyrics", "queue"
 
   let currentPlaying = $state(null);
   let audioRef = $state(null);
@@ -79,6 +81,23 @@
   let scanStatus = $state({ scanning: false, processed: 0, inboxCount: 0 });
   let pollingInterval = null;
   let dashRef = $state(null);
+  let inboxRef = $state(null);
+  let playlistRef = $state(null);
+  let smartRef = $state(null);
+  let confirmState = $state({ isOpen: false, title: "", message: "", confirmLabel: "Confirm", type: "info", icon: null, onconfirm: null, oncancel: null });
+
+  function openConfirm(options) {
+    confirmState = {
+      isOpen: true,
+      title: options.title || "Confirmar",
+      message: options.message || "¿Estás seguro?",
+      confirmLabel: options.confirmLabel || "Confirmar",
+      type: options.type || "info",
+      icon: options.icon || null,
+      onconfirm: options.onconfirm,
+      oncancel: options.oncancel || null
+    };
+  }
 
   async function checkScanStatus() {
     if (!isLoggedIn) return;
@@ -180,7 +199,7 @@
     }
   }
 
-  async function fetchTracks() {
+  export async function fetchTracks() {
     try {
       const res = await fetch("/api/tracks");
       if (!res.ok) throw new Error("Failed to fetch tracks");
@@ -279,17 +298,78 @@
     selectedTracks = selected;
   }
 
-  async function handleDelete(track) {
-    if (!confirm(`Are you sure you want to delete "${track.title}" from library?`)) return;
-    try {
-      const res = await fetch(`/api/tracks/${track.id}`, { method: 'DELETE' });
-      if (res.ok) {
-        showToast("Track deleted", "success");
-        fetchTracks();
+  async function handleDeletePhysical(track, callback) {
+    openConfirm({
+      title: "Eliminar archivo",
+      message: `¡ADVERTENCIA! ¿Estás seguro de que quieres borrar FÍSICAMENTE "${track.title}" del disco? Esta acción no se puede deshacer.`,
+      confirmLabel: "Borrar para siempre",
+      type: "danger",
+      onconfirm: async () => {
+        try {
+          const res = await fetch(`/api/tracks/${track.id}`, { method: 'DELETE' });
+          if (res.ok) {
+            showToast("Archivo eliminado del disco", "success");
+            fetchTracks();
+            if (callback) callback();
+          }
+        } catch (e) {
+          showToast("Error al eliminar el archivo", "error");
+        }
       }
-    } catch (e) {
-      showToast("Failed to delete", "error");
-    }
+    });
+  }
+
+  async function handleReject(track, callback) {
+    openConfirm({
+      title: "Ocultar canción",
+      message: `¿Ocultar "${track.title}" de la biblioteca? No aparecerá en Inbox ni Library, pero se conservará en tu disco.`,
+      confirmLabel: "Ocultar",
+      type: "info",
+      icon: "eyeOff",
+      onconfirm: async () => {
+        try {
+          const res = await fetch(`/api/tracks/reject`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: [track.id] })
+          });
+          if (res.ok) {
+            showToast("Canción ocultada", "success");
+            fetchTracks();
+            if (callback) callback();
+          }
+        } catch (e) {
+           showToast("Error al ocultar", "error");
+        }
+      }
+    });
+  }
+
+  async function handleBulkReject(ids, callback) {
+    if (!ids || ids.length === 0) return;
+    openConfirm({
+      title: "Ocultar canciones",
+      message: `¿Ocultar ${ids.length} canciones de la biblioteca? No aparecerán en Inbox ni Library, pero se conservarán en tu disco.`,
+      confirmLabel: "Ocultar todas",
+      type: "info",
+      icon: "eyeOff",
+      onconfirm: async () => {
+        try {
+          const res = await fetch('/api/tracks/reject', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids })
+          });
+          if (res.ok) {
+            showToast(`${ids.length} canciones ocultadas`, "success");
+            fetchTracks();
+            if (callback) callback();
+          }
+        } catch (e) {
+          showToast("Error al ocultar canciones", "error");
+        }
+      }
+    });
   }
 
   function handleQueue(track) {
@@ -557,7 +637,8 @@
           onplay={handlePlay}
           onedit={openEditor}
           onqueue={handleQueue}
-          ondelete={handleDelete}
+          onhide={(track) => handleReject(track, () => dashRef?.refresh())}
+          ondeletePhysical={(track) => handleDeletePhysical(track, () => dashRef?.refresh())}
           onselectInbox={() => currentView = "inbox"}
           onselectMaintenance={() => currentView = "maintenance"}
           onselectPlaylist={selectPlaylist}
@@ -586,15 +667,20 @@
             onedit={(track) => openEditor(track)}
             onselectionChange={(selection) => handleSelectionChange(selection)}
             onqueue={(track) => handleQueue(track)}
-            ondelete={(track) => handleDelete(track)}
+            onhide={handleReject}
+            ondeletePhysical={handleDeletePhysical}
           />
         {/if}
       {:else if currentView === "inbox"}
         <InboxView
+          bind:this={inboxRef}
           onplay={(track) => handlePlay(track)}
           onedit={(track) => openEditor(track)}
           onapproved={() => { fetchTracks(); checkScanStatus(); }}
           onrejected={checkScanStatus}
+          onhide={(track) => handleReject(track, () => inboxRef?.fetchInbox())}
+          onbulkReject={(ids) => handleBulkReject(ids, () => inboxRef?.fetchInbox())}
+          ondeletePhysical={(track) => handleDeletePhysical(track, () => inboxRef?.fetchInbox())}
         />
       {:else if currentView === "albums"}
         <AlbumsGrid 
@@ -615,21 +701,26 @@
         />
       {:else if currentView === "smart-playlist"}
         <SmartPlaylistView 
+          bind:this={smartRef}
           {...selectedSmart}
           currentPlaying={currentPlaying}
           onback={() => currentView = "playlists"}
           onplay={(track) => handlePlay(track)}
           onedit={(track) => openEditor(track)}
           onselectionChange={(selection) => handleSelectionChange(selection)}
+          onhide={(track) => handleReject(track, () => smartRef?.fetchTracks())}
+          ondeletePhysical={(track) => handleDeletePhysical(track, () => smartRef?.fetchTracks())}
         />
       {:else if currentView === "playlist"}
         <PlaylistsView
+          bind:this={playlistRef}
           playlist={selectedPlaylist}
           currentPlaying={currentPlaying}
           onplay={(track) => handlePlay(track)}
           onedit={(track) => openEditor(track)}
           onselectionChange={(selection) => handleSelectionChange(selection)}
-          ondelete={(track) => handleDelete(track)}
+          onhide={(track) => handleReject(track, () => playlistRef?.fetchPlaylistTracks())}
+          ondeletePhysical={(track) => handleDeletePhysical(track, () => playlistRef?.fetchPlaylistTracks())}
           onqueue={(track) => handleQueue(track)}
         />
       {:else if currentView === "settings"}
@@ -644,20 +735,24 @@
           bind:progress
           bind:duration
           bind:currentTime
+          subView={playerSubView}
           onedit={(track) => openEditor(track)}
-          ondelete={(track) => handleDelete(track)}
+          onhide={handleReject}
+          ondeletePhysical={handleDeletePhysical}
         />
       {/if}
     </div>
   </section>
 
   <div class="player-area">
-    {#if currentView === 'fullplayer'}
+    <div style="display: {currentView === 'fullplayer' ? 'contents' : 'none'}">
       <PlayerAnchorBar
         {currentPlaying}
+        bind:view={playerSubView}
         oncloseFull={() => { currentView = "dashboard"; }}
       />
-    {:else}
+    </div>
+    <div style="display: {currentView !== 'fullplayer' ? 'contents' : 'none'}">
       <MiniPlayer
         {currentPlaying}
         bind:audioRef
@@ -666,9 +761,10 @@
         bind:currentTime
         onopenFull={() => { currentView = "fullplayer"; }}
         onedit={(track) => openEditor(track)}
-        ondelete={(track) => handleDelete(track)}
+        onhide={handleReject}
+        ondeletePhysical={handleDeletePhysical}
       />
-    {/if}
+    </div>
   </div>
 </main>
 {/if}
@@ -687,8 +783,16 @@
 
 <Toast />
 
-
-
+<ConfirmModal 
+  bind:isOpen={confirmState.isOpen}
+  title={confirmState.title}
+  message={confirmState.message}
+  confirmLabel={confirmState.confirmLabel}
+  type={confirmState.type}
+  icon={confirmState.icon}
+  onconfirm={confirmState.onconfirm}
+  oncancel={confirmState.oncancel}
+/>
 <style>
   .app-layout {
     display: grid;
@@ -829,9 +933,13 @@
 
   .content.full-player-view {
     margin-bottom: 0;
+    margin-left: 1rem;
+    margin-right: 1rem;
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
     border-bottom: none;
+    background: var(--surface-container);
+    box-shadow: none;
   }
 
   .player-area {
@@ -840,9 +948,10 @@
     border-radius: 28px;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow: visible;
     background: var(--surface-container-highest);
     border: 1px solid var(--border-color);
+    z-index: 10;
   }
 
   /* FullPlayer Unified Island on Desktop */
@@ -851,6 +960,10 @@
     border-top-left-radius: 0;
     border-top-right-radius: 0;
     border-top: none;
+    background: var(--surface-container);
+    width: auto;
+    overflow: visible;
+    z-index: 100;
   }
 
   .top-bar {

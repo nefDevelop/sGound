@@ -3,7 +3,7 @@
   import { fade } from 'svelte/transition';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { queue, currentIndex, audioQuality, effectiveQuality, isPlaying, showToast } from './stores.js';
+  import { queue, currentIndex, audioQuality, effectiveQuality, isPlaying, showToast, volume } from './stores.js';
   import { get } from 'svelte/store';
   
   let { 
@@ -14,10 +14,10 @@
     audioRef = $bindable(null),
     onopenFull,
     onedit,
-    ondelete
+    onhide,
+    ondeletePhysical
   } = $props();
 
-  let volume = $state(1);
   let isMuted = $state(false);
   let showVolume = $state(false);
 
@@ -45,7 +45,8 @@
         { label: 'Edit Tags', icon: 'edit', action: () => onedit?.(currentPlaying) },
         { label: 'Copy Title', icon: 'fileText', action: () => navigator.clipboard.writeText(currentPlaying.title) },
         { divider: true },
-        { label: 'Remove from Library', icon: 'trash', color: 'danger', action: () => ondelete?.(currentPlaying) }
+        { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(currentPlaying) },
+        { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(currentPlaying) }
       ]
     };
   }
@@ -54,6 +55,8 @@
     audioRef = audioA;
     setupAudio(audioA);
     setupAudio(audioB);
+    audioA.volume = $volume;
+    audioB.volume = $volume;
   });
 
   function setupAudio(el) {
@@ -131,6 +134,13 @@
     isMuted = !isMuted;
     audioA.muted = isMuted;
     audioB.muted = isMuted;
+  }
+
+  function handleVolume(e) {
+    const v = parseFloat(e.target.value);
+    volume.set(v);
+    audioA.volume = v;
+    audioB.volume = v;
   }
 
   function skipNext() {
@@ -236,23 +246,14 @@
                 type="range" 
                 class="vol-slider-vertical" 
                 min="0" max="1" step="0.01" 
-                bind:value={volume} 
-                oninput={() => {
-                  if (!audioRef) return;
-                  const gain = currentPlaying?.replay_gain || 0;
-                  const linearGain = Math.pow(10, gain / 20);
-                  audioA.volume = Math.min(1.0, volume * linearGain);
-                  audioB.volume = Math.min(1.0, volume * linearGain);
-                }}
+                value={$volume} 
+                oninput={handleVolume}
               />
-              <div class="v-fill" style="height: {volume * 100}%"></div>
+              <div class="v-fill" style="height: {$volume * 100}%"></div>
             </div>
           </div>
         {/if}
       </div>
-      <button class="icon-btn expand-btn" onclick={onopenFull} title="Expand">
-        <Icon name="maximize" size={20} />
-      </button>
     </div>
   </div>
 
@@ -278,7 +279,7 @@
     margin: 0; 
     border-radius: inherit;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
     z-index: 1000;
   }
 
@@ -469,7 +470,6 @@
     .main-play-btn { width: 38px; height: 38px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
     .cover { width: 44px; height: 44px; border-radius: 8px; }
     .track-title { font-size: 0.95rem; }
-    .expand-btn { display: none; }
     .icon-btn { padding: 6px; }
   }
 </style>

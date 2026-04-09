@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"context"
+	"database/sql"
 
 	"github.com/dhowden/tag"
 	
@@ -108,6 +109,7 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/playlists/", auth(s.handlePlaylistActions))
 	mux.HandleFunc("/api/smart-playlists/", auth(s.handleSmartPlaylists))
 	mux.HandleFunc("/api/library/metadata", auth(s.handleLibraryMetadata))
+	mux.HandleFunc("/api/autocomplete", auth(s.handleAutocomplete))
 
 	// 2. Auth Actions
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
@@ -1084,11 +1086,33 @@ func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteTrack(trackID string, w http.ResponseWriter, r *http.Request) {
-	_, err := s.getDB(r).Conn.Exec("DELETE FROM tracks WHERE id = ?", trackID)
+	db := s.getDB(r)
+	
+	// 1. Obtener la ruta del archivo antes de borrar el registro
+	var path string
+	err := db.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
 	if err != nil {
-		http.Error(w, "Failed to delete track", http.StatusInternalServerError)
+		if err == sql.ErrNoRows {
+			http.NotFound(w, r)
+		} else {
+			http.Error(w, "Error fetching track path", http.StatusInternalServerError)
+		}
 		return
 	}
+
+	// 2. Intentar borrar el archivo físico
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		slog.Warn("Failed to delete physical file", "path", path, "error", err)
+		// Continuamos para limpiar la DB aunque falle el borrado físico (por si el archivo ya no existía)
+	}
+
+	// 3. Borrar de la base de datos
+	_, err = db.Conn.Exec("DELETE FROM tracks WHERE id = ?", trackID)
+	if err != nil {
+		http.Error(w, "Failed to delete track from DB", http.StatusInternalServerError)
+		return
+	}
+	
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
 }

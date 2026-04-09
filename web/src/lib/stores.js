@@ -33,6 +33,11 @@ export const isPlaying = writable(false);
 export const repeatMode = writable('none'); // 'none', 'all', 'one'
 export const isShuffle = writable(false);
 export const inboxCount = writable(0);
+export const volume = writable(parseFloat(localStorage.getItem('volume')) || 1.0);
+
+volume.subscribe(v => {
+    localStorage.setItem('volume', v.toString());
+});
 
 export function showToast(message, type = 'info') {
     toast.set({ message, type });

@@ -5,7 +5,7 @@
   import { fade } from 'svelte/transition';
   import { inboxCount } from './stores.js';
 
-  let { onplay, onedit, onapproved, onrejected } = $props();
+  let { onplay, onedit, onapproved, onrejected, onhide, onbulkReject, ondeletePhysical } = $props();
   
   let tracks = $state([]);
   let loading = $state(true);
@@ -13,7 +13,7 @@
 
   onMount(fetchInbox);
 
-  async function fetchInbox() {
+  export async function fetchInbox() {
     loading = true;
     try {
       const res = await fetch('/api/library/inbox');
@@ -58,21 +58,7 @@
   }
 
   async function rejectIds(ids) {
-    if (!confirm(`Are you sure you want to reject ${ids.length} tracks? They will be hidden from library.`)) return;
-    try {
-      const res = await fetch('/api/tracks/reject', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids })
-      });
-      if (res.ok) {
-        await fetchInbox();
-        selectedTracks = [];
-        onrejected?.();
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    onbulkReject?.(ids);
   }
 </script>
 
@@ -119,7 +105,10 @@
         onplay={onplay}
         onedit={onedit}
         onqueue={(track) => {}}
-        ondelete={(track) => {}}
+        onhide={(track) => rejectIds([track.id])}
+        onbulkReject={onbulkReject}
+        ondeletePhysical={(track) => ondeletePhysical(track, fetchInbox)}
+        isInbox={true}
       />
     {/if}
   </div>

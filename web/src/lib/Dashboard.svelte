@@ -8,7 +8,8 @@
     onplay, 
     onqueue, 
     onedit, 
-    ondelete, 
+    onhide, 
+    ondeletePhysical, 
     onselectInbox, 
     onselectView, 
     onselectPlaylist, 
@@ -54,8 +55,10 @@
         { divider: true },
         { label: 'Edit tags', icon: 'edit', action: () => onedit?.(track) },
         { divider: true },
-        { label: 'Copy title', icon: 'fileText', action: () => navigator.clipboard.writeText(track.title) },
-        { label: 'Remove from library', icon: 'xCircle', color: 'danger', action: () => ondelete?.(track) }
+        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(track.title) },
+        { divider: true },
+        { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(track) },
+        { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(track) }
       ]
     };
   }

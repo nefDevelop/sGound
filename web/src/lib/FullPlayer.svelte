@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade, fly } from 'svelte/transition';
-  import { audioQuality, queue, currentIndex } from './stores.js';
+  import { audioQuality, queue, currentIndex, volume } from './stores.js';
   import ContextMenu from './ContextMenu.svelte';
   import StarRating from './StarRating.svelte';
 
@@ -13,17 +13,27 @@
     progress = $bindable(0), 
     duration = $bindable(0), 
     currentTime = $bindable(0),
+    subView = 'cover',
     onedit,
-    ondelete
+    onhide,
+    ondeletePhysical
   } = $props();
 
   let lyrics = $state("");
   let parsedLyrics = $state([]);
   let currentLyricIndex = $state(-1);
   let lyricContainer = $state(null);
-  let showLyrics = $state(false);
-  let showQueue = $state(false);
-  let volume = $state(1);
+
+  function toggleMute() {
+    if ($volume > 0) {
+      localStorage.setItem('lastVolume', $volume.toString());
+      volume.set(0);
+    } else {
+      const lastV = parseFloat(localStorage.getItem('lastVolume')) || 0.5;
+      volume.set(lastV);
+    }
+    if (audioRef) audioRef.volume = $volume;
+  }
 
   async function handleRate(track, rating) {
     try {
@@ -54,7 +64,9 @@
         { label: 'Editar etiquetas', icon: 'edit', action: () => onedit?.(currentPlaying) },
         { divider: true },
         { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(currentPlaying.title) },
-        { label: 'Eliminar de biblioteca', icon: 'xCircle', color: 'danger', action: () => ondelete?.(currentPlaying) }
+        { divider: true },
+        { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(currentPlaying) },
+        { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(currentPlaying) }
       ]
     };
   }
@@ -73,11 +85,10 @@
     }
   });
 
-  // Cargar letras
   $effect(() => {
     if (currentPlaying && isOpen) {
       loadLyrics();
-      if (audioRef) volume = audioRef.volume;
+      if (audioRef) volume.set(audioRef.volume);
     }
   });
 
@@ -133,138 +144,129 @@
   }
 
   function handleSeek(e) {
-    if (!audioRef) return;
-    const seekTime = (e.target.value / 100) * duration;
+    if (!audioRef || !duration || isNaN(duration)) return;
+    const seekTime = (parseFloat(e.target.value) / 100) * duration;
     audioRef.currentTime = seekTime;
   }
 
   function handleVolume(e) {
     if (!audioRef) return;
-    volume = e.target.value;
-    audioRef.volume = volume;
+    const v = parseFloat(e.target.value);
+    volume.set(v);
+    audioRef.volume = v;
   }
 </script>
 
 {#if isOpen && currentPlaying}
 <div class="full-player-view">
   <div class="view-content">
-    <div class="player-body" class:with-side={showLyrics || showQueue}>
-      <div class="left-side">
-        <div class="cover-wrapper-container">
-          <div class="cover-wrapper">
-             <img src="/api/cover/{currentPlaying.id}" alt="Cover" />
+    <div class="player-body" class:compact-mode={subView !== 'cover'}>
+      <div class="main-content-flow">
+        <header class="player-header">
+          <div class="cover-wrapper-container">
+            <div class="cover-wrapper">
+               <img src="/api/cover/{currentPlaying.id}" alt="Cover" />
+            </div>
           </div>
-        </div>
+          
+          {#if subView !== 'cover'}
+            <div class="compact-meta" in:fade>
+              <div class="meta-texts">
+                <h2>{currentPlaying.title}</h2>
+                <p>{currentPlaying.artist}</p>
+              </div>
+            </div>
+          {/if}
+        </header>
         
-        <div class="player-island">
-          <div class="track-meta" oncontextmenu={showContextMenu} role="button" tabindex="0">
-            <div class="meta-texts">
-              <div class="title-row">
-                <h1>{currentPlaying.title}</h1>
-                <div class="quality-badge" class:transcoded={$audioQuality !== 'original'}>
-                  {#if $audioQuality === 'original'}
-                    {currentPlaying.format?.toUpperCase()} {Math.round(currentPlaying.bit_rate / 1000)}k
-                  {:else}
-                    TRANSCODED {$audioQuality.toUpperCase()}
-                  {/if}
+        <div class="dynamic-area">
+          {#if subView === 'cover'}
+            <div class="player-island" in:fade>
+              <div class="track-meta" oncontextmenu={showContextMenu} role="button" tabindex="0">
+                <div class="meta-texts">
+                  <div class="title-row">
+                    <h1>{currentPlaying.title}</h1>
+                  </div>
+                  <p class="artist-name">{currentPlaying?.artist || 'Unknown Artist'}</p>
                 </div>
               </div>
-              <p class="artist-name">{currentPlaying?.artist || 'Unknown Artist'}</p>
-            </div>
-          </div>
 
-          <div class="playback-controls">
-            <div class="timeline-container">
-              <div class="modern-slider progress-slider">
-                 <input type="range" class="knobless-range" min="0" max="100" bind:value={progress} oninput={handleSeek} />
-                 <div class="slider-fill" style="width: {progress}%"></div>
-              </div>
-              <div class="time-row">
-                <span class="time">{formatTime(currentTime)}</span>
-                <span class="time">{formatTime(duration)}</span>
-              </div>
-            </div>
-
-            <div class="main-btns">
-              <button class="sub-btn" class:active={false}><Icon name="shuffle" size={22} /></button>
-              <button class="main-btn" onclick={() => { /* skipBack logic if needed */ }}><Icon name="skipBack" size={38} /></button>
-              <button class="play-btn" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()}>
-                <Icon name={audioRef?.paused ? 'play' : 'pause'} size={38} color="black" />
-              </button>
-              <button class="main-btn" onclick={() => { /* skipNext logic if needed */ }}><Icon name="skipForward" size={38} /></button>
-              <button class="sub-btn" class:active={false}><Icon name="repeat" size={22} /></button>
-            </div>
-
-            <div class="bottom-controls">
-              <div class="volume-slider-modern">
-                 <Icon name={volume == 0 ? 'volumeX' : 'volume2'} size={20} />
-                 <div class="modern-slider v-slider-large">
-                   <input type="range" class="knobless-range" min="0" max="1" step="0.01" bind:value={volume} oninput={handleVolume} />
-                   <div class="slider-fill" style="width: {volume * 100}%"></div>
-                 </div>
-              </div>
-              
-              <div class="player-nav-tabs">
-                <button class="nav-tab" class:active={!showLyrics && !showQueue} onclick={() => { showLyrics = false; showQueue = false; }}>
-                  <Icon name="image" size={20} />
-                  <span>Portada</span>
-                </button>
-                <button class="nav-tab" class:active={showLyrics} onclick={() => { showLyrics = true; showQueue = false; }}>
-                  <Icon name="music" size={20} />
-                  <span>Letras</span>
-                </button>
-                <button class="nav-tab" class:active={showQueue} onclick={() => { showLyrics = false; showQueue = true; }}>
-                  <Icon name="list" size={20} />
-                  <span>Cola</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="right-side" class:visible={showLyrics || showQueue}>
-        {#if showQueue}
-          <div class="queue-container" in:fade>
-            <h3>A continuación</h3>
-            <div class="queue-list">
-              {#each $queue.slice($currentIndex + 1) as next, i}
-                <div class="queue-item">
-                  <span class="q-index">{i + 1}</span>
-                  <img src="/api/cover/{next.id}" alt="" class="q-cover" />
-                  <div class="q-info">
-                    <span class="q-title">{next.title}</span>
-                    <span class="q-artist">{next.artist}</span>
+              <div class="playback-controls">
+                <div class="timeline-container">
+                  <div class="modern-slider progress-slider">
+                     <input type="range" class="knobless-range" min="0" max="100" value={progress} oninput={handleSeek} />
+                     <div class="slider-fill" style="width: {progress}%"></div>
+                  </div>
+                  <div class="time-row">
+                    <span class="time">{formatTime(currentTime)}</span>
+                    <span class="time">{formatTime(duration)}</span>
                   </div>
                 </div>
-              {/each}
-              {#if $queue.length <= $currentIndex + 1}
-                 <p class="empty-queue">No hay más canciones en la cola</p>
+
+                <div class="main-btns">
+                  <button class="sub-btn"><Icon name="shuffle" size={22} /></button>
+                  <button class="main-btn"><Icon name="skipBack" size={38} /></button>
+                  <button class="play-btn" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()}>
+                    <Icon name={audioRef?.paused ? 'play' : 'pause'} size={38} color="black" />
+                  </button>
+                  <button class="main-btn"><Icon name="skipForward" size={38} /></button>
+                  <button class="sub-btn"><Icon name="repeat" size={22} /></button>
+                </div>
+
+                <div class="bottom-controls">
+                  <div class="volume-slider-modern">
+                     <button class="mute-btn" onclick={toggleMute} title={$volume === 0 ? "Activar sonido" : "Silenciar"}>
+                        <Icon name={$volume === 0 ? 'volumeX' : ($volume < 0.5 ? 'volume1' : 'volume2')} size={20} />
+                     </button>
+                     <div class="modern-slider v-slider-large">
+                       <input type="range" class="knobless-range" min="0" max="1" step="0.01" value={$volume} oninput={handleVolume} />
+                       <div class="slider-fill volume-fill" style="width: {$volume * 100}%"></div>
+                     </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          {:else if subView === 'queue'}
+            <div class="view-panel queue-panel" in:fade>
+              <div class="queue-list">
+                {#each $queue.slice($currentIndex + 1) as next, i}
+                  <div class="queue-item">
+                    <span class="q-index">{i + 1}</span>
+                    <img src="/api/cover/{next.id}" alt="" class="q-cover" />
+                    <div class="q-info">
+                      <span class="q-title">{next.title}</span>
+                      <span class="q-artist">{next.artist}</span>
+                    </div>
+                  </div>
+                {/each}
+                {#if $queue.length <= $currentIndex + 1}
+                   <p class="empty-queue">Fin de la cola</p>
+                {/if}
+              </div>
+            </div>
+          {:else if subView === 'lyrics'}
+            <div class="view-panel lyrics-panel" bind:this={lyricContainer} in:fade>
+              {#if parsedLyrics.length > 0}
+                <div class="lyrics-list">
+                  {#each parsedLyrics as line, i}
+                    <button 
+                      class="lyric-line" 
+                      class:active={i === currentLyricIndex}
+                      onclick={() => line.time > 0 && audioRef && (audioRef.currentTime = line.time)}
+                    >
+                      {line.text}
+                    </button>
+                  {/each}
+                </div>
+              {:else}
+                <div class="no-lyrics">
+                    <Icon name="music" size={64} />
+                    <p>Instrumental</p>
+                </div>
               {/if}
             </div>
-          </div>
-        {:else}
-          <div class="lyrics-container" bind:this={lyricContainer} in:fade>
-            {#if parsedLyrics.length > 0}
-              <div class="lyrics-list">
-                {#each parsedLyrics as line, i}
-                  <button 
-                    class="lyric-line" 
-                    class:active={i === currentLyricIndex}
-                    onclick={() => line.time > 0 && audioRef && (audioRef.currentTime = line.time)}
-                  >
-                    {line.text}
-                  </button>
-                {/each}
-              </div>
-            {:else}
-              <div class="no-lyrics">
-                  <Icon name="music" size={64} />
-                  <p>Instrumental o sin letra</p>
-              </div>
-            {/if}
-          </div>
-        {/if}
+          {/if}
+        </div>
       </div>
     </div>
   </div>
@@ -292,10 +294,6 @@
     padding-bottom: 2rem;
   }
 
-
-
-
-
   .view-content {
     position: relative;
     z-index: 3;
@@ -303,11 +301,8 @@
     display: flex;
     flex-direction: column;
     width: 100%;
-    max-width: 500px;
-    margin: 0 auto;
+    padding: 1rem 0 3rem 0;
   }
-
-
 
   .player-body {
     flex: 1;
@@ -320,27 +315,70 @@
     width: 100%;
   }
 
-  .player-island {
+  .main-content-flow {
     width: 100%;
-    background: var(--surface-container);
-    border-radius: 34px;
-    border: 1px solid var(--border-color);
-    box-shadow: 0 12px 40px rgba(0,0,0,0.25);
-    padding: 2rem;
+    max-width: 500px;
     display: flex;
     flex-direction: column;
-    gap: 2rem;
-    margin-top: -1rem; /* Subtle overlap with cover area */
-    z-index: 2;
+    align-items: center;
+    gap: 1.5rem;
+    transition: all 0.4s ease;
   }
 
-  .left-side {
+  .player-header {
+    width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 0;
     align-items: center;
-    justify-content: flex-start;
+    gap: 1rem;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+
+  .compact-mode .player-header {
+    flex-direction: row;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 0 1rem;
+  }
+
+  .compact-mode .cover-wrapper-container {
+    max-width: 80px;
+  }
+
+  .compact-mode .cover-wrapper {
+    box-shadow: 0 10px 20px rgba(0,0,0,0.4);
+    border-radius: 12px;
+  }
+
+  .compact-meta {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: left;
+    min-width: 0;
+  }
+
+  .compact-meta h2 {
+    margin: 0;
+    font-size: 1.3rem;
+    font-weight: 850;
+    letter-spacing: -0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .compact-meta p {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    opacity: 0.6;
+  }
+
+  .dynamic-area {
     width: 100%;
+    flex: 1;
   }
 
   .cover-wrapper-container {
@@ -350,7 +388,7 @@
     flex-direction: column;
     gap: 1.2rem;
     align-items: center;
-    z-index: 3; /* Above island */
+    z-index: 3;
   }
 
   .cover-wrapper {
@@ -364,192 +402,54 @@
     transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     border: 1px solid rgba(255,255,255,0.1);
   }
-  .cover-wrapper:hover { transform: scale(1.02); }
+  .cover-wrapper img { width: 100%; height: 100%; object-fit: cover; }
 
-
-
-  .cover-wrapper img {
+  .player-island {
     width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  
-  .track-meta {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    flex-shrink: 0;
-    margin-bottom: -0.5rem;
-  }
-
-  .meta-texts h1 { 
-    font-family: var(--font-headline);
-    font-size: 2.2rem; 
-    font-weight: 800;
-    letter-spacing: -1px;
-    margin: 0; 
-    text-align: center;
-    line-height: 1.1;
-    color: white;
-  }
-
-  .title-row {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
+    gap: 2.5rem;
   }
 
-  .quality-badge {
-    background: rgba(255,255,255,0.08);
-    padding: 0.2rem 0.6rem;
-    border-radius: 6px;
-    font-size: 0.65rem;
-    font-weight: 900;
-    color: rgba(255,255,255,0.5);
-    letter-spacing: 1px;
-    border: 1px solid rgba(255,255,255,0.05);
+  .track-meta { display: flex; justify-content: center; width: 100%; }
+  .meta-texts h1 { 
+    font-size: 2.2rem; font-weight: 800; letter-spacing: -1px; margin: 0; text-align: center; line-height: 1.1; 
   }
-
-  .quality-badge.transcoded {
-    background: var(--primary-10);
-    color: var(--primary);
-  }
-
   .artist-name { font-size: 1.1rem; font-weight: 700; opacity: 0.6; text-align: center; width: 100%; margin: 0.2rem 0 0 0; }
 
-  /* Modern Knobless Sliders */
-  .modern-slider { position: relative; width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 20px; cursor: pointer; overflow: hidden; }
-  .knobless-range { position: absolute; inset: 0; width: 100%; height: 100%; appearance: none; background: transparent; z-index: 5; cursor: pointer; margin: 0; }
-  .slider-fill { position: absolute; top: 0; left: 0; height: 100%; background: white; border-radius: 20px; z-index: 4; transition: background 0.2s; }
 
   .timeline-container { width: 100%; display: flex; flex-direction: column; gap: 0.8rem; }
-  .time-row { display: flex; justify-content: space-between; width: 100%; }
-  .time { font-size: 0.8rem; font-weight: 700; opacity: 0.6; font-variant-numeric: tabular-nums; }
+  .time-row { display: flex; justify-content: space-between; font-size: 0.8rem; opacity: 0.6; font-variant-numeric: tabular-nums; }
 
-  .bottom-controls { 
-    display: flex;
-    flex-direction: column;
-    gap: 1.2rem;
-    padding-bottom: 2rem;
-    width: 100%;
-  }
+  .playback-controls { width: 100%; display: flex; flex-direction: column; gap: 2rem; }
+  .main-btns { display: flex; justify-content: space-between; align-items: center; }
+  .play-btn { width: 72px; height: 72px; background: white; border: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .main-btn { color: white; opacity: 0.8; background: none; border: none; cursor: pointer; }
+  .sub-btn { color: white; opacity: 0.4; background: none; border: none; cursor: pointer; }
 
-  .volume-slider-modern { display: flex; align-items: center; gap: 1rem; width: 100%; justify-content: center; transform: scale(0.9); }
-  .v-slider-large { height: 6px; flex: 1; }
+  .volume-slider-modern { display: flex; align-items: center; gap: 1rem; width: 100%; justify-content: center; }
+  .mute-btn { background: none; border: none; color: white; opacity: 0.6; cursor: pointer; padding: 0.5rem; display: flex; align-items: center; transition: all 0.2s; }
+  .mute-btn:hover { opacity: 1; transform: scale(1.1); }
 
-  .player-nav-tabs { 
-    display: flex; 
-    background: rgba(255,255,255,0.08); 
-    padding: 0.3rem; 
-    border-radius: 100px; 
-    gap: 0.4rem; 
-    justify-content: center;
-    width: 100%;
-  }
-  .nav-tab {
-    background: transparent;
-    border: none;
-    color: rgba(255,255,255,0.4);
-    padding: 0.8rem;
-    border-radius: 100px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex: 1;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  .nav-tab span { display: none; }
-  .nav-tab.active { background: rgba(255,255,255,0.95); color: black; }
-  .nav-tab:hover:not(.active) { color: white; background: rgba(255,255,255,0.1); }
-  
+  .modern-slider { position: relative; width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 20px; cursor: pointer; }
+  .slider-fill { position: absolute; top: 0; left: 0; height: 100%; background: white; border-radius: 20px; z-index: 1; }
+  .volume-fill { background: var(--primary); }
+  .knobless-range { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; z-index: 2; }
 
+  /* Panels */
+  .view-panel { width: 100%; display: flex; flex-direction: column; gap: 1.5rem; animation: fadeIn 0.3s ease; }
 
-  .playback-controls {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    flex-shrink: 0;
-  }
+  .queue-list { display: flex; flex-direction: column; gap: 0.6rem; max-height: 400px; overflow-y: auto; padding-right: 0.5rem; }
+  .queue-item { display: flex; align-items: center; gap: 1rem; padding: 0.8rem; border-radius: 16px; background: rgba(255,255,255,0.03); }
+  .q-cover { width: 44px; height: 44px; border-radius: 8px; }
+  .q-info { display: flex; flex-direction: column; min-width: 0; }
+  .q-title { font-weight: 700; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .q-artist { font-size: 0.8rem; opacity: 0.5; }
 
-  .main-btns {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin: 0;
-    transform: scale(0.85);
-  }
+  .lyrics-list { display: flex; flex-direction: column; gap: 1rem; max-height: 500px; overflow-y: auto; scrollbar-width: none; }
+  .lyric-line { font-size: 1.5rem; font-weight: 800; color: rgba(255,255,255,0.2); background: none; border: none; cursor: pointer; text-align: center; }
+  .lyric-line.active { color: white; transform: scale(1.05); }
 
-  .play-btn {
-    width: 72px;
-    height: 72px;
-    background: white;
-    border: none;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    box-shadow: 0 10px 30px rgba(255,255,255,0.2);
-  }
-  .play-btn:hover { transform: scale(1.08); background: #eee; }
-  .play-btn:active { transform: scale(0.95); }
-
-  .main-btn { color: white; opacity: 0.8; }
-  .main-btn:hover { opacity: 1; transform: scale(1.1); }
-  .sub-btn { color: white; opacity: 0.4; }
-  .sub-btn.active { color: var(--primary); opacity: 1; }
-
-  /* Queue and Lyrics share the same style foundation */
-  .right-side {
-    display: none;
-    width: 100%;
-    flex-direction: column;
-    gap: 1.5rem;
-    padding: 0 0 5rem 0;
-    min-height: 400px;
-  }
-  .right-side.visible { display: flex; }
-
-  .queue-container { display: flex; flex-direction: column; gap: 1.5rem; }
-  .queue-container h3 { margin: 0; font-size: 1.3rem; font-weight: 900; letter-spacing: -0.5px; text-align: center; }
-  .queue-list { display: flex; flex-direction: column; gap: 0.5rem; }
-  
-  .queue-item { 
-    display: flex; 
-    align-items: center; 
-    gap: 1rem; 
-    padding: 0.6rem; 
-    border-radius: 12px; 
-    background: rgba(255,255,255,0.03); 
-    border: 1px solid rgba(255,255,255,0.05);
-  }
-  .q-index { font-size: 0.7rem; font-weight: 900; opacity: 0.3; width: 14px; }
-  .q-cover { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; }
-  .q-info { display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
-  .q-title { font-weight: 700; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .q-artist { font-size: 0.75rem; opacity: 0.5; font-weight: 600; }
-
-  .lyrics-container { display: flex; flex-direction: column; gap: 1rem; }
-  .lyrics-list { display: flex; flex-direction: column; align-items: center; }
-  .lyric-line {
-    font-size: 1.5rem;
-    font-weight: 800;
-    margin: 0.8rem 0;
-    color: rgba(255,255,255,0.2);
-    transition: all 0.4s ease;
-    cursor: pointer;
-    line-height: 1.1;
-    letter-spacing: -0.8px;
-    text-align: center;
-    background: none; border: none; padding: 0;
-  }
-  .lyric-line.active { color: white; transform: scale(1.05); filter: drop-shadow(0 0 15px rgba(255,255,255,0.2)); }
-  .no-lyrics { text-align: center; padding: 3rem; opacity: 0.4; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
-
-
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 </style>
+>

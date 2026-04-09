@@ -11,7 +11,10 @@
     onedit, 
     onselectionChange, 
     onqueue, 
-    ondelete 
+    onhide, 
+    onbulkReject,
+    ondeletePhysical,
+    isInbox = false
   } = $props();
   
   let selectedIds = $state(new Set());
@@ -43,10 +46,12 @@
         { label: 'Add to queue', icon: 'plus', action: () => onqueue?.(track) },
         { divider: true },
         { label: 'Edit tags', icon: 'edit', action: () => onedit?.(track) },
-        { label: 'Organize file', icon: 'folder', action: () => handleOrganize(track.id) },
+        ...(!isInbox ? [{ label: 'Organize file', icon: 'folder', action: () => handleOrganize(track.id) }] : []),
         { divider: true },
         { label: 'Copy title', icon: 'fileText', action: () => navigator.clipboard.writeText(track.title) },
-        { label: 'Remove from library', icon: 'xCircle', color: 'danger', action: () => ondelete?.(track) }
+        { divider: true },
+        { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(track) },
+        { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(track) }
       ]
     };
   }
@@ -102,6 +107,7 @@
   // --- Inline Editing Logic ---
 
   function startEdit(track, field, e) {
+    if (isInbox) return;
     e.stopPropagation();
     editingCell = { trackId: track.id, field };
     editingValue = track[field] || '';
@@ -229,6 +235,11 @@
             onclick={(e) => handleRowClick(track, e)}
             ondblclick={() => onplay?.(track)}
             oncontextmenu={(e) => showContextMenu(track, e)}
+            onkeydown={(e) => {
+              if (e.key === 'Enter') onplay?.(track);
+              if (e.key === ' ') { e.preventDefault(); toggleSelect(track.id); }
+            }}
+            tabindex="0"
           >
             <td class="checkbox-cell">
               <input type="checkbox" checked={selectedIds.has(track.id)} onchange={(e) => toggleSelect(track.id)} />

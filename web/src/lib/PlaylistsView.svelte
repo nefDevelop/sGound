@@ -4,7 +4,7 @@
   import { fade } from 'svelte/transition';
   import TracksView from './TracksView.svelte';
 
-  let { playlist = { id: '', name: '' }, currentPlaying = null, onplay, onedit, onselectionChange, onqueue, ondelete } = $props();
+  let { playlist = { id: '', name: '' }, currentPlaying = null, onplay, onedit, onselectionChange, onqueue, onhide, ondeletePhysical } = $props();
   
   let tracks = $state([]);
   let loading = $state(true);
@@ -14,7 +14,7 @@
     if (playlist?.id) fetchPlaylistTracks();
   });
 
-  async function fetchPlaylistTracks() {
+  export async function fetchPlaylistTracks() {
     loading = true;
     try {
       const res = await fetch(`/api/playlists/${playlist.id}/tracks`);
@@ -69,7 +69,8 @@
           onedit={onedit}
           onselectionChange={onselectionChange}
           onqueue={onqueue}
-          ondelete={ondelete}
+          onhide={onhide}
+          ondeletePhysical={ondeletePhysical}
         />
       {/if}
     </div>
