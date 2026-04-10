@@ -8,6 +8,8 @@
   import TracksView from "./lib/TracksView.svelte";
   import AlbumsGrid from "./lib/AlbumsGrid.svelte";
   import ArtistsView from "./lib/ArtistsView.svelte";
+  import ArtistDetail from "./lib/ArtistDetail.svelte";
+  import AlbumView from "./lib/AlbumView.svelte";
   import Playlists from "./lib/Playlists.svelte";
   import PlaylistsView from "./lib/PlaylistsView.svelte";
   import Maintenance from "./lib/Maintenance.svelte";
@@ -47,6 +49,8 @@
   let setupUsername = $state('');
   let isLoggedIn = $state(!!localStorage.getItem('username'));
   let currentView = $state("dashboard");
+  let viewParams = $state({});
+  let isNavigatingHistory = false;
   let tracks = $state([]);
   let playlists = $state([]);
   let selectedPlaylist = $state(null);
@@ -58,6 +62,7 @@
   let trackToEdit = $state({ id: "", title: "", artist: "", album: "" });
   let selectedTracks = $state([]);
   let selectedArtistId = $state(null);
+  let selectedAlbumId = $state(null);
   let playerSubView = $state("cover"); // "cover", "lyrics", "queue"
 
   let currentPlaying = $state(null);
@@ -170,6 +175,58 @@
       }
     } catch (e) {
       console.error("Initialization check failed:", e);
+    }
+
+    // LISTENER PARA EL BOTÓN ATRÁS
+    window.addEventListener('popstate', (event) => {
+      if (event.state && event.state.view) {
+        isNavigatingHistory = true;
+        currentView = event.state.view;
+        const params = event.state.params || {};
+        
+        // Restaurar estados específicos 
+        if (currentView === 'albums') selectedArtistId = params.artistId || null;
+        if (currentView === 'artist-detail') selectedArtistId = params.artistId || null;
+        if (currentView === 'album') selectedAlbumId = params.albumId || null;
+        if (currentView === 'playlist') selectedPlaylist = params.playlist;
+        if (currentView === 'smart-playlist') selectedSmart = params.smart;
+        
+        // Si la vista requiere recarga de tracks (ej: un listado filtrado)
+        if (params.filterTracks) {
+          // fetch filtered tracks if needed
+        } else if (currentView === 'library' && !params.albumId) {
+          fetchTracks();
+        }
+
+        setTimeout(() => isNavigatingHistory = false, 0);
+      }
+    });
+
+    // Estado inicial en el historial
+    if (!history.state) {
+      history.replaceState({ view: currentView, params: {} }, "");
+    }
+  });
+
+  // Watcher de cambios de vista para PUSH al historial
+  $effect(() => {
+    if (isLoggedIn && !isNavigatingHistory) {
+      const params = JSON.parse(JSON.stringify({ 
+        artistId: selectedArtistId,
+        albumId: selectedAlbumId,
+        playlist: selectedPlaylist,
+        smart: selectedSmart
+      }));
+
+      const state = { 
+        view: currentView, 
+        params
+      };
+      
+      // Solo hacer push si la vista actual es distinta a la del top del historial
+      if (!history.state || history.state.view !== currentView || JSON.stringify(history.state.params) !== JSON.stringify(state.params)) {
+        history.pushState(state, "");
+      }
     }
   });
 
@@ -377,19 +434,20 @@
      // Logic for adding to queue would go here
   }
 
-  async function selectAlbum(albumId) {
-    try {
-      const res = await fetch(`/api/albums/${albumId}/tracks`);
-      tracks = (await res.json()) || [];
-      currentView = "library";
-    } catch (e) {
-      console.error(e);
+  async function selectAlbum(albumId, shouldPush = true) {
+    selectedAlbumId = albumId;
+    currentView = "album";
+    if (shouldPush && !isNavigatingHistory) {
+      history.pushState({ view: "album", params: { albumId } }, "");
     }
   }
 
   function handleSelectArtist(artist) {
     selectedArtistId = artist.id;
-    currentView = "albums";
+    currentView = "artist-detail";
+    if (!isNavigatingHistory) {
+      history.pushState({ view: "artist-detail", params: { artistId: artist.id } }, "");
+    }
   }
 
   async function handlePlayAlbum(albumId) {
@@ -434,6 +492,8 @@
     playlists: "Playlists",
     "smart-playlist": "Smart Playlist",
     playlist: "Playlist",
+    album: "Album",
+    "artist-detail": "Artist",
     settings: "Settings",
     maintenance: "Maintenance",
     fullplayer: "Player"
@@ -668,6 +728,7 @@
             onselectionChange={(selection) => handleSelectionChange(selection)}
             onqueue={(track) => handleQueue(track)}
             onhide={handleReject}
+            onbulkReject={handleBulkReject}
             ondeletePhysical={handleDeletePhysical}
           />
         {/if}
@@ -689,6 +750,21 @@
           onplayAlbum={(id) => handlePlayAlbum(id)}
           onqueueAlbum={(id) => handleQueueAlbum(id)}
           oneditAlbum={(album) => openEditor(album)}
+        />
+      {:else if currentView === "artist-detail"}
+        <ArtistDetail
+          artistId={selectedArtistId}
+          onselectAlbum={(id) => selectAlbum(id)}
+          onplayAlbum={(id) => handlePlayAlbum(id)}
+          onqueueAlbum={(id) => handleQueueAlbum(id)}
+          oneditAlbum={(album) => openEditor(album)}
+        />
+      {:else if currentView === "album"}
+        <AlbumView
+          albumId={selectedAlbumId}
+          onplay={handlePlay}
+          onedit={openEditor}
+          onback={() => history.back()}
         />
       {:else if currentView === "artists"}
         <ArtistsView
@@ -749,7 +825,7 @@
       <PlayerAnchorBar
         {currentPlaying}
         bind:view={playerSubView}
-        oncloseFull={() => { currentView = "dashboard"; }}
+        oncloseFull={() => history.back()}
       />
     </div>
     <div style="display: {currentView !== 'fullplayer' ? 'contents' : 'none'}">
@@ -967,12 +1043,33 @@
   }
 
   .top-bar {
-    padding: 1.2rem 1.5rem;
+    height: 70px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid var(--border-color);
+    padding: 0 2rem;
+    gap: 2rem;
+    background: var(--surface-05);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--white-05);
+    position: sticky;
+    top: 0;
+    z-index: 100;
   }
+  .search-box { width: 400px; }
+  .nav-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    background: var(--component-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .nav-btn:hover { background: var(--surface-container-highest); color: var(--text-main); transform: scale(1.05); }
 
   @media (max-width: 768px) {
     .top-bar { padding: 1rem !important; }

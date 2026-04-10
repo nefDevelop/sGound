@@ -35,6 +35,7 @@ type Track struct {
 	Rating     int     `json:"rating"`
 	Instrumental bool  `json:"instrumental"`
 	ReplayGain float64 `json:"replayGain"`
+	FileHash   string  `json:"fileHash"`
 	CreatedAt  string `json:"createdAt"`
 }
 

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
+  import Artwork from './Artwork.svelte';
   
   let { artistId = null, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum } = $props();
   
@@ -72,14 +73,9 @@
           onkeydown={(e) => e.key === 'Enter' && onselectAlbum?.(album.id)}
         >
           <div class="cover-wrapper">
-            <img 
-              class="cover" 
+            <Artwork 
               src={`/api/cover/${album.coverId}`} 
               alt={album.title} 
-              onerror={(e) => {
-                const target = e.currentTarget;
-                if (target instanceof HTMLImageElement) target.src = 'https://placehold.co/300x300?text=Album';
-              }} 
             />
             <div class="play-overlay">
               <button 
@@ -160,12 +156,6 @@
     border-radius: 24px;
     overflow: hidden;
     box-shadow: 0 8px 30px rgba(0,0,0,0.4);
-  }
-
-  .cover {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
   }
 
   .play-overlay {

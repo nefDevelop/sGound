@@ -5,6 +5,7 @@
   import { audioQuality, queue, currentIndex, volume } from './stores.js';
   import ContextMenu from './ContextMenu.svelte';
   import StarRating from './StarRating.svelte';
+  import Artwork from './Artwork.svelte';
 
   let { 
     currentPlaying = null, 
@@ -165,7 +166,7 @@
         <header class="player-header">
           <div class="cover-wrapper-container">
             <div class="cover-wrapper">
-               <img src="/api/cover/{currentPlaying.id}" alt="Cover" />
+               <Artwork src="/api/cover/{currentPlaying.id}" alt="Cover" />
             </div>
           </div>
           
@@ -232,7 +233,12 @@
                 {#each $queue.slice($currentIndex + 1) as next, i}
                   <div class="queue-item">
                     <span class="q-index">{i + 1}</span>
-                    <img src="/api/cover/{next.id}" alt="" class="q-cover" />
+                    <Artwork 
+                      src="/api/cover/{next.id}" 
+                      alt="" 
+                      size="44px" 
+                      borderRadius="8px" 
+                    />
                     <div class="q-info">
                       <span class="q-title">{next.title}</span>
                       <span class="q-artist">{next.artist}</span>
@@ -402,7 +408,6 @@
     transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     border: 1px solid rgba(255,255,255,0.1);
   }
-  .cover-wrapper img { width: 100%; height: 100%; object-fit: cover; }
 
   .player-island {
     width: 100%;
@@ -441,7 +446,6 @@
 
   .queue-list { display: flex; flex-direction: column; gap: 0.6rem; max-height: 400px; overflow-y: auto; padding-right: 0.5rem; }
   .queue-item { display: flex; align-items: center; gap: 1rem; padding: 0.8rem; border-radius: 16px; background: rgba(255,255,255,0.03); }
-  .q-cover { width: 44px; height: 44px; border-radius: 8px; }
   .q-info { display: flex; flex-direction: column; min-width: 0; }
   .q-title { font-weight: 700; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .q-artist { font-size: 0.8rem; opacity: 0.5; }

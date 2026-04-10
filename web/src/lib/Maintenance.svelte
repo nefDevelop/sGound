@@ -135,7 +135,10 @@
   {:else}
     <div class="detail-container">
       <div class="detail-header">
-        <h2>{currentView.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ')}</h2>
+        <div class="title-wrap">
+          <h2>{currentView.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ')}</h2>
+          <p class="desc">{currentView === 'duplicates' ? 'Tracks grouped by content similarity.' : 'Isolated database entries with no physical files.'}</p>
+        </div>
         {#if loading}
           <div class="loading-spinner"></div>
         {/if}
@@ -148,42 +151,104 @@
         </div>
       {:else}
         <div class="scroll-wrapper">
-          <table class="m-table">
-            <thead>
-              <tr>
-                <th>Composition</th>
-                <th>Attributes</th>
-                <th>Path Integrity</th>
-                <th class="actions-col"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each currentList as track}
+          {#if currentView === 'duplicates'}
+             <div class="groups-container">
+               {#each currentList as group}
+                 {@const best = group.reduce((acc, curr) => {
+                    const accScore = (acc.format === 'flac' ? 10 : 0) + (acc.bit_rate || 0);
+                    const currScore = (curr.format === 'flac' ? 10 : 0) + (curr.bit_rate || 0);
+                    return currScore > accScore ? curr : acc;
+                 }, group[0])}
+                 
+                 <div class="duplicate-group" in:fade>
+                   <div class="group-header">
+                     <Icon name="copy" size={18} />
+                     <span>{group[0].title} — {group.length} versions found</span>
+                   </div>
+                   
+                   <table class="m-table">
+                     <tbody>
+                       {#each group as track}
+                         <tr class:is-best={track.id === best.id}>
+                           <td>
+                             <div class="title-cell">
+                               <div class="top">
+                                 <span class="track-title">{track.title}</span>
+                                 {#if track.id === best.id}
+                                   <span class="best-badge"><Icon name="award" size={12} /> BEST QUALITY</span>
+                                 {/if}
+                               </div>
+                               <span class="track-sub">{track.artist} inner tags</span>
+                             </div>
+                           </td>
+                           <td>
+                             <div class="attr-badges">
+                               {#if track.bit_rate}
+                                 <span class="quality-badge">{Math.round(track.bit_rate / 1000)}kbps</span>
+                               {/if}
+                               <span class="format-badge">{track.format?.toUpperCase()}</span>
+                               {#if track.fileHash}
+                                 <span class="hash-badge" title="Physical match verified">HASH MATCH</span>
+                               {/if}
+                             </div>
+                           </td>
+                           <td>
+                             <code class="path-snippet" title={track.path}>{track.path}</code>
+                           </td>
+                           <td class="actions-col">
+                             <button 
+                               class="icon-btn danger-hover" 
+                               onclick={() => deleteTrack(track)} 
+                               title={track.id === best.id ? "Keep this one" : "Delete redundant copy"}
+                             >
+                               <Icon name="trash" size={18} />
+                             </button>
+                           </td>
+                         </tr>
+                       {/each}
+                     </tbody>
+                   </table>
+                 </div>
+               {/each}
+             </div>
+          {:else}
+            <table class="m-table">
+              <thead>
                 <tr>
-                  <td>
-                    <div class="title-cell">
-                      <span class="track-title">{track.title}</span>
-                      <span class="track-sub">{track.artist} • {track.album}</span>
-                    </div>
-                  </td>
-                  <td>
-                    {#if track.bit_rate}
-                      <span class="quality-badge">{Math.round(track.bit_rate / 1000)}kbps</span>
-                    {/if}
-                    <span class="format-badge">{track.format?.toUpperCase() || 'AUDIO'}</span>
-                  </td>
-                  <td>
-                     <code class="path-snippet" title={track.path}>{track.path}</code>
-                  </td>
-                  <td class="actions-col">
-                    <button class="icon-btn danger-hover" onclick={() => deleteTrack(track)} title="Delete asset">
-                      <Icon name="trash" size={18} />
-                    </button>
-                  </td>
+                  <th>Composition</th>
+                  <th>Attributes</th>
+                  <th>Path Integrity</th>
+                  <th class="actions-col"></th>
                 </tr>
-              {/each}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {#each currentList as track}
+                  <tr>
+                    <td>
+                      <div class="title-cell">
+                        <span class="track-title">{track.title}</span>
+                        <span class="track-sub">{track.artist} • {track.album}</span>
+                      </div>
+                    </td>
+                    <td>
+                      {#if track.bit_rate}
+                        <span class="quality-badge">{Math.round(track.bit_rate / 1000)}kbps</span>
+                      {/if}
+                      <span class="format-badge">{track.format?.toUpperCase() || 'AUDIO'}</span>
+                    </td>
+                    <td>
+                       <code class="path-snippet" title={track.path}>{track.path}</code>
+                    </td>
+                    <td class="actions-col">
+                      <button class="icon-btn danger-hover" onclick={() => deleteTrack(track)} title="Delete asset">
+                        <Icon name="trash" size={18} />
+                      </button>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
         </div>
       {/if}
     </div>
@@ -247,6 +312,58 @@
     padding: 3rem; 
     border: 1px solid var(--border-color); 
     animation: slideUp 0.4s ease-out;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+  }
+
+  .title-wrap { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  .groups-container { display: flex; flex-direction: column; gap: 3rem; }
+
+  .duplicate-group {
+    background: var(--surface-container-high);
+    border-radius: 32px;
+    padding: 2rem;
+    border: 1px solid var(--border-color);
+  }
+
+  .group-header {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    margin-bottom: 1.5rem;
+    color: var(--primary);
+    font-weight: 900;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+    letter-spacing: 1px;
+  }
+
+  tr.is-best td { background: var(--surface-container-highest); border-color: var(--primary-20); }
+
+  .top { display: flex; align-items: center; gap: 1rem; }
+  
+  .best-badge {
+    background: var(--primary);
+    color: white;
+    font-size: 0.65rem;
+    font-weight: 900;
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .attr-badges { display: flex; align-items: center; gap: 0.5rem; }
+  .hash-badge {
+    background: #10b98120;
+    color: #10b981;
+    font-size: 0.7rem;
+    font-weight: 900;
+    padding: 0.4rem 0.8rem;
+    border-radius: 10px;
   }
 
   .section-header {

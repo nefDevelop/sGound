@@ -10,6 +10,7 @@ import (
 	"github.com/bogem/id3v2/v2"
 	"github.com/go-flac/flacvorbis"
 	"github.com/go-flac/go-flac"
+	"github.com/go-flac/flacpicture"
 	"sgound/internal/db"
 	"log"
 )
@@ -331,9 +332,29 @@ func (e *Editor) EmbedCover(trackID string, imgData []byte, mimeType string) err
 		tag.AddAttachedPicture(pic)
 		return tag.Save()
 	} else if ext == ".flac" {
-		// FLAC picture embedding requires a specific subpackage or manual block construction.
-		// For now, we skip physical embedding for FLAC to keep the server running.
-		return nil
+		f, err := flac.ParseFile(path)
+		if err != nil { return err }
+
+		// Eliminar bloques de imagen existentes para no duplicar
+		var newMeta []*flac.MetaDataBlock
+		for _, block := range f.Meta {
+			if block.Type != flac.Picture {
+				newMeta = append(newMeta, block)
+			}
+		}
+		f.Meta = newMeta
+
+		picture, err := flacpicture.NewFromImageData(
+			flacpicture.PictureTypeFrontCover,
+			"Front Cover",
+			imgData,
+			mimeType,
+		)
+		if err != nil { return err }
+
+		pictureMeta := picture.Marshal()
+		f.Meta = append(f.Meta, &pictureMeta)
+		return f.Save(path)
 	}
 	return fmt.Errorf("format not supported for embedding covers: %s", ext)
 }

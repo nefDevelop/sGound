@@ -5,6 +5,7 @@
   import ContextMenu from './ContextMenu.svelte';
   import { queue, currentIndex, audioQuality, effectiveQuality, isPlaying, showToast, volume } from './stores.js';
   import { get } from 'svelte/store';
+  import Artwork from './Artwork.svelte';
   
   let { 
     currentPlaying = $bindable(null), 
@@ -205,7 +206,12 @@
   <div class="now-playing" onclick={onopenFull} oncontextmenu={showContextMenu} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && onopenFull?.()}>
     <div class="cover-container">
       {#if currentPlaying?.id}
-        <img src="/api/cover/{currentPlaying.id}" alt="Cover" class="cover" />
+        <Artwork 
+          src="/api/cover/{currentPlaying.id}" 
+          alt="Cover" 
+          size="60px" 
+          borderRadius="12px" 
+        />
       {:else}
         <div class="cover-placeholder"></div>
       {/if}
@@ -299,15 +305,6 @@
     min-width: 0; /* Essential for text trimming */
     flex: 1;
     cursor: pointer;
-  }
-
-  .cover {
-    width: 60px;
-    height: 60px;
-    border-radius: 12px;
-    object-fit: cover;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-    flex-shrink: 0;
   }
 
   .info {
@@ -468,7 +465,6 @@
     .right-actions { gap: 0.6rem; }
     .playback-btns { gap: 0.4rem; }
     .main-play-btn { width: 38px; height: 38px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
-    .cover { width: 44px; height: 44px; border-radius: 8px; }
     .track-title { font-size: 0.95rem; }
     .icon-btn { padding: 6px; }
   }

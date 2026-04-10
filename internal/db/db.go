@@ -113,6 +113,7 @@ func (db *Database) initSchema() error {
 		"ALTER TABLE tracks ADD COLUMN replay_gain REAL DEFAULT 0.0",
 		"ALTER TABLE tracks ADD COLUMN play_count INTEGER DEFAULT 0",
 		"ALTER TABLE tracks ADD COLUMN file_mtime INTEGER",
+		"ALTER TABLE tracks ADD COLUMN file_hash TEXT",
 	}
 
 	for _, sql := range cols {
@@ -132,17 +133,23 @@ func (db *Database) initSchema() error {
 
 func (db *Database) GetDuplicates() ([]models.Track, error) {
 	query := `
-	SELECT t.id, t.title, a.title as album, art.name as artist, t.path, t.bit_rate
+	SELECT t.id, t.title, a.title as album, art.name as artist, t.path, t.bit_rate, t.duration, t.format, t.file_hash
 	FROM tracks t
 	JOIN albums a ON t.album_id = a.id
 	JOIN artists art ON a.artist_id = art.id
-	WHERE t.status = 'active' AND (art.id, a.id, t.title) IN (
-		SELECT a2.artist_id, t2.album_id, t2.title
-		FROM tracks t2
-		JOIN albums a2 ON t2.album_id = a2.id
-		WHERE t2.status = 'active'
-		GROUP BY a2.artist_id, t2.album_id, t2.title
-		HAVING COUNT(*) > 1
+	WHERE t.status = 'active' AND (
+		(t.file_hash IS NOT NULL AND t.file_hash IN (SELECT t2.file_hash FROM tracks t2 WHERE t2.status = 'active' AND t2.file_hash IS NOT NULL GROUP BY t2.file_hash HAVING COUNT(*) > 1))
+		OR
+		(t.title, t.duration) IN (SELECT t3.title, t3.duration FROM tracks t3 WHERE t3.status = 'active' GROUP BY t3.title, t3.duration HAVING COUNT(*) > 1)
+		OR
+		(art.id, a.id, t.title) IN (
+			SELECT a2.artist_id, t2.album_id, t2.title
+			FROM tracks t2
+			JOIN albums a2 ON t2.album_id = a2.id
+			WHERE t2.status = 'active'
+			GROUP BY a2.artist_id, t2.album_id, t2.title
+			HAVING COUNT(*) > 1
+		)
 	)
 	ORDER BY art.name, a.title, t.title`
 
@@ -155,7 +162,7 @@ func (db *Database) GetDuplicates() ([]models.Track, error) {
 	var tracks []models.Track
 	for rows.Next() {
 		var t models.Track
-		if err := rows.Scan(&t.ID, &t.Title, &t.Album, &t.Artist, &t.Path, &t.BitRate); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Album, &t.Artist, &t.Path, &t.BitRate, &t.Duration, &t.Format, &t.FileHash); err != nil {
 			return nil, err
 		}
 		tracks = append(tracks, t)

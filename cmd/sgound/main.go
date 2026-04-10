@@ -4,10 +4,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"sgound/internal/api"
 	"sgound/internal/config"
 	"sgound/internal/db"
+	"sgound/internal/watcher"
 )
 
 func main() {
@@ -32,6 +34,27 @@ func main() {
 
 	apiServer := api.NewServer(masterDB, cfg)
 	mux := apiServer.SetupRoutes()
+
+	// Initialize Watcher
+	w, err := watcher.NewWatcher(cfg.MusicPath, apiServer.HandleFileEvent)
+	if err != nil {
+		slog.Error("Failed to initialize file watcher", "error", err)
+	} else {
+		if err := w.Start(); err != nil {
+			slog.Error("Failed to start file watcher", "error", err)
+		} else {
+			slog.Info("File watcher started", "path", cfg.MusicPath)
+			defer w.Close()
+		}
+	}
+
+	// Periodic Polling (seguro ante fallos del watcher o red)
+	ticker := time.NewTicker(6 * time.Hour)
+	go func() {
+		for range ticker.C {
+			apiServer.TriggerGlobalScan()
+		}
+	}()
 
 	slog.Info("Listening on HTTP port", "port", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, mux); err != nil {

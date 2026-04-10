@@ -380,6 +380,19 @@ paths:
               properties:
                 name:
                   type: string
+                isSmart:
+                  type: boolean
+                rules:
+                  type: object
+                  properties:
+                    genre:
+                      type: string
+                    minRating:
+                      type: integer
+                    lastPlayedDays:
+                      type: integer
+                    instrumental:
+                      type: boolean
       responses:
         '201':
           description: Playlist creada

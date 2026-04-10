@@ -4,18 +4,22 @@
   import StarRating from './StarRating.svelte';
   import { get } from 'svelte/store';
   import { showToast } from './stores.js';
+  import Artwork from './Artwork.svelte';
   
   let { 
     tracks = $bindable([]), 
     currentPlaying = null, 
-    onplay, 
-    onedit, 
-    onselectionChange, 
-    onqueue, 
-    onhide, 
-    onbulkReject,
-    ondeletePhysical,
-    isInbox = false
+    onplay = undefined, 
+    onedit = undefined, 
+    onselectionChange = undefined, 
+    onqueue = undefined, 
+    onhide = undefined, 
+    onbulkReject = undefined, 
+    ondeletePhysical = undefined,
+    isInbox = false,
+    columns = ['checkbox', 'title', 'artist', 'album', 'rating', 'genre'],
+    showHeader = true,
+    title = "Tracks"
   } = $props();
   
   let selectedIds = $state(new Set());
@@ -197,145 +201,204 @@
       if (res.ok) track.rating = rating;
     } catch (e) { console.error(e); }
   }
+
+  function formatDuration(seconds) {
+    if (!seconds) return '--:--';
+    const min = Math.floor(seconds / 60);
+    const sec = Math.floor(seconds % 60);
+    return `${min}:${sec.toString().padStart(2, '0')}`;
+  }
+
+  function hasCol(id) { return columns.includes(id); }
 </script>
 
 <div class="tracks-view">
-  <header class="section-header">
-    <h1>Tracks</h1>
-  </header>
+  {#if showHeader}
+    <header class="section-header">
+      <h1>{title}</h1>
+    </header>
+  {/if}
   <div class="table-container">
-    <table class="tracks-table">
+    <table class="tracks-table" class:no-header={!showHeader}>
       <thead>
         <tr>
-          <th class="checkbox-cell">
-            <input type="checkbox" onchange={toggleAll} checked={selectedIds.size === tracks.length && tracks.length > 0} />
-          </th>
-          <th onclick={() => toggleSort('title')} class="sortable">
-            Title {sortConfig.field === 'title' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-          </th>
-          <th onclick={() => toggleSort('artist')} class="col-artist sortable">
-            Artist {sortConfig.field === 'artist' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-          </th>
-          <th onclick={() => toggleSort('album')} class="col-album sortable">
-            Album {sortConfig.field === 'album' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-          </th>
-          <th onclick={() => toggleSort('rating')} class="col-rating sortable">
-            Rating {sortConfig.field === 'rating' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-          </th>
-          <th onclick={() => toggleSort('genre')} class="col-genre sortable">
-            Genre {sortConfig.field === 'genre' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-          </th>
+          {#if hasCol('checkbox')}
+            <th class="checkbox-cell">
+              <input type="checkbox" onchange={toggleAll} checked={selectedIds.size === tracks.length && tracks.length > 0} />
+            </th>
+          {/if}
+          {#if hasCol('num')}
+            <th class="num-col">#</th>
+          {/if}
+          {#if hasCol('title')}
+            <th onclick={() => toggleSort('title')} class="sortable">
+              Title {sortConfig.field === 'title' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+          {/if}
+          {#if hasCol('artist')}
+            <th onclick={() => toggleSort('artist')} class="col-artist sortable">
+              Artist {sortConfig.field === 'artist' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+          {/if}
+          {#if hasCol('album')}
+            <th onclick={() => toggleSort('album')} class="col-album sortable">
+              Album {sortConfig.field === 'album' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+          {/if}
+          {#if hasCol('rating')}
+            <th onclick={() => toggleSort('rating')} class="col-rating sortable">
+              Rating {sortConfig.field === 'rating' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+          {/if}
+          {#if hasCol('genre')}
+            <th onclick={() => toggleSort('genre')} class="col-genre sortable">
+              Genre {sortConfig.field === 'genre' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+          {/if}
+          {#if hasCol('duration')}
+            <th class="dur-col"><Icon name="clock" size={16} /></th>
+          {/if}
         </tr>
       </thead>
       <tbody>
-        {#each tracks as track}
+        {#each tracks as track, i}
           <tr 
             class="track-row" 
             class:active={currentPlaying && currentPlaying.id === track.id}
-            class:selected={selectedIds.has(track.id)}
+            class:selected={hasCol('checkbox') && selectedIds.has(track.id)}
             onclick={(e) => handleRowClick(track, e)}
             ondblclick={() => onplay?.(track)}
             oncontextmenu={(e) => showContextMenu(track, e)}
             onkeydown={(e) => {
               if (e.key === 'Enter') onplay?.(track);
-              if (e.key === ' ') { e.preventDefault(); toggleSelect(track.id); }
+              if (e.key === ' ' && hasCol('checkbox')) { e.preventDefault(); toggleSelect(track.id); }
             }}
             tabindex="0"
           >
-            <td class="checkbox-cell">
-              <input type="checkbox" checked={selectedIds.has(track.id)} onchange={(e) => toggleSelect(track.id)} />
-            </td>
-            <td class="title-cell" ondblclick={(e) => startEdit(track, 'title', e)}>
-              <div class="flex-align">
-                <img class="mini-cover" src={`/api/cover/${track.id}`} alt="" />
-                <div class="info-stack">
-                  {#if editingCell.trackId === track.id && editingCell.field === 'title'}
-                    <div class="inline-edit-wrap">
-                      <input 
-                        type="text" 
-                        class="inline-input" 
-                        value={editingValue} 
-                        oninput={handleValueChange}
-                        onkeydown={handleKeyDown}
-                        onblur={saveEdit}
-                        autoFocus 
-                      />
-                    </div>
-                  {:else}
-                    <span class="title-text">{track.title}</span>
-                    <span class="mobile-subtitle">{track.artist}</span>
-                  {/if}
-                </div>
-              </div>
-            </td>
-            <td class="col-artist" ondblclick={(e) => startEdit(track, 'artist', e)}>
-              {#if editingCell.trackId === track.id && editingCell.field === 'artist'}
-                <div class="inline-edit-wrap">
-                  <input 
-                    type="text" 
-                    class="inline-input" 
-                    value={editingValue} 
-                    oninput={handleValueChange}
-                    onkeydown={handleKeyDown}
-                    onblur={saveEdit}
-                    autoFocus 
+            {#if hasCol('checkbox')}
+              <td class="checkbox-cell">
+                <input type="checkbox" checked={selectedIds.has(track.id)} onchange={(e) => toggleSelect(track.id)} />
+              </td>
+            {/if}
+
+            {#if hasCol('num')}
+              <td class="num-col">{track.trackNum || i + 1}</td>
+            {/if}
+
+            {#if hasCol('title')}
+              <td class="title-cell" ondblclick={(e) => startEdit(track, 'title', e)}>
+                <div class="flex-align">
+                  <Artwork 
+                    src={`/api/cover/${track.id}`} 
+                    size="40px" 
+                    borderRadius="10px" 
+                    alt="" 
                   />
-                  {#if suggestions.length > 0}
-                    <div class="suggestions-popover">
-                      {#each suggestions as s, i}
-                        <div class="suggestion-item" class:active={i === suggestionIdx} onmousedown={() => { editingValue = s; saveEdit(); }}>{s}</div>
-                      {/each}
-                    </div>
-                  {/if}
+                  <div class="info-stack">
+                    {#if editingCell.trackId === track.id && editingCell.field === 'title'}
+                      <div class="inline-edit-wrap">
+                        <input 
+                          type="text" 
+                          class="inline-input" 
+                          value={editingValue} 
+                          oninput={handleValueChange}
+                          onkeydown={handleKeyDown}
+                          onblur={saveEdit}
+                          autoFocus 
+                        />
+                      </div>
+                    {:else}
+                      <span class="title-text">{track.title}</span>
+                      <span class="mobile-subtitle">{track.artist}</span>
+                    {/if}
+                  </div>
                 </div>
-              {:else}
-                {track.artist}
-              {/if}
-            </td>
-            <td class="col-album" ondblclick={(e) => startEdit(track, 'album', e)}>
-              {#if editingCell.trackId === track.id && editingCell.field === 'album'}
-                <div class="inline-edit-wrap">
-                  <input 
-                    type="text" 
-                    class="inline-input" 
-                    value={editingValue} 
-                    oninput={handleValueChange}
-                    onkeydown={handleKeyDown}
-                    onblur={saveEdit}
-                    autoFocus 
-                  />
-                  {#if suggestions.length > 0}
-                    <div class="suggestions-popover">
-                      {#each suggestions as s, i}
-                        <div class="suggestion-item" class:active={i === suggestionIdx} onmousedown={() => { editingValue = s; saveEdit(); }}>{s}</div>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
-              {:else}
-                {track.album}
-              {/if}
-            </td>
-            <td class="col-rating">
-              <StarRating rating={track.rating || 0} onchange={(rating) => handleRate(track, rating)} />
-            </td>
-            <td class="col-genre" ondblclick={(e) => startEdit(track, 'genre', e)}>
-              {#if editingCell.trackId === track.id && editingCell.field === 'genre'}
-                <div class="inline-edit-wrap">
-                  <input 
-                    type="text" 
-                    class="inline-input" 
-                    value={editingValue} 
-                    oninput={handleValueChange}
-                    onkeydown={handleKeyDown}
-                    onblur={saveEdit}
-                    autoFocus 
-                  />
-                </div>
-              {:else}
-                <span class="genre-tag">{track.genre || '-'}</span>
-              {/if}
-            </td>
+              </td>
+            {/if}
+
+            {#if hasCol('artist')}
+              <td class="col-artist" ondblclick={(e) => startEdit(track, 'artist', e)}>
+                {#if editingCell.trackId === track.id && editingCell.field === 'artist'}
+                  <div class="inline-edit-wrap">
+                    <input 
+                      type="text" 
+                      class="inline-input" 
+                      value={editingValue} 
+                      oninput={handleValueChange}
+                      onkeydown={handleKeyDown}
+                      onblur={saveEdit}
+                      autoFocus 
+                    />
+                    {#if suggestions.length > 0}
+                      <div class="suggestions-popover">
+                        {#each suggestions as s, i}
+                          <div class="suggestion-item" class:active={i === suggestionIdx} onmousedown={() => { editingValue = s; saveEdit(); }}>{s}</div>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                {:else}
+                  {track.artist}
+                {/if}
+              </td>
+            {/if}
+
+            {#if hasCol('album')}
+              <td class="col-album" ondblclick={(e) => startEdit(track, 'album', e)}>
+                {#if editingCell.trackId === track.id && editingCell.field === 'album'}
+                  <div class="inline-edit-wrap">
+                    <input 
+                      type="text" 
+                      class="inline-input" 
+                      value={editingValue} 
+                      oninput={handleValueChange}
+                      onkeydown={handleKeyDown}
+                      onblur={saveEdit}
+                      autoFocus 
+                    />
+                    {#if suggestions.length > 0}
+                      <div class="suggestions-popover">
+                        {#each suggestions as s, i}
+                          <div class="suggestion-item" class:active={i === suggestionIdx} onmousedown={() => { editingValue = s; saveEdit(); }}>{s}</div>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                {:else}
+                  {track.album}
+                {/if}
+              </td>
+            {/if}
+
+            {#if hasCol('rating')}
+              <td class="col-rating">
+                <StarRating rating={track.rating || 0} onchange={(rating) => handleRate(track, rating)} />
+              </td>
+            {/if}
+
+            {#if hasCol('genre')}
+              <td class="col-genre" ondblclick={(e) => startEdit(track, 'genre', e)}>
+                {#if editingCell.trackId === track.id && editingCell.field === 'genre'}
+                  <div class="inline-edit-wrap">
+                    <input 
+                      type="text" 
+                      class="inline-input" 
+                      value={editingValue} 
+                      oninput={handleValueChange}
+                      onkeydown={handleKeyDown}
+                      onblur={saveEdit}
+                      autoFocus 
+                    />
+                  </div>
+                {:else}
+                  <span class="genre-tag">{track.genre || '-'}</span>
+                {/if}
+              </td>
+            {/if}
+
+            {#if hasCol('duration')}
+              <td class="dur-col">{formatDuration(track.duration)}</td>
+            {/if}
           </tr>
         {/each}
       </tbody>
@@ -386,8 +449,6 @@
   .flex-align { display: flex; align-items: center; gap: 1rem; }
   .info-stack { display: flex; flex-direction: column; overflow: hidden; gap: 2px; }
   
-  .mini-cover { width: 40px; height: 40px; border-radius: 10px; background: var(--surface-container-highest); object-fit: cover; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
-  
   .title-text { font-weight: 700; color: var(--text-main); }
   .genre-tag { color: var(--secondary); font-size: 0.75rem; font-weight: 800; background: var(--secondary-10); padding: 0.25rem 0.6rem; border-radius: 6px; text-transform: uppercase; }
   
@@ -436,6 +497,8 @@
   }
 
   /* Table Column Widths */
+  .num-col { width: 40px; text-align: center; color: var(--text-muted); font-weight: 600; }
+  .dur-col { width: 80px; text-align: right; color: var(--text-muted); font-weight: 600; padding-right: 2rem !important; }
   .col-artist { width: 20%; }
   .col-album { width: 20%; }
   .col-rating { width: 130px; }

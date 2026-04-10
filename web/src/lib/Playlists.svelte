@@ -3,10 +3,12 @@
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
   import { showToast } from './stores.js';
+  import PlaylistModal from './PlaylistModal.svelte';
   
   const dispatch = createEventDispatcher();
   let playlists = $state([]);
   let loading = $state(true);
+  let isCreateModalOpen = $state(false);
 
   let contextMenu = $state({
     visible: false,
@@ -58,16 +60,7 @@
   }
 
   function createPlaylist() {
-    const name = prompt("New playlist name:");
-    if (!name) return;
-    
-    fetch('/api/playlists', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
-    }).then(res => {
-      if (res.ok) fetchPlaylists();
-    });
+    isCreateModalOpen = true;
   }
 </script>
 
@@ -142,6 +135,11 @@
     y={contextMenu.y}
     items={contextMenu.items}
     onclose={() => contextMenu.visible = false}
+  />
+
+  <PlaylistModal 
+    bind:isOpen={isCreateModalOpen} 
+    onCreated={fetchPlaylists} 
   />
 </div>
 
