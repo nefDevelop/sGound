@@ -176,63 +176,69 @@
     } catch (e) {
       console.error("Initialization check failed:", e);
     }
+  });
 
-    // LISTENER PARA EL BOTÓN ATRÁS
+  /**
+   * FUNCIÓN MAESTRA DE NAVEGACIÓN
+   * Centraliza los cambios de vista y el registro en el historial.
+   */
+  function navigate(view, params = {}, { push = true, replace = false } = {}) {
+    isNavigatingHistory = true;
+    
+    // 1. Limpieza total de parámetros antiguos antes de asignar los nuevos
+    selectedArtistId = null;
+    selectedAlbumId = null;
+    selectedPlaylist = null;
+    selectedSmart = null;
+
+    // 2. Asignación de la nueva vista y sus parámetros
+    currentView = view;
+    if (params.artistId) selectedArtistId = params.artistId;
+    if (params.albumId) selectedAlbumId = params.albumId;
+    if (params.playlist) selectedPlaylist = params.playlist;
+    if (params.smart) selectedSmart = params.smart;
+
+    // 3. Gestión del Historial del Navegador
+    if (push || replace) {
+      const state = JSON.parse(JSON.stringify({ view, params }));
+      if (replace) {
+        history.replaceState(state, "");
+      } else {
+        // Solo hacemos push si el nuevo estado es diferente al actual del tope
+        const currentState = history.state;
+        if (!currentState || currentState.view !== view || JSON.stringify(currentState.params) !== JSON.stringify(params)) {
+          history.pushState(state, "");
+        }
+      }
+    }
+
+    // 4. Acciones automáticas por vista
+    if (view === 'library') fetchTracks();
+
+    // Devolvemos el control a la navegación normal después de un tick
+    setTimeout(() => isNavigatingHistory = false, 0);
+  }
+
+  // Sincronizar historial en el montaje
+  onMount(() => {
     window.addEventListener('popstate', (event) => {
       if (event.state && event.state.view) {
-        isNavigatingHistory = true;
-        currentView = event.state.view;
-        const params = event.state.params || {};
-        
-        // Restaurar estados específicos 
-        if (currentView === 'albums') selectedArtistId = params.artistId || null;
-        if (currentView === 'artist-detail') selectedArtistId = params.artistId || null;
-        if (currentView === 'album') selectedAlbumId = params.albumId || null;
-        if (currentView === 'playlist') selectedPlaylist = params.playlist;
-        if (currentView === 'smart-playlist') selectedSmart = params.smart;
-        
-        // Si la vista requiere recarga de tracks (ej: un listado filtrado)
-        if (params.filterTracks) {
-          // fetch filtered tracks if needed
-        } else if (currentView === 'library' && !params.albumId) {
-          fetchTracks();
-        }
-
-        setTimeout(() => isNavigatingHistory = false, 0);
+        navigate(event.state.view, event.state.params || {}, { push: false });
       }
     });
 
-    // Estado inicial en el historial
     if (!history.state) {
-      history.replaceState({ view: currentView, params: {} }, "");
-    }
-  });
-
-  // Watcher de cambios de vista para PUSH al historial
-  $effect(() => {
-    if (isLoggedIn && !isNavigatingHistory) {
-      const params = JSON.parse(JSON.stringify({ 
+      navigate(currentView, {
         artistId: selectedArtistId,
         albumId: selectedAlbumId,
         playlist: selectedPlaylist,
         smart: selectedSmart
-      }));
-
-      const state = { 
-        view: currentView, 
-        params
-      };
-      
-      // Solo hacer push si la vista actual es distinta a la del top del historial
-      if (!history.state || history.state.view !== currentView || JSON.stringify(history.state.params) !== JSON.stringify(state.params)) {
-        history.pushState(state, "");
-      }
+      }, { replace: true });
     }
   });
 
   function selectSmart(config) {
-    selectedSmart = config;
-    currentView = "smart-playlist";
+    navigate("smart-playlist", { smart: config });
   }
 
   async function loadTheme() {
@@ -277,7 +283,7 @@
       );
       const data = await res.json();
       tracks = data.tracks || [];
-      currentView = "library";
+      navigate("library");
     } catch (e) {
       console.error("Search failed", e);
     }
@@ -303,7 +309,7 @@
       const res = await fetch(`/api/tracks?genre=${encodeURIComponent(genre)}`);
       if (!res.ok) throw new Error("Failed to fetch tracks");
       tracks = (await res.json()) || [];
-      currentView = "library";
+      navigate("library");
     } catch (e) {
       console.error("Genre filter failed", e);
     }
@@ -434,20 +440,12 @@
      // Logic for adding to queue would go here
   }
 
-  async function selectAlbum(albumId, shouldPush = true) {
-    selectedAlbumId = albumId;
-    currentView = "album";
-    if (shouldPush && !isNavigatingHistory) {
-      history.pushState({ view: "album", params: { albumId } }, "");
-    }
+  async function selectAlbum(albumId) {
+    navigate("album", { albumId });
   }
 
   function handleSelectArtist(artist) {
-    selectedArtistId = artist.id;
-    currentView = "artist-detail";
-    if (!isNavigatingHistory) {
-      history.pushState({ view: "artist-detail", params: { artistId: artist.id } }, "");
-    }
+    navigate("artist-detail", { artistId: artist.id });
   }
 
   async function handlePlayAlbum(albumId) {
@@ -469,9 +467,8 @@
     } catch (e) { console.error(e); }
   }
 
-  function selectPlaylist(playlist) {
-    selectedPlaylist = playlist;
-    currentView = "playlist";
+  function selectPlaylist(pl) {
+    navigate("playlist", { playlist: pl });
   }
 
   function handleLogout() {
@@ -570,7 +567,7 @@
       <button
         class="nav-item"
         class:active={currentView === "dashboard"}
-        onclick={() => (currentView = "dashboard")}
+        onclick={() => navigate("dashboard")}
       >
         <div class="nav-icon-wrap">
           <Icon name="grid" size={18} />
@@ -588,7 +585,7 @@
       <button
         class="nav-item"
         class:active={currentView === "library"}
-        onclick={() => (currentView = "library")}
+        onclick={() => navigate("library")}
       >
         <Icon name="music" size={18} />
         <span>Tracks</span>
@@ -596,7 +593,7 @@
       <button
         class="nav-item"
         class:active={currentView === "albums"}
-        onclick={() => (currentView = "albums")}
+        onclick={() => navigate("albums")}
       >
         <Icon name="disc" size={18} />
         <span>Albums</span>
@@ -604,7 +601,7 @@
       <button
         class="nav-item"
         class:active={currentView === "artists"}
-        onclick={() => { selectedArtistId = null; currentView = "artists"; }}
+        onclick={() => navigate("artists")}
       >
         <Icon name="users" size={18} />
         <span>Artists</span>
@@ -612,7 +609,7 @@
       <button
         class="nav-item"
         class:active={currentView === "playlists"}
-        onclick={() => (currentView = "playlists")}
+        onclick={() => navigate("playlists")}
       >
         <Icon name="list" size={18} />
         <span>Playlists</span>
@@ -622,7 +619,7 @@
       <button
         class="nav-item"
         class:active={currentView === "maintenance"}
-        onclick={() => (currentView = "maintenance")}
+        onclick={() => navigate("maintenance")}
       >
         <Icon name="shield" size={18} />
         <span>Maintenance</span>
@@ -630,7 +627,7 @@
       <button
         class="nav-item"
         class:active={currentView === "settings"}
-        onclick={() => (currentView = "settings")}
+        onclick={() => navigate("settings")}
       >
         <Icon name="settings" size={18} />
         <span>Settings</span>
@@ -647,7 +644,7 @@
               selectedPlaylist?.id === pl.id}
             onclick={() => {
               selectedPlaylist = pl;
-              currentView = "playlist";
+              navigate("playlist", { playlist: pl });
             }}
           >
             <Icon name="list" size={18} />
@@ -699,15 +696,14 @@
           onqueue={handleQueue}
           onhide={(track) => handleReject(track, () => dashRef?.refresh())}
           ondeletePhysical={(track) => handleDeletePhysical(track, () => dashRef?.refresh())}
-          onselectInbox={() => currentView = "inbox"}
-          onselectMaintenance={() => currentView = "maintenance"}
+          onselectInbox={() => navigate("inbox")}
+          onselectMaintenance={() => navigate("maintenance")}
           onselectPlaylist={selectPlaylist}
           onselectView={(view, id) => {
-            if (view === 'tracks') currentView = 'library';
+            if (view === 'tracks') navigate('library');
             else if (view === 'albums' && id) selectAlbum(id);
             else {
-              selectedArtistId = null;
-              currentView = view;
+              navigate(view);
             }
           }}
           onsmartAlbums={() => { /* logic */ }}
@@ -780,7 +776,7 @@
           bind:this={smartRef}
           {...selectedSmart}
           currentPlaying={currentPlaying}
-          onback={() => currentView = "playlists"}
+          onback={() => history.back()}
           onplay={(track) => handlePlay(track)}
           onedit={(track) => openEditor(track)}
           onselectionChange={(selection) => handleSelectionChange(selection)}
@@ -835,7 +831,7 @@
         bind:progress
         bind:duration
         bind:currentTime
-        onopenFull={() => { currentView = "fullplayer"; }}
+        onopenFull={() => navigate("fullplayer")}
         onedit={(track) => openEditor(track)}
         onhide={handleReject}
         ondeletePhysical={handleDeletePhysical}
@@ -1056,20 +1052,6 @@
     z-index: 100;
   }
   .search-box { width: 400px; }
-  .nav-btn {
-    width: 44px;
-    height: 44px;
-    border-radius: 14px;
-    background: var(--component-bg);
-    border: 1px solid var(--border-color);
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  .nav-btn:hover { background: var(--surface-container-highest); color: var(--text-main); transform: scale(1.05); }
 
   @media (max-width: 768px) {
     .top-bar { padding: 1rem !important; }

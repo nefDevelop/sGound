@@ -111,7 +111,7 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 	metadata, err := tag.ReadFrom(f)
 	
-	var artistName, albumName, title string
+	var artistName, albumArtist, albumName, title string
 	var trackNum, year, discNum int
 	var genre, composer, comment string
 	var replayGain float64
@@ -127,6 +127,16 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	} else {
 		artistName = metadata.Artist()
 		if artistName == "" { artistName = "Unknown Artist" }
+		
+		// INTENTAR ARTISTA DEL ÁLBUM (Prioridad para agrupar)
+		albumArtist = artistName // Default
+		raw := metadata.Raw()
+		if val, ok := raw["albumartist"].(string); ok && val != "" {
+			albumArtist = val
+		} else if val, ok := raw["TPE2"].(string); ok && val != "" { // ID3v2 Album Artist
+			albumArtist = val
+		}
+
 		albumName = metadata.Album()
 		if albumName == "" { albumName = "Unknown Album" }
 		title = metadata.Title()
@@ -175,10 +185,10 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		}
 	}
 
-	// 3. Crear Artista y Álbum
-	artistId := generateID(artistName)
-	s.DB.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistId, artistName)
-	albumId := generateID(artistName + albumName)
+	// 3. Crear Artista del Álbum y Álbum
+	artistId := generateID(albumArtist)
+	s.DB.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistId, albumArtist)
+	albumId := generateID(albumArtist + albumName)
 	s.DB.Conn.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", albumId, artistId, albumName, year)
 
 	// 4. Guardar Track
@@ -193,9 +203,9 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 	_, err = s.DB.Conn.Exec(
 		`INSERT OR REPLACE INTO tracks 
-		(id, album_id, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, rating, instrumental, replay_gain, file_mtime, file_hash) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		trackId, albumId, title, trackNum, discNum, path, duration, genre, fileSize, fileExt, composer, comment, 0, 44100, status, 0, instrumental, replayGain, fileMtime, hash,
+		(id, album_id, artist, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, rating, instrumental, replay_gain, file_mtime, file_hash) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		trackId, albumId, artistName, title, trackNum, discNum, path, duration, genre, fileSize, fileExt, composer, comment, 0, 44100, status, 0, instrumental, replayGain, fileMtime, hash,
 	)
 	return err
 }

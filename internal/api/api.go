@@ -762,10 +762,12 @@ func (s *Server) handleGetAlbum(albumID string, w http.ResponseWriter, r *http.R
 
 func (s *Server) handleGetAlbumTracks(albumID string, w http.ResponseWriter, r *http.Request) {
 	rows, err := s.getDB(r).Conn.Query(`
-		SELECT id, title, track_num, duration, genre 
-		FROM tracks 
-		WHERE album_id = ? AND status = 'active'
-		ORDER BY track_num
+		SELECT t.id, t.title, t.track_num, t.duration, t.genre, COALESCE(t.artist, a.name) as artist
+		FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists a ON al.artist_id = a.id
+		WHERE t.album_id = ? AND t.status = 'active'
+		ORDER BY t.track_num
 	`, albumID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -775,13 +777,13 @@ func (s *Server) handleGetAlbumTracks(albumID string, w http.ResponseWriter, r *
 
 	var tracks []map[string]interface{}
 	for rows.Next() {
-		var id, title, genre string
+		var id, title, genre, artist string
 		var trackNum, duration int
-		if err := rows.Scan(&id, &title, &trackNum, &duration, &genre); err != nil {
+		if err := rows.Scan(&id, &title, &trackNum, &duration, &genre, &artist); err != nil {
 			continue
 		}
 		tracks = append(tracks, map[string]interface{}{
-			"id": id, "title": title, "trackNum": trackNum, "duration": duration, "genre": genre,
+			"id": id, "title": title, "trackNum": trackNum, "duration": duration, "genre": genre, "artist": artist,
 		})
 	}
 
@@ -990,7 +992,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
-		       a.name as artist, al.title as album, al.year as year,
+		       COALESCE(t.artist, a.name) as artist, al.title as album, al.year as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
 		       t.composer, t.comment, t.status, t.rating, t.instrumental
 		FROM tracks t
@@ -1609,17 +1611,21 @@ func (s *Server) handleLibraryDuplicates(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Agrupar duplicados
+	// Agrupar duplicados de forma inclusiva
 	groups := make(map[string][]models.Track)
 	for _, t := range dups {
-		key := ""
-		if t.FileHash != "" {
+		// Usamos una clave de metadatos para que canciones con distinto hash 
+		// pero mismo contenido teórico (artista, álbum, título) se agrupen y se vea el duplicado.
+		key := fmt.Sprintf("%s|%s|%s", 
+			strings.ToLower(t.Artist), 
+			strings.ToLower(t.Album), 
+			strings.ToLower(t.Title))
+		
+		// Si no tiene metadatos pero tiene hash (raro pero posible), usamos el hash.
+		if t.Artist == "" && t.Album == "" && t.Title == "" && t.FileHash != "" {
 			key = "hash:" + t.FileHash
-		} else if t.Duration > 0 {
-			key = fmt.Sprintf("dur:%s:%d", strings.ToLower(t.Title), t.Duration)
-		} else {
-			key = fmt.Sprintf("tag:%s:%s:%s", strings.ToLower(t.Artist), strings.ToLower(t.Album), strings.ToLower(t.Title))
 		}
+		
 		groups[key] = append(groups[key], t)
 	}
 

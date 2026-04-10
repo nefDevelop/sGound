@@ -63,6 +63,7 @@ func (db *Database) initSchema() error {
 	CREATE TABLE IF NOT EXISTS tracks (
 		id TEXT PRIMARY KEY,
 		album_id TEXT NOT NULL,
+		artist TEXT, -- Artista específico de la pista
 		title TEXT NOT NULL,
 		track_num INTEGER,
 		disc_num INTEGER,
@@ -114,6 +115,7 @@ func (db *Database) initSchema() error {
 		"ALTER TABLE tracks ADD COLUMN play_count INTEGER DEFAULT 0",
 		"ALTER TABLE tracks ADD COLUMN file_mtime INTEGER",
 		"ALTER TABLE tracks ADD COLUMN file_hash TEXT",
+		"ALTER TABLE tracks ADD COLUMN artist TEXT",
 	}
 
 	for _, sql := range cols {
