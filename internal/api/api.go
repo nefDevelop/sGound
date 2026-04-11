@@ -1007,7 +1007,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
 		       COALESCE(t.artist, a.name) as artist, al.title as album, al.year as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
-		       t.composer, t.comment, t.status, t.rating, t.instrumental
+		       t.composer, t.comment, t.status, t.rating, t.instrumental, t.track_total, t.disc_total
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
@@ -1024,9 +1024,9 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	tracks := make([]map[string]interface{}, 0)
 	for rows.Next() {
 		var id, title, genre, artist, album, format, composer, comment, tStatus string
-		var trackNum, discNum, duration, year, bitRate, sampleRate, rating, instrumental int
+		var trackNum, discNum, duration, year, bitRate, sampleRate, rating, instrumental, trackTotal, discTotal int
 		var size int64
-		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating, &instrumental); err != nil {
+		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating, &instrumental, &trackTotal, &discTotal); err != nil {
 			slog.Error("Scan error", "err", err)
 			continue
 		}
@@ -1035,7 +1035,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 			"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
 			"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
 			"composer": composer, "comment": comment, "status": tStatus, "rating": rating,
-			"instrumental": instrumental == 1,
+			"instrumental": instrumental == 1, "trackTotal": trackTotal, "discTotal": discTotal,
 		})
 	}
 
@@ -2206,7 +2206,7 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''),
 		       a.name as artist, al.title as album, al.year as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
-		       t.composer, t.comment, t.instrumental
+		       t.composer, t.comment, t.instrumental, t.track_total, t.disc_total
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id`
@@ -2255,9 +2255,9 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 	var tracks []map[string]interface{}
 	for rows.Next() {
 		var id, title, genre, artist, album, format, composer, comment string
-		var trackNum, discNum, duration, year, bitRate, sampleRate, instrumental int
+		var trackNum, discNum, duration, year, bitRate, sampleRate, instrumental, trackTotal, discTotal int
 		var size int64
-		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &instrumental); err != nil {
+		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &instrumental, &trackTotal, &discTotal); err != nil {
 			continue
 		}
 		tracks = append(tracks, map[string]interface{}{
@@ -2313,7 +2313,7 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 	}
 
 	var rows *sql.Rows
-	fields := "t.id, t.title, t.track_num, t.disc_num, t.duration, t.genre, a.name, al.title, al.year, t.rating, t.composer, t.comment, t.instrumental"
+	fields := "t.id, t.title, t.track_num, t.disc_num, t.duration, t.genre, a.name, al.title, al.year, t.rating, t.composer, t.comment, t.instrumental, t.track_total, t.disc_total"
 	
 	if isSmart == 1 && ruleSQL != "" {
 		// Ejecutar regla dinámica
@@ -2347,8 +2347,8 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 	var list []map[string]interface{}
 	for rows.Next() {
 		var tid, title, genre, artist, album, composer, comment string
-		var trackNum, discNum, duration, year, rating, instrumental int
-		err := rows.Scan(&tid, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &rating, &composer, &comment, &instrumental)
+		var trackNum, discNum, duration, year, rating, instrumental, trackTotal, discTotal int
+		err := rows.Scan(&tid, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &rating, &composer, &comment, &instrumental, &trackTotal, &discTotal)
 		if err != nil {
 			continue
 		}
@@ -2357,6 +2357,7 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 			"duration": duration, "genre": genre, "artist": artist, 
 			"album": album, "year": year, "rating": rating,
 			"composer": composer, "comment": comment, "instrumental": instrumental == 1,
+			"trackTotal": trackTotal, "discTotal": discTotal,
 		})
 	}
 	json.NewEncoder(w).Encode(list)
