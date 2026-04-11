@@ -121,6 +121,7 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		// FALLBACK: Si falla el parser (ej: error 4294967295), usamos la ruta
 		// pero permitimos que el escaneo continúe a máxima velocidad
 		artistName = "Unknown Artist"
+		albumArtist = "Unknown Artist"
 		albumName = filepath.Base(filepath.Dir(path))
 		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		genre = "Unknown"
