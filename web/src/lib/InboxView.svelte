@@ -10,6 +10,8 @@
   let tracks = $state([]);
   let loading = $state(true);
   let selectedTracks = $state([]);
+  let suggestions = $state([]);
+  let isAnalyzing = $state(false);
 
   onMount(fetchInbox);
 
@@ -20,6 +22,7 @@
       if (res.ok) {
         tracks = (await res.json()) || [];
         inboxCount.set(tracks.length);
+        if (tracks.length > 0) analyzeInbox();
       }
     } catch (e) {
       console.error(e);
@@ -60,6 +63,66 @@
   async function rejectIds(ids) {
     onbulkReject?.(ids);
   }
+
+  async function analyzeInbox() {
+    isAnalyzing = true;
+    try {
+      const res = await fetch('/api/library/inbox/analyze');
+      if (res.ok) {
+        const data = await res.json();
+        suggestions = data.suggestions || [];
+        // Aplicamos las sugerencias al estado local para visualización
+        tracks = tracks.map(t => {
+          const s = suggestions.find(sug => sug.trackId === t.id);
+          if (s) {
+            return { ...t, suggestedArtist: s.artist, suggestedYear: s.year };
+          }
+          return t;
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      isAnalyzing = false;
+    }
+  }
+
+  async function applySuggestions() {
+    if (suggestions.length === 0) return;
+    try {
+      const res = await fetch('/api/library/inbox/apply-suggestions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestions })
+      });
+      if (res.ok) {
+        suggestions = [];
+        await fetchInbox(); // Recargamos para ver los cambios "oficiales"
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function applySingleSuggestion(track) {
+    const sug = suggestions.find(s => s.trackId === track.id);
+    if (!sug) return;
+    
+    try {
+      const res = await fetch('/api/library/inbox/apply-suggestions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestions: [sug] })
+      });
+      if (res.ok) {
+        // Quitamos la sugerencia de la lista local
+        suggestions = suggestions.filter(s => s.trackId !== track.id);
+        await fetchInbox();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
 </script>
 
 <div class="inbox-view" in:fade>
@@ -69,25 +132,32 @@
       <p class="desc">Newly detected files. Approve them to include them in your main library.</p>
     </div>
     
-    <div class="actions">
-       {#if selectedTracks.length > 0}
-         <button class="btn danger" onclick={() => rejectIds(selectedTracks.map(t => t.id))}>
-           <Icon name="trash" size={18} />
-           Reject ({selectedTracks.length})
-         </button>
-         <button class="btn primary" onclick={approveSelected}>
-           <Icon name="zap" size={18} />
-           Approve Selected ({selectedTracks.length})
-         </button>
-       {:else}
-         <button class="btn ghost" onclick={() => rejectIds(tracks.map(t => t.id))} disabled={tracks.length === 0}>
-           Reject All
-         </button>
-         <button class="btn ghost" onclick={approveAll} disabled={tracks.length === 0}>
-           Approve All ({tracks.length})
-         </button>
-       {/if}
-    </div>
+      <div class="actions">
+        {#if suggestions.length > 0}
+          <button class="btn magic" onclick={applySuggestions}>
+            <Icon name="zap" size={18} />
+            Aplicar Cambios ({suggestions.length})
+          </button>
+        {/if}
+
+        {#if selectedTracks.length > 0}
+          <button class="btn danger" onclick={() => rejectIds(selectedTracks.map(t => t.id))}>
+            <Icon name="trash" size={18} />
+            Reject ({selectedTracks.length})
+          </button>
+          <button class="btn primary" onclick={approveSelected}>
+            <Icon name="zap" size={18} />
+            Approve Selected ({selectedTracks.length})
+          </button>
+        {:else}
+          <button class="btn ghost" onclick={() => rejectIds(tracks.map(t => t.id))} disabled={tracks.length === 0}>
+            Reject All
+          </button>
+          <button class="btn ghost" onclick={approveAll} disabled={tracks.length === 0}>
+            Approve All ({tracks.length})
+          </button>
+        {/if}
+      </div>
   </header>
 
   <div class="content">
@@ -108,7 +178,9 @@
         onhide={(track) => rejectIds([track.id])}
         onbulkReject={onbulkReject}
         ondeletePhysical={(track) => ondeletePhysical(track, fetchInbox)}
+        onapplySuggestions={applySingleSuggestion}
         isInbox={true}
+        showHeader={false}
       />
     {/if}
   </div>
@@ -147,9 +219,16 @@
   }
 
   .btn.primary { background: var(--primary); color: white; box-shadow: 0 4px 12px var(--primary-10); }
+  .btn.magic { background: var(--primary); color: white; box-shadow: 0 4px 12px var(--primary-10); animation: pulse 2s infinite; }
   .btn.danger { background: #ff4444; color: white; }
   .btn.ghost { background: var(--surface-container-high); color: var(--text-main); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  @keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+  }
 
   .content { flex: 1; overflow-y: auto; }
 

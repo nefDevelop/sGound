@@ -110,6 +110,8 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/library/organize/status", auth(s.handleOrganizeStatus))
 	mux.HandleFunc("/api/library/status", auth(s.handleScanStatus))
 	mux.HandleFunc("/api/library/inbox", auth(s.handleGetInbox))
+	mux.HandleFunc("/api/library/inbox/analyze", auth(s.handleAnalyzeInbox))
+	mux.HandleFunc("/api/library/inbox/apply-suggestions", auth(s.handleApplyInboxSuggestions))
 	mux.HandleFunc("/api/tracks/approve", auth(s.handleApproveTracks))
 	mux.HandleFunc("/api/tracks/reject", auth(s.handleRejectTracks))
 	mux.HandleFunc("/api/tracks/rate", auth(s.handleRateTrack))
@@ -1150,6 +1152,194 @@ func (s *Server) handleRejectTracks(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"success"}`))
 }
 
+func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
+	db := s.getDB(r)
+	rows, err := db.Conn.Query(`
+		SELECT t.id, t.artist, al.title, COALESCE(al.year, 0)
+		FROM tracks t 
+		JOIN albums al ON t.album_id = al.id 
+		WHERE t.status = 'pending'
+	`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type PendingTrack struct {
+		ID     string
+		Artist string
+		Album  string
+		Year   int
+	}
+	var tracks []PendingTrack
+	for rows.Next() {
+		var t PendingTrack
+		if err := rows.Scan(&t.ID, &t.Artist, &t.Album, &t.Year); err == nil {
+			tracks = append(tracks, t)
+		}
+	}
+
+	type Suggestion struct {
+		TrackID string `json:"trackId"`
+		Artist  string `json:"artist"`
+		Album   string `json:"album"`
+		Year    int    `json:"year"`
+	}
+	var suggestions []Suggestion = make([]Suggestion, 0)
+
+	// Agrupamos tracks pendientes por (Artista Normalizado + Título Álbum)
+	type groupKey struct {
+		normArtist string
+		albumTitle string
+	}
+	groups := make(map[groupKey][]string) // key -> IDs
+	trackMeta := make(map[string]PendingTrack)
+
+	for _, t := range tracks {
+		norm := scanner.NormalizeArtist(t.Artist)
+		key := groupKey{norm, t.Album}
+		groups[key] = append(groups[key], t.ID)
+		trackMeta[t.ID] = t
+	}
+
+	// Para cada grupo, buscamos el "Consenso"
+	for key, ids := range groups {
+		// Buscamos en TODA la biblioteca temas que coincidan en Título y Raíz de Artista
+		consensusRows, err := db.Conn.Query(`
+			SELECT t.artist, COALESCE(al.year, 0)
+			FROM tracks t
+			JOIN albums al ON t.album_id = al.id
+			WHERE al.title = ? 
+			  AND (t.artist LIKE ? OR t.artist LIKE ? OR ? LIKE '%' || t.artist || '%')
+		`, key.albumTitle, key.normArtist+"%", "%"+key.normArtist+"%", key.normArtist)
+		
+		if err != nil { continue }
+		
+		counts := make(map[string]int)
+		years := make(map[int]int)
+		
+		for consensusRows.Next() {
+			var a string
+			var y int
+			if err := consensusRows.Scan(&a, &y); err == nil {
+				counts[a]++
+				if y > 0 { years[y]++ }
+			}
+		}
+		consensusRows.Close()
+
+		// El ganador es el que tiene más frecuencia
+		winnerArtist := ""
+		maxCount := -1
+		for a, c := range counts {
+			if c > maxCount {
+				maxCount = c
+				winnerArtist = a
+			}
+		}
+
+		winnerYear := 0
+		maxYearCount := -1
+		for y, c := range years {
+			if c > maxYearCount {
+				maxYearCount = c
+				winnerYear = y
+			}
+		}
+
+		// Proponemos la sugerencia si es diferente a lo que tiene el track
+		if winnerArtist != "" {
+			winnerNorm := scanner.NormalizeArtist(winnerArtist)
+
+			for _, id := range ids {
+				t := trackMeta[id]
+				currentNorm := scanner.NormalizeArtist(t.Artist)
+
+				// REGLA DE SEGURIDAD: Solo sugerimos el cambio si los artistas normalizan IGUAL
+				// Esto evita que en una banda sonora (Wicked) intente cambiar a "Cynthia Erivo" por "Ariana Grande"
+				// pero sí permite cambiar "Ariana Grande ft. Alguien" por "Ariana Grande"
+				isSameArtistRoot := winnerNorm == currentNorm
+
+				if isSameArtistRoot && (t.Artist != winnerArtist || (winnerYear > 0 && t.Year != winnerYear)) {
+					suggestions = append(suggestions, Suggestion{
+						TrackID: id,
+						Artist:  winnerArtist,
+						Album:   t.Album,
+						Year:    winnerYear,
+					})
+				} else if !isSameArtistRoot && (winnerYear > 0 && t.Year != winnerYear) {
+					// Si son artistas distintos pero el año del álbum es consistente, solo sugerimos el año
+					suggestions = append(suggestions, Suggestion{
+						TrackID: id,
+						Artist:  t.Artist, // Mantenemos el original
+						Album:   t.Album,
+						Year:    winnerYear,
+					})
+				}
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "success",
+		"suggestions": suggestions,
+	})
+}
+
+func (s *Server) handleApplyInboxSuggestions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var data struct {
+		Suggestions []struct {
+			TrackID string `json:"trackId"`
+			Artist  string `json:"artist"`
+			Album   string `json:"album"`
+			Year    int    `json:"year"`
+		} `json:"suggestions"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	db := s.getDB(r)
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	for _, sug := range data.Suggestions {
+		// 1. Obtener o crear artista del álbum corregido
+		artistId := scanner.GenerateID(sug.Artist)
+		_, err = tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistId, sug.Artist)
+		if err != nil { continue }
+
+		// 2. Obtener o crear álbum corregido
+		albumId := scanner.GenerateID(sug.Artist + sug.Album)
+		_, err = tx.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", albumId, artistId, sug.Album, sug.Year)
+		if err != nil { continue }
+
+		// 3. Actualizar el track en el Inbox (manteniendo status 'pending')
+		_, err = tx.Exec("UPDATE tracks SET album_id = ?, artist = ? WHERE id = ?", albumId, sug.Artist, sug.TrackID)
+		if err != nil { slog.Error("Failed to apply suggestion to track", "id", sug.TrackID, "err", err) }
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success"}`))
+}
+
 func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -1349,19 +1539,19 @@ func (s *Server) handleAutocomplete(w http.ResponseWriter, r *http.Request) {
 	var query string
 	switch field {
 	case "artist":
-		query = "SELECT DISTINCT ar.name FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id WHERE ar.name LIKE ? ORDER BY ar.name LIMIT 10"
+		query = "SELECT DISTINCT ar.name FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id WHERE ar.name LIKE ? ORDER BY CASE WHEN ar.name LIKE ? THEN 0 ELSE 1 END, ar.name LIMIT 10"
 	case "genre":
-		query = "SELECT DISTINCT genre FROM tracks WHERE genre LIKE ? ORDER BY genre LIMIT 10"
+		query = "SELECT DISTINCT genre FROM tracks WHERE genre LIKE ? ORDER BY CASE WHEN genre LIKE ? THEN 0 ELSE 1 END, genre LIMIT 10"
 	case "album":
-		query = "SELECT DISTINCT al.title FROM albums al JOIN tracks t ON al.id = t.album_id WHERE al.title LIKE ? ORDER BY al.title LIMIT 10"
+		query = "SELECT DISTINCT al.title FROM albums al JOIN tracks t ON al.id = t.album_id WHERE al.title LIKE ? ORDER BY CASE WHEN al.title LIKE ? THEN 0 ELSE 1 END, al.title LIMIT 10"
 	case "composer":
-		query = "SELECT DISTINCT composer FROM tracks WHERE composer LIKE ? ORDER BY composer LIMIT 10"
+		query = "SELECT DISTINCT composer FROM tracks WHERE composer LIKE ? ORDER BY CASE WHEN composer LIKE ? THEN 0 ELSE 1 END, composer LIMIT 10"
 	default:
 		json.NewEncoder(w).Encode([]string{})
 		return
 	}
 
-	rows, err := s.getDB(r).Conn.Query(query, q+"%")
+	rows, err := s.getDB(r).Conn.Query(query, "%"+q+"%", q+"%")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1960,8 +2150,17 @@ func (s *Server) handlePlaylists(w http.ResponseWriter, r *http.Request) {
 		var id, name, ruleSQL string
 		var isSmart int
 		rows.Scan(&id, &name, &isSmart, &ruleSQL)
+		
+		count := 0
+		if isSmart == 1 && ruleSQL != "" {
+			// Ejecutar conteo rápido para smart playlist
+			s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM (" + ruleSQL + ")").Scan(&count)
+		} else {
+			s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?", id).Scan(&count)
+		}
+
 		list = append(list, map[string]interface{}{
-			"id": id, "name": name, "isSmart": isSmart == 1,
+			"id": id, "name": name, "isSmart": isSmart == 1, "trackCount": count,
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -2114,10 +2313,12 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 	}
 
 	var rows *sql.Rows
+	fields := "t.id, t.title, t.track_num, t.disc_num, t.duration, t.genre, a.name, al.title, al.year, t.rating, t.composer, t.comment, t.instrumental"
+	
 	if isSmart == 1 && ruleSQL != "" {
 		// Ejecutar regla dinámica
 		rows, err = s.getDB(r).Conn.Query(`
-			SELECT t.id, t.title, a.name, al.title, t.duration
+			SELECT ` + fields + `
 			FROM tracks t
 			JOIN albums al ON t.album_id = al.id
 			JOIN artists a ON al.artist_id = a.id
@@ -2127,7 +2328,7 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 	} else {
 		// Lista estática tradicional
 		rows, err = s.getDB(r).Conn.Query(`
-			SELECT t.id, t.title, a.name, al.title, t.duration
+			SELECT ` + fields + `
 			FROM tracks t
 			JOIN playlist_tracks pt ON t.id = pt.track_id
 			JOIN albums al ON t.album_id = al.id
@@ -2145,12 +2346,17 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 
 	var list []map[string]interface{}
 	for rows.Next() {
-		var tid, title, artist, album string
-		var duration int
-		rows.Scan(&tid, &title, &artist, &album, &duration)
+		var tid, title, genre, artist, album, composer, comment string
+		var trackNum, discNum, duration, year, rating, instrumental int
+		err := rows.Scan(&tid, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &rating, &composer, &comment, &instrumental)
+		if err != nil {
+			continue
+		}
 		list = append(list, map[string]interface{}{
-			"id": tid, "title": title, "artist": artist, 
-			"album": album, "duration": duration,
+			"id": tid, "title": title, "trackNum": trackNum, "discNum": discNum,
+			"duration": duration, "genre": genre, "artist": artist, 
+			"album": album, "year": year, "rating": rating,
+			"composer": composer, "comment": comment, "instrumental": instrumental == 1,
 		})
 	}
 	json.NewEncoder(w).Encode(list)

@@ -111,7 +111,7 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 	metadata, err := tag.ReadFrom(f)
 	
-	var artistName, albumArtist, albumName, title string
+	var artistName, albumArtist, albumName, title, albumId string
 	var trackNum, year, discNum int
 	var genre, composer, comment string
 	var replayGain float64
@@ -125,6 +125,7 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		albumName = filepath.Base(filepath.Dir(path))
 		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		genre = "Unknown"
+		albumId = GenerateID(filepath.Dir(path) + albumName)
 	} else {
 		artistName = metadata.Artist()
 		if artistName == "" { artistName = "Unknown Artist" }
@@ -132,9 +133,12 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		// INTENTAR ARTISTA DEL ÁLBUM (Prioridad para agrupar)
 		albumArtist = artistName // Default
 		raw := metadata.Raw()
+		// Intentar varias tags comunes de Album Artist
 		if val, ok := raw["albumartist"].(string); ok && val != "" {
 			albumArtist = val
 		} else if val, ok := raw["TPE2"].(string); ok && val != "" { // ID3v2 Album Artist
+			albumArtist = val
+		} else if val, ok := raw["ALBUMARTIST"].(string); ok && val != "" {
 			albumArtist = val
 		}
 
@@ -149,6 +153,13 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		if genre == "" { genre = "Unknown" }
 		composer = metadata.Composer()
 		comment = metadata.Comment()
+
+		// HEURÍSTICA MEJORADA: Normalizamos el artista principal para agrupar.
+		// Esto une "Artista A" y "Artista A ft. B" en el mismo álbum de forma inteligente.
+		albumGroupingKey := NormalizeArtist(albumArtist)
+		
+		// El ID del álbum se genera con el nombre normalizado del artista + el nombre del álbum
+		albumId = GenerateID(albumGroupingKey + albumName)
 	}
 
 	// EXTRACCIÓN DE DURACIÓN (Mejora)
@@ -158,11 +169,6 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		if err == nil {
 			for _, m := range f.Meta {
 				if m.Type == flac.StreamInfo {
-					// Extraemos samples totales y frecuencia (truco de bits para StreamInfo)
-					// StreamInfo tiene 34 bytes. Los samples están en los bytes 14-17 (parte) y 18-25
-					// Por simplicidad, usemos el método de la librería si existe o lo estimamos
-					// go-flac no expone campos directos en StreamInfo fácilmente sin parsear manual
-					// pero podemos usar el tamaño / bitrate si hace falta
 				}
 			}
 		}
@@ -174,7 +180,7 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	trackId := tags.ReadPersistentID(path)
 	if trackId == "" {
 		// Si está en el inbox o es nuevo, ID rápido basado en ruta
-		trackId = generateID(path)
+		trackId = GenerateID(path)
 	} else {
 		// Si ya tiene ID, comprobamos si ha cambiado algo rápido
 		var dbMtime int64
@@ -186,10 +192,18 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		}
 	}
 
-	// 3. Crear Artista del Álbum y Álbum
-	artistId := generateID(albumArtist)
+	// 3. Crear Artista del Álbum e identificar Álbum
+	artistId := GenerateID(albumArtist)
 	s.DB.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistId, albumArtist)
-	albumId := generateID(albumArtist + albumName)
+
+	if albumId == "" {
+		// Por si acaso no se asignó en los bloques anteriores
+		albumGroupingKey := albumArtist
+		if strings.Contains(albumArtist, "Unknown") {
+			albumGroupingKey = filepath.Dir(path)
+		}
+		albumId = GenerateID(albumGroupingKey + albumName)
+	}
 	s.DB.Conn.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", albumId, artistId, albumName, year)
 
 	// 4. Guardar Track
@@ -211,8 +225,36 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	return err
 }
 
-func generateID(input string) string {
+func GenerateID(input string) string {
 	h := sha1.New()
 	h.Write([]byte(input))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// NormalizeArtist intenta extraer el artista principal de una cadena
+// eliminando colaboraciones (ft, feat, &, etc) para mejorar la agrupación.
+func NormalizeArtist(artist string) string {
+	if artist == "" || strings.Contains(strings.ToLower(artist), "unknown") {
+		return "Unknown Artist"
+	}
+
+	// Lista de delimitadores comunes de colaboración
+	delimiters := []string{
+		" ft. ", " feat. ", " & ", " with ", " ft ", " feat ", 
+		" featuring ", " and ", " / ", " , ", " con ", " x ",
+	}
+
+	lowerArtist := " " + strings.ToLower(artist) + " "
+	firstIndex := len(artist)
+
+	for _, d := range delimiters {
+		if idx := strings.Index(lowerArtist, d); idx != -1 {
+			// El índice es en lowerArtist que tiene un espacio extra al inicio
+			if idx-1 < firstIndex {
+				firstIndex = idx - 1
+			}
+		}
+	}
+
+	return strings.TrimSpace(artist[:firstIndex])
 }

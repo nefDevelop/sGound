@@ -17,6 +17,7 @@
     onbulkReject = undefined, 
     ondeletePhysical = undefined,
     onshuffle = undefined,
+    onapplySuggestions = undefined,
     isInbox = false,
     columns = ['checkbox', 'title', 'artist', 'album', 'rating', 'genre'],
     showHeader = true,
@@ -266,6 +267,9 @@
           {#if hasCol('duration')}
             <th class="dur-col"><Icon name="clock" size={16} /></th>
           {/if}
+          {#if isInbox}
+            <th class="actions-col"></th>
+          {/if}
         </tr>
       </thead>
       <tbody>
@@ -346,7 +350,17 @@
                     {/if}
                   </div>
                 {:else}
-                  {track.artist}
+                  {#if isInbox && track.suggestedArtist && track.suggestedArtist !== track.artist}
+                    <div class="suggestion-stack">
+                      <span class="artist-text original">{track.artist}</span>
+                      <span class="artist-text suggested">
+                        <Icon name="zap" size={12} />
+                        {track.suggestedArtist}
+                      </span>
+                    </div>
+                  {:else}
+                    <span class="artist-text">{track.artist}</span>
+                  {/if}
                 {/if}
               </td>
             {/if}
@@ -373,7 +387,15 @@
                     {/if}
                   </div>
                 {:else}
-                  {track.album}
+                  <div class="suggestion-stack">
+                    <span class="album-text">{track.album}</span>
+                    {#if isInbox && track.suggestedYear && track.suggestedYear !== track.year}
+                      <span class="suggested year-suggestion">
+                        <Icon name="zap" size={10} /> 
+                        Año: {track.suggestedYear}
+                      </span>
+                    {/if}
+                  </div>
                 {/if}
               </td>
             {/if}
@@ -406,6 +428,20 @@
 
             {#if hasCol('duration')}
               <td class="dur-col">{formatDuration(track.duration)}</td>
+            {/if}
+
+            {#if isInbox}
+              <td class="actions-col">
+                {#if track.suggestedArtist || track.suggestedYear}
+                  <button 
+                    class="track-magic-btn" 
+                    title="Aplicar sugerencias a esta pista"
+                    onclick={(e) => { e.stopPropagation(); onapplySuggestions?.(track); }}
+                  >
+                    <Icon name="zap" size={16} />
+                  </button>
+                {/if}
+              </td>
             {/if}
           </tr>
         {/each}
@@ -540,4 +576,43 @@
     .tracks-table th { padding: 0.5rem 1rem; }
     .tracks-table td { padding: 0.6rem 1rem; }
   }
+
+
+
+  .actions-col { width: 50px; text-align: center; }
+  .track-magic-btn {
+    background: var(--primary-10);
+    color: var(--primary);
+    border: none;
+    border-radius: 8px;
+    padding: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .track-magic-btn:hover {
+    background: var(--primary);
+    color: white;
+    transform: scale(1.1);
+  }
+
+  .suggestion-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.2;
+    overflow: hidden;
+  }
+  .original { opacity: 0.4; text-decoration: line-through; font-size: 0.75rem; }
+  .suggested { 
+    color: var(--primary); 
+    font-weight: 800; 
+    font-size: 0.85rem; 
+    display: flex; 
+    align-items: center; 
+    gap: 4px; 
+  }
+  .year-suggestion { margin-top: 1px; }
 </style>

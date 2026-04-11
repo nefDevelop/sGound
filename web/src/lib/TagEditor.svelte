@@ -259,6 +259,7 @@
               <label class="relative">
                 <span>Genre</span>
                 <input type="text" bind:value={track.genre} oninput={(e) => fetchSuggestions('genre', e.currentTarget.value)} />
+                <span class="field-hint">Separa múltiples géneros con punto y coma (ej: Rock; Pop)</span>
                 {#if suggestions.length > 0 && activeSuggestionField === 'genre'}
                   <div class="suggestions">
                     {#each suggestions as s}
@@ -698,5 +699,13 @@
       background: #ffcc00;
       color: #1e293b;
       border: none;
+  }
+  .field-hint {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    opacity: 0.7;
+    margin-top: 4px;
+    font-weight: 600;
+    display: block;
   }
 </style>

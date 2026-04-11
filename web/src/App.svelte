@@ -661,8 +661,13 @@
               navigate("playlist", { playlist: pl });
             }}
           >
-            <Icon name="list" size={18} />
+            <div class="nav-icon-wrap">
+              <Icon name={pl.isSmart ? "zap" : "list"} size={17} />
+            </div>
             <span>{pl.name}</span>
+            {#if pl.trackCount > 0}
+              <span class="nav-badge">{pl.trackCount}</span>
+            {/if}
           </button>
         {/each}
       </div>
@@ -1008,7 +1013,21 @@
   .playlists-scroll {
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
+    gap: 0.1rem;
+    padding-bottom: 2rem;
+  }
+
+  .playlist-item {
+    padding-top: 0.6rem !important;
+    padding-bottom: 0.6rem !important;
+    font-size: 0.88rem !important;
+  }
+
+  .playlist-item span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
   }
 
   .logout-btn { 

@@ -35,11 +35,11 @@
 <div class="playlist-view" in:fade>
   {#if playlist}
     <div class="playlist-header">
-      <div class="playlist-cover">
-          <Icon name="list" size={80} />
+      <div class="playlist-cover" class:is-smart={playlist.isSmart}>
+          <Icon name={playlist.isSmart ? "zap" : "list"} size={80} />
       </div>
       <div class="playlist-info">
-        <span class="type-label">Playlist</span>
+        <span class="type-label">{playlist.isSmart ? 'Intelligent Playlist' : 'Playlist'}</span>
         <h1>{playlist.name}</h1>
         <div class="meta-row">
           <p class="stats">{tracks.length} tracks</p>
@@ -95,6 +95,12 @@
     box-shadow: 0 30px 60px rgba(0,0,0,0.4);
     color: var(--primary);
     border: 1px solid var(--border-color);
+  }
+  .playlist-cover.is-smart {
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: white;
+    border: none;
+    box-shadow: 0 30px 60px var(--primary-20);
   }
 
   h1 { 
