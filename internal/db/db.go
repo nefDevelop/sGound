@@ -66,7 +66,9 @@ func (db *Database) initSchema() error {
 		artist TEXT, -- Artista específico de la pista
 		title TEXT NOT NULL,
 		track_num INTEGER,
+		track_total INTEGER,
 		disc_num INTEGER,
+		disc_total INTEGER,
 		path TEXT NOT NULL,
 		duration INTEGER,
 		genre TEXT,
@@ -116,6 +118,8 @@ func (db *Database) initSchema() error {
 		"ALTER TABLE tracks ADD COLUMN file_mtime INTEGER",
 		"ALTER TABLE tracks ADD COLUMN file_hash TEXT",
 		"ALTER TABLE tracks ADD COLUMN artist TEXT",
+		"ALTER TABLE tracks ADD COLUMN track_total INTEGER",
+		"ALTER TABLE tracks ADD COLUMN disc_total INTEGER",
 	}
 
 	for _, sql := range cols {

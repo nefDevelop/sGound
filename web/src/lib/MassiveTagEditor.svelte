@@ -2,6 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
   import { showToast } from './stores.js';
+  import { fade } from 'svelte/transition';
   
   let { 
     isOpen = $bindable(false), 
@@ -16,13 +17,75 @@
   let suggestions = $state([]);
   let activeSuggestionField = $state("");
 
+  let isSingleAlbum = $derived(
+    selectedTracks.length > 0 && 
+    selectedTracks.every(t => t.album === selectedTracks[0].album && t.artist === selectedTracks[0].artist)
+  );
+  let albumInfo = $derived(isSingleAlbum ? {
+    title: selectedTracks[0].album,
+    artist: selectedTracks[0].artist,
+    coverTrackId: selectedTracks[0].id
+  } : null);
+
   // Datos globales que se aplicarán a todos
   let bulkData = $state({
     artist: '',
     album: '',
     genre: '',
     year: '',
-    composer: ''
+    composer: '',
+    trackTotal: ''
+  });
+
+  let dragOverIdx = $state(-1);
+  let draggingIdx = $state(-1);
+
+  function handleDragStart(idx, e) {
+    draggingIdx = idx;
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function handleDragOver(idx, e) {
+    e.preventDefault();
+    dragOverIdx = idx;
+  }
+
+  function handleDrop(idx, e) {
+    e.preventDefault();
+    if (draggingIdx === -1 || draggingIdx === idx) {
+      draggingIdx = -1;
+      dragOverIdx = -1;
+      return;
+    }
+
+    const item = selectedTracks[draggingIdx];
+    let newTracks = [...selectedTracks];
+    newTracks.splice(draggingIdx, 1);
+    newTracks.splice(idx, 0, item);
+    selectedTracks = newTracks;
+    
+    draggingIdx = -1;
+    dragOverIdx = -1;
+  }
+
+  // Pre-poblar campos si son comunes a todos los tracks
+  $effect(() => {
+    if (isOpen && selectedTracks.length > 0) {
+      const getCommon = (field) => {
+        const firstVal = selectedTracks[0][field];
+        if (selectedTracks.every(t => t[field] === firstVal)) return firstVal;
+        return '';
+      };
+      
+      bulkData = {
+        artist: getCommon('artist'),
+        album: getCommon('album'),
+        genre: getCommon('genre'),
+        year: getCommon('year') || '',
+        composer: getCommon('composer'),
+        trackTotal: getCommon('trackTotal') || ''
+      };
+    }
   });
 
   async function fetchSuggestions(field, value) {
@@ -48,13 +111,17 @@
     processingStatus = "Saving all tracks...";
     
     try {
-      const promises = selectedTracks.map(track => {
+      const promises = selectedTracks.map((track, index) => {
         const payload = { ...track };
         if (bulkData.artist) payload.artist = bulkData.artist;
         if (bulkData.album) payload.album = bulkData.album;
         if (bulkData.genre) payload.genre = bulkData.genre;
         if (bulkData.year) payload.year = parseInt(bulkData.year);
         if (bulkData.composer) payload.composer = bulkData.composer;
+        if (bulkData.trackTotal) payload.trackTotal = parseInt(bulkData.trackTotal);
+        
+        // Auto-assign track number based on order if reordered or needed
+        payload.trackNum = index + 1;
 
         const p1 = fetch(`/api/tracks/${track.id}/tags`, {
           method: 'PUT',
@@ -139,21 +206,26 @@
 <div class="modal-backdrop" onclick={closeModal}>
     <div class="modal glass" onclick={(e) => e.stopPropagation()}>
       <div class="modal-header">
-        <div class="header-info">
-          <h2>Bulk Edit Tags</h2>
-          <p class="subtitle">{selectedTracks.length} tracks selected</p>
+        <div class="header-info-wrap">
+          {#if albumInfo}
+            <div class="header-cover">
+              <img src="/api/cover/{albumInfo.coverTrackId}" alt="" />
+            </div>
+          {/if}
+          <div class="header-info">
+            <h2>{albumInfo ? 'Album Editor' : 'Bulk Edit Tags'}</h2>
+            {#if albumInfo}
+               <div class="album-meta">
+                 <span class="album-title">{albumInfo.title}</span>
+                 <span class="album-artist">{albumInfo.artist}</span>
+               </div>
+            {:else}
+              <p class="subtitle">{selectedTracks.length} tracks selected</p>
+            {/if}
+          </div>
         </div>
         <button class="close-btn" onclick={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
       </div>
-
-      {#if processingStatus}
-        <div class="global-status">
-          <div class="status-content">
-            <div class="spinner"></div>
-            <span>{processingStatus}</span>
-          </div>
-        </div>
-      {/if}
 
     <div class="bulk-layout">
       <aside class="bulk-sidebar">
@@ -198,6 +270,7 @@
           </label>
 
           <label><span>Year</span><input type="number" bind:value={bulkData.year} /></label>
+          <label><span>Tracks (Total)</span><input type="number" bind:value={bulkData.trackTotal} placeholder="e.g. 12" /></label>
           
           <div class="bulk-actions">
             <button class="tool-btn" onclick={autoSearchAll} disabled={loading}><Icon name="zap" size={14} /> Auto-Tag</button>
@@ -207,32 +280,53 @@
       </aside>
 
       <section class="tracks-list-area">
-        <table class="mini-tracks-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Title</th>
-              <th>Album</th>
-              <th>Lyrics?</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each selectedTracks as track}
+        <div class="tracks-scroll">
+          <table class="mini-tracks-table">
+            <thead>
               <tr>
-                <td>{track.trackNum || '-'}</td>
-                <td class="bold">{track.title}</td>
-                <td class="muted">{track.album}</td>
-                <td>
-                  {#if track.lyrics}
-                    <Icon name="checkCircle" size={14} color="#10b981" />
-                  {:else}
-                    <Icon name="xCircle" size={14} color="#f87171" />
-                  {/if}
-                </td>
+                <th>#</th>
+                <th>Title</th>
+                <th>Album</th>
+                <th>Lyrics?</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {#each selectedTracks as track, i}
+                <tr 
+                  class="track-row"
+                  draggable="true"
+                  ondragstart={(e) => handleDragStart(i, e)}
+                  ondragover={(e) => handleDragOver(i, e)}
+                  ondrop={(e) => handleDrop(i, e)}
+                  class:is-dragging={draggingIdx === i}
+                  class:drag-over={dragOverIdx === i}
+                >
+                  <td class="drag-handle"><Icon name="menu" size={14} color="var(--text-muted)" /></td>
+                  <td class="track-num-cell">
+                    <span class="new-num">{i + 1}</span>
+                    <span class="old-num">{track.trackNum || '-'}</span>
+                  </td>
+                  <td class="bold">{track.title}</td>
+                  <td class="muted">{track.album}</td>
+                  <td>
+                    {#if track.lyrics}
+                      <Icon name="checkCircle" size={14} color="#10b981" />
+                    {:else}
+                      <Icon name="xCircle" size={14} color="#f87171" />
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        
+        {#if processingStatus}
+          <div class="bottom-status" in:fade>
+            <div class="spinner"></div>
+            <span>{processingStatus}</span>
+          </div>
+        {/if}
       </section>
     </div>
 
@@ -303,23 +397,42 @@
     padding: 1.5rem 2.5rem;
     border-bottom: 1px solid var(--border-color);
   }
-  .header-info h2 { margin: 0; font-size: 1.25rem; font-weight: 900; color: white; }
-  .header-info .subtitle { margin: 0.2rem 0 0; font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
+  .header-info-wrap { display: flex; align-items: center; gap: 1.5rem; }
+  .header-cover { width: 60px; height: 60px; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.3); border: 1px solid var(--white-05); }
+  .header-cover img { width: 100%; height: 100%; object-fit: cover; }
+  
+  .album-meta { display: flex; flex-direction: column; gap: 0.1rem; }
+  .album-title { font-size: 1.1rem; font-weight: 800; color: white; letter-spacing: -0.5px; }
+  .album-artist { font-size: 0.85rem; font-weight: 600; color: var(--primary); }
 
-  .global-status {
-    background: var(--primary-10);
+  .header-info h2 { margin: 0; font-size: 0.85rem; font-weight: 900; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 2px; }
+  .header-info .subtitle { margin: 0; font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
+
+  .bottom-status {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--primary);
+    color: white;
     padding: 0.8rem 2.5rem;
-    border-bottom: 1px solid var(--primary-20);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-weight: 700;
+    font-size: 0.9rem;
+    z-index: 50;
+    animation: slideUp 0.3s ease-out;
   }
-  .status-content { display: flex; align-items: center; gap: 1rem; color: var(--primary); font-weight: 700; font-size: 0.9rem; }
   
   .spinner {
-    width: 18px; height: 18px; border: 2px solid var(--primary-30); border-top-color: var(--primary);
+    width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white;
     border-radius: 50%; animation: spin 1s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
-  .bulk-layout { display: grid; grid-template-columns: 340px 1fr; gap: 0; flex: 1; overflow: hidden; }
+  .bulk-layout { display: grid; grid-template-columns: 340px 1fr; gap: 0; flex: 1; overflow: hidden; position: relative; }
 
   .bulk-sidebar { 
     display: flex; 
@@ -368,9 +481,16 @@
   .tool-btn:hover { background: var(--surface-container-highest); border-color: var(--primary-30); color: var(--primary); }
 
   .tracks-list-area {
-    overflow-y: auto; 
-    padding: 2.5rem;
+    position: relative;
+    display: flex;
+    flex-direction: column;
     min-height: 0;
+  }
+  
+  .tracks-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2.5rem;
   }
 
   .mini-tracks-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 0.9rem; }
@@ -383,6 +503,16 @@
   
   .mini-tracks-table .bold { font-weight: 700; color: white; }
   .mini-tracks-table .muted { color: var(--text-muted); opacity: 0.8; }
+
+  .drag-handle { width: 30px; cursor: grab; opacity: 0.5; transition: opacity 0.2s; }
+  .track-row:hover .drag-handle { opacity: 1; }
+  
+  .is-dragging { opacity: 0.4; background: var(--surface-container-highest) !important; }
+  .drag-over { border-top: 2px solid var(--primary); }
+
+  .track-num-cell { display: flex; align-items: center; gap: 0.5rem; }
+  .new-num { font-weight: 900; color: var(--primary); font-size: 1rem; }
+  .old-num { font-size: 0.7rem; color: var(--text-muted); opacity: 0.5; text-decoration: line-through; }
 
   .footer-actions {
     display: flex; 

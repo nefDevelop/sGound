@@ -119,7 +119,7 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) error {
 
 	// Sincronizar cambios en la BD
 	query := `UPDATE tracks SET 
-		title = ?, genre = ?, track_num = ?, disc_num = ?, 
+		title = ?, genre = ?, track_num = ?, track_total = ?, disc_num = ?, disc_total = ?,
 		composer = ?, comment = ?, rating = ?, instrumental = ?
 		WHERE id = ?`
 	
@@ -138,8 +138,8 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) error {
 	}
 
 	_, err = e.DB.Conn.Exec(query, 
-		getString("title"), getString("genre"), getInt("trackNum"), 
-		getInt("discNum"), getString("composer"), getString("comment"), 
+		getString("title"), getString("genre"), getInt("trackNum"), getInt("trackTotal"),
+		getInt("discNum"), getInt("discTotal"), getString("composer"), getString("comment"), 
 		getInt("rating"), getBoolInt("instrumental"), trackID)
 	
 	if err != nil {
@@ -518,8 +518,17 @@ func updateMP3(path string, data map[string]interface{}) error {
 		tag.SetYear(yearStr)
 	}
 	
-	tag.AddTextFrame(tag.CommonID("Track number/Position in set"), id3v2.EncodingUTF8, getIntStr("trackNum"))
-	tag.AddTextFrame(tag.CommonID("Part of a set"), id3v2.EncodingUTF8, getIntStr("discNum"))
+	trck := getIntStr("trackNum")
+	if tt := getIntStr("trackTotal"); tt != "" {
+		trck = trck + "/" + tt
+	}
+	tag.AddTextFrame(tag.CommonID("Track number/Position in set"), id3v2.EncodingUTF8, trck)
+
+	tpos := getIntStr("discNum")
+	if dt := getIntStr("discTotal"); dt != "" {
+		tpos = tpos + "/" + dt
+	}
+	tag.AddTextFrame(tag.CommonID("Part of a set"), id3v2.EncodingUTF8, tpos)
 	tag.AddTextFrame(tag.CommonID("Composer"), id3v2.EncodingUTF8, getString("composer"))
 	
 	tag.AddCommentFrame(id3v2.CommentFrame{
@@ -623,7 +632,9 @@ func updateFLAC(path string, data map[string]interface{}) error {
 	setField("GENRE", getString("genre"))
 	setField("DATE", getIntStr("year"))
 	setField("TRACKNUMBER", getIntStr("trackNum"))
+	setField("TRACKTOTAL", getIntStr("trackTotal"))
 	setField("DISCNUMBER", getIntStr("discNum"))
+	setField("DISCTOTAL", getIntStr("discTotal"))
 	setField("COMPOSER", getString("composer"))
 	setField("COMMENT", getString("comment"))
 	
