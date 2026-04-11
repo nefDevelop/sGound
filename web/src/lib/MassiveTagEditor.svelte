@@ -39,8 +39,41 @@
 
   let dragOverIdx = $state(-1);
   let draggingIdx = $state(-1);
+  let editingTrackId = $state(null);
+  let editingField = $state(null);
 
-  function handleDragStart(idx, e) {
+  // Generar la tabla basada en slots
+  let trackGrid = $derived.by(() => {
+    const total = parseInt(bulkData.trackTotal) || 0;
+    const maxTrackNum = selectedTracks.reduce((max, t) => Math.max(max, t.trackNum || 0), 0);
+    const gridLen = Math.max(total, maxTrackNum, selectedTracks.length);
+    
+    const grid = Array(gridLen).fill(null);
+    const unplaced = [];
+
+    // Mapear tracks a sus posiciones actuales
+    selectedTracks.forEach(t => {
+      const pos = (t.trackNum || 0) - 1;
+      if (pos >= 0 && pos < gridLen && !grid[pos]) {
+        grid[pos] = t;
+      } else {
+        unplaced.push(t);
+      }
+    });
+
+    // Colocar los tracks que no tienen posición o están en conflicto (sin mutar)
+    unplaced.forEach(t => {
+      const firstEmpty = grid.findIndex(v => v === null);
+      if (firstEmpty !== -1) {
+        grid[firstEmpty] = t;
+      }
+    });
+
+    return grid;
+  });
+
+  function handleDragStart(idx, e, isSlot = false) {
+    if (isSlot && !trackGrid[idx]) return; 
     draggingIdx = idx;
     e.dataTransfer.effectAllowed = 'move';
   }
@@ -58,19 +91,45 @@
       return;
     }
 
-    const item = selectedTracks[draggingIdx];
-    let newTracks = [...selectedTracks];
-    newTracks.splice(draggingIdx, 1);
-    newTracks.splice(idx, 0, item);
-    selectedTracks = newTracks;
+    // El origen es un track en draggingIdx, el destino es el slot idx
+    const total = parseInt(bulkData.trackTotal) || selectedTracks.length;
+    const sourceTrack = trackGrid[draggingIdx];
+    if (!sourceTrack) return;
+
+    // Actualizar trackNum de todos los tracks según su nueva posición en el grid imaginario
+    const newTracks = [...selectedTracks];
+    const targetTrack = trackGrid[idx];
+
+    // Intercambiar trackNums
+    if (targetTrack) {
+      const oldSourceNum = sourceTrack.trackNum;
+      sourceTrack.trackNum = idx + 1;
+      targetTrack.trackNum = draggingIdx + 1;
+    } else {
+      sourceTrack.trackNum = idx + 1;
+    }
     
+    selectedTracks = [...newTracks];
     draggingIdx = -1;
     dragOverIdx = -1;
   }
 
-  // Pre-poblar campos si son comunes a todos los tracks
+  function startEdit(trackId, field) {
+    editingTrackId = trackId;
+    editingField = field;
+  }
+
+  function handleEditKeydown(e) {
+    if (e.key === 'Enter' || e.key === 'Escape') {
+      editingTrackId = null;
+      editingField = null;
+    }
+  }
+
+  let initialized = $state(false);
+  // Pre-poblar campos si son comunes a todos los tracks (solo al abrir)
   $effect(() => {
-    if (isOpen && selectedTracks.length > 0) {
+    if (isOpen && selectedTracks.length > 0 && !initialized) {
       const getCommon = (field) => {
         const firstVal = selectedTracks[0][field];
         if (selectedTracks.every(t => t[field] === firstVal)) return firstVal;
@@ -85,6 +144,23 @@
         composer: getCommon('composer'),
         trackTotal: getCommon('trackTotal') || ''
       };
+
+      // Normalizar trackNums si faltan (sin disparar el effect infinitamente)
+      let nextNum = 1;
+      selectedTracks.forEach(t => {
+        if (!t.trackNum) {
+          // Buscar el primer número libre
+          while (selectedTracks.some(other => other.trackNum === nextNum)) {
+            nextNum++;
+          }
+          t.trackNum = nextNum;
+        }
+      });
+
+      initialized = true;
+    }
+    if (!isOpen) {
+      initialized = false;
     }
   });
 
@@ -120,8 +196,8 @@
         if (bulkData.composer) payload.composer = bulkData.composer;
         if (bulkData.trackTotal) payload.trackTotal = parseInt(bulkData.trackTotal);
         
-        // Auto-assign track number based on order if reordered or needed
-        payload.trackNum = index + 1;
+        // El trackNum ya viene establecido por la posición en el grid/slots
+        // payload.trackNum = track.trackNum; // No hace falta cambiarlo, ya viene en track
 
         const p1 = fetch(`/api/tracks/${track.id}/tags`, {
           method: 'PUT',
@@ -291,28 +367,53 @@
               </tr>
             </thead>
             <tbody>
-              {#each selectedTracks as track, i}
+              {#each trackGrid as track, i}
                 <tr 
                   class="track-row"
-                  draggable="true"
-                  ondragstart={(e) => handleDragStart(i, e)}
+                  class:empty-slot={!track}
+                  draggable={!!track}
+                  ondragstart={(e) => handleDragStart(i, e, true)}
                   ondragover={(e) => handleDragOver(i, e)}
                   ondrop={(e) => handleDrop(i, e)}
                   class:is-dragging={draggingIdx === i}
                   class:drag-over={dragOverIdx === i}
                 >
-                  <td class="drag-handle"><Icon name="menu" size={14} color="var(--text-muted)" /></td>
-                  <td class="track-num-cell">
-                    <span class="new-num">{i + 1}</span>
-                    <span class="old-num">{track.trackNum || '-'}</span>
+                  <td class="drag-handle">
+                    {#if track}
+                      <Icon name="menu" size={14} color="var(--text-muted)" />
+                    {/if}
                   </td>
-                  <td class="bold">{track.title}</td>
-                  <td class="muted">{track.album}</td>
-                  <td>
-                    {#if track.lyrics}
-                      <Icon name="checkCircle" size={14} color="#10b981" />
+                  <td class="track-num-cell">
+                    <span class="slot-num" class:out-of-range={parseInt(bulkData.trackTotal) > 0 && (i + 1) > parseInt(bulkData.trackTotal)}>
+                      {i + 1}
+                    </span>
+                  </td>
+                  <td class="title-cell" ondblclick={() => track && startEdit(track.id, 'title')}>
+                    {#if track}
+                      {#if editingTrackId === track.id && editingField === 'title'}
+                        <input 
+                          type="text" 
+                          bind:value={track.title} 
+                          onkeydown={handleEditKeydown}
+                          onblur={() => { editingTrackId = null; editingField = null; }}
+                          autoFocus
+                          class="inline-edit"
+                        />
+                      {:else}
+                        <span class="bold">{track.title}</span>
+                      {/if}
                     {:else}
-                      <Icon name="xCircle" size={14} color="#f87171" />
+                      <span class="empty-hint">── Empty Slot ──</span>
+                    {/if}
+                  </td>
+                  <td class="muted">{track ? track.album : ''}</td>
+                  <td>
+                    {#if track}
+                      {#if track.lyrics}
+                        <Icon name="checkCircle" size={14} color="#10b981" />
+                      {:else}
+                        <Icon name="xCircle" size={14} color="#f87171" />
+                      {/if}
                     {/if}
                   </td>
                 </tr>
@@ -508,11 +609,26 @@
   .track-row:hover .drag-handle { opacity: 1; }
   
   .is-dragging { opacity: 0.4; background: var(--surface-container-highest) !important; }
-  .drag-over { border-top: 2px solid var(--primary); }
+  .drag-over { border-bottom: 2px solid var(--primary); }
 
-  .track-num-cell { display: flex; align-items: center; gap: 0.5rem; }
-  .new-num { font-weight: 900; color: var(--primary); font-size: 1rem; }
-  .old-num { font-size: 0.7rem; color: var(--text-muted); opacity: 0.5; text-decoration: line-through; }
+  .track-num-cell { width: 40px; }
+  .slot-num { font-weight: 900; color: var(--primary); font-size: 1rem; opacity: 0.8; }
+  .slot-num.out-of-range { color: #f87171; }
+  
+  .empty-slot { opacity: 0.3; }
+  .empty-hint { font-size: 0.8rem; letter-spacing: 1px; color: var(--text-muted); font-style: italic; }
+
+  .title-cell { min-width: 250px; cursor: text; }
+  .inline-edit {
+    width: 100%;
+    background: var(--surface-container-high);
+    border: 1px solid var(--primary);
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: white;
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
 
   .footer-actions {
     display: flex; 
