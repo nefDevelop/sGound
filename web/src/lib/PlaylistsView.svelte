@@ -4,7 +4,7 @@
   import { fade } from 'svelte/transition';
   import TracksView from './TracksView.svelte';
 
-  let { playlist = { id: '', name: '' }, currentPlaying = null, onplay, onedit, onselectionChange, onqueue, onhide, ondeletePhysical } = $props();
+  let { playlist = { id: '', name: '' }, currentPlaying = null, onplay, onedit, onselectionChange, onqueue, onhide, ondeletePhysical, onshuffle } = $props();
   
   let tracks = $state([]);
   let loading = $state(true);
@@ -40,13 +40,13 @@
       </div>
       <div class="playlist-info">
         <span class="type-label">{playlist.isSmart ? 'Intelligent Playlist' : 'Playlist'}</span>
-        <h1>{playlist.name}</h1>
-        <div class="meta-row">
-          <p class="stats">{tracks.length} tracks</p>
-          <button class="play-btn" onclick={handlePlayAll}>
-            <Icon name="play" size={20} color="black" />
-            Play All
-          </button>
+        <div class="title-with-actions">
+          <h1>{playlist.name}</h1>
+          {#if tracks.length > 0 && onshuffle}
+            <button class="header-shuffle-btn" onclick={() => onshuffle(tracks)} title="Shuffle Play">
+              <Icon name="shuffle" size={32} />
+            </button>
+          {/if}
         </div>
       </div>
     </div>
@@ -71,6 +71,7 @@
           onqueue={onqueue}
           onhide={onhide}
           ondeletePhysical={ondeletePhysical}
+          showHeader={false}
         />
       {/if}
     </div>
@@ -119,30 +120,26 @@
     color: var(--primary);
   }
 
-  .meta-row { display: flex; align-items: center; gap: 2rem; }
-
-  .stats {
-    color: var(--text-muted);
-    font-weight: 800;
-    font-size: 1.1rem;
-    margin: 0;
-  }
-
-  .play-btn {
-    background: var(--primary);
-    color: white;
+  .title-with-actions { display: flex; align-items: center; gap: 1.5rem; }
+  
+  .header-shuffle-btn {
+    background: transparent;
     border: none;
-    padding: 1.2rem 3rem;
-    border-radius: 100px;
-    font-weight: 900;
+    color: var(--primary);
+    cursor: pointer;
+    transition: all 0.2s;
     display: flex;
     align-items: center;
-    gap: 0.8rem;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
-    box-shadow: 0 10px 30px var(--primary-20);
+    justify-content: center;
+    opacity: 0.6;
+    padding: 10px;
+    border-radius: 50%;
   }
-  .play-btn:hover { transform: translateY(-4px); box-shadow: 0 15px 40px var(--primary-30); }
+  .header-shuffle-btn:hover {
+    transform: scale(1.1) rotate(15deg);
+    opacity: 1;
+    background: var(--primary-10);
+  }
 
   .tracks-list { margin-top: 1rem; }
 
@@ -173,11 +170,8 @@
       flex-shrink: 0;
     }
     .playlist-cover :global(svg) { width: 40px; height: 40px; }
+    .title-with-actions { gap: 1rem; }
     h1 { font-size: 1.8rem; }
-    .meta-row { flex-direction: row; gap: 1rem; align-items: center; margin-top: 0.5rem; }
-    .play-btn { padding: 0.7rem 1.2rem; font-size: 0.85rem; }
-    .stats { font-size: 0.9rem; }
     .type-label { font-size: 0.65rem; }
   }
 </style>
-

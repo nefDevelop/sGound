@@ -73,7 +73,14 @@
     try {
       const res = await fetch(`/api/tracks/${track.id}`, { method: 'DELETE' });
       if (res.ok) {
-        currentList = currentList.filter(t => t.id !== track.id);
+        if (subview === 'duplicates') {
+          // Remove from group and filter groups that no longer have duplicates
+          currentList = currentList
+            .map(group => group.filter(t => t.id !== track.id))
+            .filter(group => group.length > 1);
+        } else {
+          currentList = currentList.filter(t => t.id !== track.id);
+        }
         fetchHealth();
         showToast("Asset deleted successfully", "success");
       }

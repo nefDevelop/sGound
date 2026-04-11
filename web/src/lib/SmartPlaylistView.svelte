@@ -92,7 +92,14 @@
       </div>
       <div class="texts">
         <span class="type-label">Smart Selection</span>
-        <h1>{name}</h1>
+        <div class="title-with-actions">
+          <h1>{name}</h1>
+          {#if tracks.length > 0}
+            <button class="header-shuffle-btn" onclick={() => onshuffle?.(tracks)} title="Shuffle Play">
+              <Icon name="shuffle" size={32} />
+            </button>
+          {/if}
+        </div>
         <p class="desc">Automatically generated from your library.</p>
       </div>
     </div>
@@ -111,7 +118,7 @@
         onqueue={(track) => {}}
         onhide={onhide}
         ondeletePhysical={ondeletePhysical}
-        onshuffle={onshuffle}
+        showHeader={false}
       />
     {/if}
   </div>
@@ -162,8 +169,29 @@
     color: var(--primary);
   }
 
-  h1 { font-size: 3.5rem; margin: 0.5rem 0; font-weight: 900; letter-spacing: -2px; color: var(--text-main); }
-  .desc { color: var(--text-muted); font-size: 1.1rem; font-weight: 600; }
+  h1 { font-size: 3.5rem; margin: 0; font-weight: 900; letter-spacing: -2px; color: var(--text-main); }
+  .title-with-actions { display: flex; align-items: center; gap: 1.5rem; }
+  
+  .header-shuffle-btn {
+    background: transparent;
+    border: none;
+    color: var(--primary);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.6;
+    padding: 10px;
+    border-radius: 50%;
+  }
+  .header-shuffle-btn:hover {
+    transform: scale(1.1) rotate(15deg);
+    opacity: 1;
+    background: var(--primary-10);
+  }
+
+  .desc { color: var(--text-muted); font-size: 1.1rem; font-weight: 600; margin: 0.5rem 0 0 0; }
 
   .filter-box {
     display: flex; align-items: center; gap: 1rem;

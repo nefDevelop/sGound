@@ -337,9 +337,22 @@
     }
   }
 
-  function openEditor(track) {
-    trackToEdit = { ...track };
-    isTagEditorOpen = true;
+  async function openEditor(item) {
+    if (item.coverId && !item.trackNum) {
+      // It's an album (identified by coverId and absence of trackNum)
+      try {
+        const res = await fetch(`/api/albums/${item.id}/tracks`);
+        if (!res.ok) throw new Error("Failed to fetch tracks");
+        selectedTracks = await res.json();
+        isMassiveEditorOpen = true;
+      } catch (e) {
+        showToast("Error loading album tracks: " + e.message, "error");
+      }
+    } else {
+      // It's a single track
+      trackToEdit = { ...item };
+      isTagEditorOpen = true;
+    }
   }
 
   function handlePlay(data) {
@@ -817,6 +830,7 @@
           onhide={(track) => handleReject(track, () => playlistRef?.fetchPlaylistTracks())}
           ondeletePhysical={(track) => handleDeletePhysical(track, () => playlistRef?.fetchPlaylistTracks())}
           onqueue={(track) => handleQueue(track)}
+          onshuffle={handleShufflePlay}
         />
       {:else if currentView === "settings"}
         <Settings onscan={triggerScan} />

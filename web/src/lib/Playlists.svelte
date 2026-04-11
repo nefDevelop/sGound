@@ -9,6 +9,7 @@
   let playlists = $state([]);
   let loading = $state(true);
   let isCreateModalOpen = $state(false);
+  let smartCounts = $state({});
 
   let contextMenu = $state({
     visible: false,
@@ -18,7 +19,21 @@
     items: []
   });
 
-  onMount(fetchPlaylists);
+  onMount(() => {
+    fetchPlaylists();
+    fetchSmartCounts();
+  });
+
+  async function fetchSmartCounts() {
+    const types = ['recently-played', 'high-quality', 'recently-added', 'decade', 'genre'];
+    for (const type of types) {
+      try {
+        const res = await fetch(`/api/smart-playlists/${type}`);
+        const data = await res.json();
+        smartCounts[type] = data.length;
+      } catch (e) {}
+    }
+  }
 
   async function fetchPlaylists() {
     try {
@@ -59,6 +74,14 @@
     }
   }
 
+  function handleMouseMove(e) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    e.currentTarget.style.setProperty('--mouse-x', `${x}px`);
+    e.currentTarget.style.setProperty('--mouse-y', `${y}px`);
+  }
+
   function createPlaylist() {
     isCreateModalOpen = true;
   }
@@ -76,25 +99,60 @@
   <section class="smart-playlists">
     <h2>Smart Collections</h2>
     <div class="smart-grid">
-      <button class="smart-card" onclick={() => dispatch('selectSmart', { type: 'recently-played', name: 'Recently Played', icon: 'clock' })}>
+      <button 
+        class="smart-card" 
+        onmousemove={handleMouseMove}
+        onclick={() => dispatch('selectSmart', { type: 'recently-played', name: 'Recently Played', icon: 'clock' })}
+      >
         <div class="smart-icon" style="background: var(--primary-10); color: var(--primary);"><Icon name="clock" size={24} /></div>
-        <span>Recently Played</span>
+        <div class="smart-info">
+          <span>Recently Played</span>
+          <p class="count">{smartCounts['recently-played'] || 0} tracks</p>
+        </div>
       </button>
-      <button class="smart-card" onclick={() => dispatch('selectSmart', { type: 'high-quality', name: 'High Fidelity', icon: 'award' })}>
+      <button 
+        class="smart-card" 
+        onmousemove={handleMouseMove}
+        onclick={() => dispatch('selectSmart', { type: 'high-quality', name: 'High Fidelity', icon: 'award' })}
+      >
         <div class="smart-icon" style="background: rgba(214, 184, 92, 0.1); color: #d4b85c;"><Icon name="award" size={24} /></div>
-        <span>High Fidelity</span>
+        <div class="smart-info">
+          <span>High Fidelity</span>
+          <p class="count">{smartCounts['high-quality'] || 0} tracks</p>
+        </div>
       </button>
-      <button class="smart-card" onclick={() => dispatch('selectSmart', { type: 'recently-added', name: 'New Additions', icon: 'plus' })}>
+      <button 
+        class="smart-card" 
+        onmousemove={handleMouseMove}
+        onclick={() => dispatch('selectSmart', { type: 'recently-added', name: 'New Additions', icon: 'plus' })}
+      >
         <div class="smart-icon" style="background: var(--secondary-10); color: var(--secondary);"><Icon name="plus" size={24} /></div>
-        <span>New Additions</span>
+        <div class="smart-info">
+          <span>New Additions</span>
+          <p class="count">{smartCounts['recently-added'] || 0} tracks</p>
+        </div>
       </button>
-      <button class="smart-card" onclick={() => dispatch('selectSmart', { type: 'decade', name: 'Decades', icon: 'calendar' })}>
+      <button 
+        class="smart-card" 
+        onmousemove={handleMouseMove}
+        onclick={() => dispatch('selectSmart', { type: 'decade', name: 'Decades', icon: 'calendar' })}
+      >
         <div class="smart-icon" style="background: rgba(194, 112, 133, 0.1); color: #c27085;"><Icon name="calendar" size={24} /></div>
-        <span>Decades</span>
+        <div class="smart-info">
+          <span>Decades</span>
+          <p class="count">{smartCounts['decade'] || 0} tracks</p>
+        </div>
       </button>
-      <button class="smart-card" onclick={() => dispatch('selectSmart', { type: 'genre', name: 'By Genre', icon: 'layers' })}>
+      <button 
+        class="smart-card" 
+        onmousemove={handleMouseMove}
+        onclick={() => dispatch('selectSmart', { type: 'genre', name: 'By Genre', icon: 'layers' })}
+      >
         <div class="smart-icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;"><Icon name="layers" size={24} /></div>
-        <span>By Genre</span>
+        <div class="smart-info">
+          <span>By Genre</span>
+          <p class="count">{smartCounts['genre'] || 0} tracks</p>
+        </div>
       </button>
     </div>
   </section>
@@ -113,11 +171,12 @@
           class="playlist-card" 
           onclick={() => dispatch('selectPlaylist', playlist)}
           oncontextmenu={(e) => showContextMenu(playlist, e)}
+          onmousemove={handleMouseMove}
         >
-          <div class="playlist-art">
-            <Icon name="music" size={40} />
+          <div class="smart-icon playlist-icon">
+            <Icon name="music" size={24} />
             <div class="play-overlay">
-              <Icon name="play" size={24} color="black" />
+              <Icon name="play" size={16} color="black" />
             </div>
           </div>
           <div class="playlist-info">
@@ -180,12 +239,36 @@
     background: var(--surface-container);
     border-radius: 32px;
     border: 1px solid var(--border-color);
-    transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
     cursor: pointer;
-    border: 1px solid transparent;
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
   }
 
-  .smart-card:hover { transform: translateY(-8px); background: var(--surface-container-high); border-color: var(--primary); }
+  .smart-card:hover { 
+    transform: translateY(-12px) scale(1.02); 
+    background: var(--surface-container-high); 
+    border-color: var(--primary-40);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+  }
+
+  /* Shared glow logic for smart cards too */
+  .smart-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 32px;
+    background: radial-gradient(400px circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(var(--primary-rgb), 0.05), transparent 40%);
+    opacity: 0;
+    transition: opacity 0.5s;
+    z-index: -1;
+  }
+  .smart-card:hover::before { opacity: 1; }
+
+  .smart-card span { font-weight: 800; font-size: 0.95rem; color: var(--text-main); }
+  .smart-info { display: flex; flex-direction: column; gap: 0.2rem; align-items: center; }
+  .smart-info .count { margin: 0; font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: none; letter-spacing: 0; }
 
   .smart-icon {
     width: 64px; height: 64px;
@@ -210,61 +293,92 @@
     cursor: pointer;
     border: none;
   }
-  .create-btn:hover { transform: translateY(-4px); box-shadow: 0 15px 40px var(--primary-30); }
+  .create-btn:hover { 
+    transform: translateY(-6px) scale(1.05); 
+    box-shadow: 0 15px 40px var(--primary-40);
+    filter: brightness(1.1);
+  }
 
   .playlists-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 2rem;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.5rem;
   }
 
   .playlist-card {
     display: flex;
-    flex-direction: column;
-    gap: 1.2rem;
-    padding: 1rem;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 1.5rem;
+    padding: 1.2rem 1.5rem;
     background: var(--surface-container);
-    border-radius: 32px;
-    transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+    border-radius: 24px;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
     border: 1px solid var(--border-color);
     cursor: pointer;
     text-align: left;
-  }
-  .playlist-card:hover { border-color: var(--primary); transform: translateY(-8px); box-shadow: 0 12px 24px rgba(0,0,0,0.2); }
-
-  .playlist-art {
-    aspect-ratio: 1;
-    background: var(--surface-container-highest);
-    border-radius: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     position: relative;
-    color: var(--text-muted);
     overflow: hidden;
+    isolation: isolate;
+  }
+
+  .playlist-card:hover {
+    transform: translateY(-12px) scale(1.02);
+    border-color: var(--primary-40);
+    background: var(--surface-container-high);
+    box-shadow: 
+      0 20px 40px rgba(0,0,0,0.3),
+      0 0 0 1px var(--primary-20);
+  }
+
+  /* Glow effect on hover */
+  .playlist-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 32px;
+    background: radial-gradient(800px circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(var(--primary-rgb), 0.08), transparent 40%);
+    opacity: 0;
+    transition: opacity 0.5s;
+    z-index: -1;
+  }
+  .playlist-card:hover::before { opacity: 1; }
+
+  .playlist-icon {
+    background: var(--primary-10);
+    color: var(--primary);
+    position: relative;
+  }
+
+  .playlist-card:hover .smart-icon {
+    transform: scale(1.1);
+    background: var(--primary-20);
+    box-shadow: 0 15px 30px rgba(0,0,0,0.3);
   }
 
   .play-overlay {
     position: absolute;
-    bottom: 1rem;
-    right: 1rem;
-    width: 48px;
-    height: 48px;
+    inset: 0;
+    width: 100%;
+    height: 100%;
     background: var(--primary);
-    border-radius: 50%;
+    border-radius: inherit;
     display: flex;
     align-items: center;
     justify-content: center;
     opacity: 0;
-    transform: scale(0.8) translateY(10px);
+    transform: scale(0.8);
     transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
-    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
   }
 
-  .playlist-card:hover .play-overlay { opacity: 1; transform: scale(1) translateY(0); }
+  .playlist-card:hover .play-overlay { 
+    opacity: 1; 
+    transform: scale(1);
+  }
 
   .playlist-info h3 { margin: 0; font-size: 1.1rem; font-weight: 800; color: var(--text-main); }
-  .playlist-info p { margin: 0.2rem 0 0; color: var(--text-muted); font-size: 0.85rem; font-weight: 600; }
+  .playlist-info p { margin: 0.1rem 0 0; color: var(--text-muted); font-size: 0.8rem; font-weight: 600; }
 
   .status { text-align: center; padding: 4rem; color: var(--text-muted); }
   .empty-state { text-align: center; padding: 5rem 0; color: var(--text-muted); }

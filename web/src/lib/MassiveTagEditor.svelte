@@ -137,16 +137,23 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="modal-backdrop" onclick={closeModal}>
-  <div class="modal glass" onclick={(e) => e.stopPropagation()}>
-    <div class="modal-header">
-      <div>
-        <h2>Bulk Edit: {selectedTracks.length} tracks</h2>
-        {#if processingStatus}
-          <span class="status-badge">{processingStatus}</span>
-        {/if}
+    <div class="modal glass" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-header">
+        <div class="header-info">
+          <h2>Bulk Edit Tags</h2>
+          <p class="subtitle">{selectedTracks.length} tracks selected</p>
+        </div>
+        <button class="close-btn" onclick={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
       </div>
-      <button class="close-btn" onclick={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
-    </div>
+
+      {#if processingStatus}
+        <div class="global-status">
+          <div class="status-content">
+            <div class="spinner"></div>
+            <span>{processingStatus}</span>
+          </div>
+        </div>
+      {/if}
 
     <div class="bulk-layout">
       <aside class="bulk-sidebar">
@@ -253,16 +260,16 @@
   }
 
   .modal {
-    background: #0f111a;
-    padding: 2.5rem;
+    background: var(--surface-container-highest);
+    padding: 0;
     border-radius: 40px;
     width: 95%;
-    max-width: 1000px;
-    height: 80vh;
+    max-width: 1100px;
+    height: 85vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 40px 100px rgba(0,0,0,0.8);
-    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 40px 120px rgba(0,0,0,0.6);
+    border: 1px solid var(--border-color);
     overflow: hidden;
   }
 
@@ -271,73 +278,137 @@
   .suggestions {
     position: absolute;
     top: 100%; left: 0; width: 100%;
-    background: #1e293b;
-    border: 1px solid rgba(255,255,255,0.1);
+    background: var(--surface-container-highest);
+    border: 1px solid var(--border-color);
     border-radius: 12px;
     z-index: 10;
     margin-top: 4px;
     max-height: 150px;
     overflow-y: auto;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
   }
 
   .suggestions button {
     display: block; width: 100%; text-align: left;
-    padding: 0.6rem 1rem; background: transparent;
-    border: none; color: white; cursor: pointer;
+    padding: 0.8rem 1rem; background: transparent;
+    border: none; color: var(--text-main); cursor: pointer;
   }
 
-  .suggestions button:hover { background: rgba(255, 51, 102, 0.2); }
+  .suggestions button:hover { background: var(--primary-10); color: var(--primary); }
 
-  .modal-header { display: flex; justify-content: space-between; margin-bottom: 2rem; }
+  .modal-header { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center;
+    padding: 1.5rem 2.5rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .header-info h2 { margin: 0; font-size: 1.25rem; font-weight: 900; color: white; }
+  .header-info .subtitle { margin: 0.2rem 0 0; font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
 
-  .status-badge {
-    background: rgba(255, 51, 102, 0.2);
-    color: #ff3366; padding: 0.3rem 0.8rem;
-    border-radius: 100px; font-size: 0.8rem; font-weight: 700;
+  .global-status {
+    background: var(--primary-10);
+    padding: 0.8rem 2.5rem;
+    border-bottom: 1px solid var(--primary-20);
+  }
+  .status-content { display: flex; align-items: center; gap: 1rem; color: var(--primary); font-weight: 700; font-size: 0.9rem; }
+  
+  .spinner {
+    width: 18px; height: 18px; border: 2px solid var(--primary-30); border-top-color: var(--primary);
+    border-radius: 50%; animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .bulk-layout { display: grid; grid-template-columns: 340px 1fr; gap: 0; flex: 1; overflow: hidden; }
+
+  .bulk-sidebar { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 1.5rem; 
+    padding: 2.5rem;
+    background: rgba(0,0,0,0.15);
+    border-right: 1px solid var(--border-color);
   }
 
-  .bulk-layout { display: grid; grid-template-columns: 300px 1fr; gap: 2.5rem; flex: 1; overflow: hidden; }
+  .bulk-sidebar h3 { margin: 0; font-size: 1rem; color: white; font-weight: 800; }
+  .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: -1rem; font-weight: 600; }
 
-  .bulk-sidebar { display: flex; flex-direction: column; gap: 1.5rem; }
+  .tag-form { display: flex; flex-direction: column; gap: 1.5rem; }
 
-  .hint { font-size: 0.8rem; color: #64748b; margin-top: -1rem; }
-
-  .tag-form { display: flex; flex-direction: column; gap: 1.2rem; }
-
-  .tag-form label { display: flex; flex-direction: column; gap: 0.4rem; color: #94a3b8; font-size: 0.9rem; }
+  .tag-form label { display: flex; flex-direction: column; gap: 0.5rem; color: var(--text-muted); font-size: 0.85rem; font-weight: 700; }
 
   .tag-form input {
-    background: #1e293b; border: 1px solid rgba(255,255,255,0.05);
-    color: white; padding: 0.7rem 1rem; border-radius: 16px; outline: none;
+    background: var(--surface-container); 
+    border: 1px solid var(--border-color);
+    color: white; 
+    padding: 0.8rem 1.2rem; 
+    border-radius: 14px; 
+    outline: none;
+    transition: all 0.2s;
   }
+  .tag-form input:focus { border-color: var(--primary); background: var(--surface); }
 
-  .bulk-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-top: 1rem; }
+  .bulk-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.5rem; }
 
   .tool-btn {
-    background: rgba(255, 255, 255, 0.05); color: white;
-    border: 1px solid rgba(255, 255, 255, 0.1); padding: 0.8rem;
-    border-radius: 16px; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+    background: var(--surface-container-high); 
+    color: var(--text-main);
+    border: 1px solid var(--border-color); 
+    padding: 0.8rem;
+    border-radius: 16px; 
+    font-size: 0.8rem; 
+    font-weight: 700; 
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: all 0.2s;
   }
+  .tool-btn:hover { background: var(--surface-container-highest); border-color: var(--primary-30); color: var(--primary); }
 
   .tracks-list-area {
-    background: rgba(0,0,0,0.2); border-radius: 24px;
-    overflow-y: auto; padding: 1rem; border: 1px solid rgba(255,255,255,0.03);
+    overflow-y: auto; 
+    padding: 2.5rem;
     min-height: 0;
   }
 
-  .mini-tracks-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-  .mini-tracks-table th { text-align: left; color: #64748b; padding: 0.8rem; }
-  .mini-tracks-table td { padding: 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.02); color: #cbd5e1; }
+  .mini-tracks-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 0.9rem; }
+  .mini-tracks-table th { text-align: left; color: var(--text-muted); padding: 0.8rem 1rem; font-weight: 800; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 1px; }
+  .mini-tracks-table td { padding: 0.8rem 1rem; border-top: 1px solid transparent; border-bottom: 1px solid transparent; color: var(--text-main); }
+  
+  .mini-tracks-table tr:hover td { background: var(--surface-container-high); }
+  .mini-tracks-table td:first-child { border-top-left-radius: 12px; border-bottom-left-radius: 12px; }
+  .mini-tracks-table td:last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
+  
+  .mini-tracks-table .bold { font-weight: 700; color: white; }
+  .mini-tracks-table .muted { color: var(--text-muted); opacity: 0.8; }
 
   .footer-actions {
-    display: flex; justify-content: flex-end; gap: 1.5rem;
-    margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.05);
+    display: flex; 
+    justify-content: flex-end; 
+    gap: 1.5rem;
+    padding: 2rem 2.5rem; 
+    border-top: 1px solid var(--border-color);
+    background: rgba(0,0,0,0.1);
   }
 
   .save-btn {
-    background: #ff3366; color: white; padding: 1rem 2.5rem;
-    border-radius: 100px; font-weight: 700; border: none; cursor: pointer;
+    background: var(--primary); 
+    color: white; 
+    padding: 1rem 3rem;
+    border-radius: 100px; 
+    font-weight: 800; 
+    border: none; 
+    cursor: pointer;
+    box-shadow: 0 10px 30px var(--primary-20);
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
   }
+  .save-btn:hover { transform: translateY(-3px); box-shadow: 0 15px 40px var(--primary-30); }
+  .save-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
 
   .cancel-btn { background: transparent; border: none; color: #64748b; font-weight: 600; cursor: pointer; }
 
