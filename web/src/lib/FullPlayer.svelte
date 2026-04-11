@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade, fly } from 'svelte/transition';
-  import { audioQuality, queue, currentIndex, volume } from './stores.js';
+  import { audioQuality, queue, currentIndex, volume, isShuffle, repeatMode } from './stores.js';
   import ContextMenu from './ContextMenu.svelte';
   import StarRating from './StarRating.svelte';
   import Artwork from './Artwork.svelte';
@@ -17,7 +17,9 @@
     subView = 'cover',
     onedit,
     onhide,
-    ondeletePhysical
+    ondeletePhysical,
+    onskipNext,
+    onskipBack
   } = $props();
 
   let lyrics = $state("");
@@ -45,6 +47,13 @@
       });
       if (res.ok) track.rating = rating;
     } catch (e) { console.error(e); }
+  }
+
+  function toggleRepeat() {
+    const modes = ['none', 'all', 'one'];
+    const current = $repeatMode;
+    const next = modes[(modes.indexOf(current) + 1) % modes.length];
+    repeatMode.set(next);
   }
 
   let contextMenu = $state({
@@ -205,13 +214,22 @@
                 </div>
 
                 <div class="main-btns">
-                  <button class="sub-btn"><Icon name="shuffle" size={22} /></button>
-                  <button class="main-btn"><Icon name="skipBack" size={38} /></button>
-                  <button class="play-btn" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()}>
+                  <button class="sub-btn" class:active={$isShuffle} onclick={() => isShuffle.update(s => !s)} title="Aleatorio">
+                    <Icon name="shuffle" size={22} />
+                  </button>
+                  <button class="main-btn" onclick={onskipBack} title="Anterior">
+                    <Icon name="skipBack" size={38} />
+                  </button>
+                  <button class="play-btn" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()} title={audioRef?.paused ? "Reproducir" : "Pausar"}>
                     <Icon name={audioRef?.paused ? 'play' : 'pause'} size={38} color="black" />
                   </button>
-                  <button class="main-btn"><Icon name="skipForward" size={38} /></button>
-                  <button class="sub-btn"><Icon name="repeat" size={22} /></button>
+                  <button class="main-btn" onclick={onskipNext} title="Siguiente">
+                    <Icon name="skipForward" size={38} />
+                  </button>
+                  <button class="sub-btn" class:active={$repeatMode !== 'none'} onclick={toggleRepeat} title="Repetición">
+                    <Icon name="repeat" size={22} />
+                    {#if $repeatMode === 'one'}<span class="repeat-one-badge">1</span>{/if}
+                  </button>
                 </div>
 
                 <div class="bottom-controls">
@@ -429,8 +447,26 @@
   .playback-controls { width: 100%; display: flex; flex-direction: column; gap: 2rem; }
   .main-btns { display: flex; justify-content: space-between; align-items: center; }
   .play-btn { width: 72px; height: 72px; background: white; border: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-  .main-btn { color: white; opacity: 0.8; background: none; border: none; cursor: pointer; }
-  .sub-btn { color: white; opacity: 0.4; background: none; border: none; cursor: pointer; }
+  .main-btn { color: white; opacity: 0.8; background: none; border: none; cursor: pointer; transition: all 0.2s; }
+  .main-btn:hover { opacity: 1; transform: scale(1.1); }
+  .sub-btn { color: white; opacity: 0.4; background: none; border: none; cursor: pointer; transition: all 0.2s; position: relative; }
+  .sub-btn:hover { opacity: 0.7; }
+  .sub-btn.active { opacity: 1; color: var(--primary); }
+  .repeat-one-badge {
+    position: absolute;
+    top: -5px;
+    right: -8px;
+    font-size: 10px;
+    font-weight: 900;
+    background: var(--primary);
+    color: white;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 
   .volume-slider-modern { display: flex; align-items: center; gap: 1rem; width: 100%; justify-content: center; }
   .mute-btn { background: none; border: none; color: white; opacity: 0.6; cursor: pointer; padding: 0.5rem; display: flex; align-items: center; transition: all 0.2s; }

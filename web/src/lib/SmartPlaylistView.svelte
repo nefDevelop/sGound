@@ -4,7 +4,7 @@
   import { fade } from 'svelte/transition';
   import TracksView from './TracksView.svelte';
 
-  let { type = "", name = "", icon = "list", currentPlaying = null, onback, onplay, onedit, onselectionChange, onhide, ondeletePhysical } = $props();
+  let { type = "", name = "", icon = "list", currentPlaying = null, onback, onplay, onedit, onselectionChange, onhide, ondeletePhysical, onshuffle } = $props();
 
   let tracks = $state([]);
   let loading = $state(true);
@@ -111,6 +111,7 @@
         onqueue={(track) => {}}
         onhide={onhide}
         ondeletePhysical={ondeletePhysical}
+        onshuffle={onshuffle}
       />
     {/if}
   </div>

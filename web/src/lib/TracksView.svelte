@@ -16,6 +16,7 @@
     onhide = undefined, 
     onbulkReject = undefined, 
     ondeletePhysical = undefined,
+    onshuffle = undefined,
     isInbox = false,
     columns = ['checkbox', 'title', 'artist', 'album', 'rating', 'genre'],
     showHeader = true,
@@ -215,7 +216,14 @@
 <div class="tracks-view">
   {#if showHeader}
     <header class="section-header">
-      <h1>{title}</h1>
+      <div class="title-row">
+        <h1>{title}</h1>
+        {#if onshuffle && tracks.length > 0}
+          <button class="subtle-shuffle-btn" onclick={() => onshuffle(tracks)} title="Aleatorio">
+            <Icon name="shuffle" size={20} />
+          </button>
+        {/if}
+      </div>
     </header>
   {/if}
   <div class="table-container">
@@ -422,7 +430,23 @@
     align-items: center;
     margin-bottom: 2.5rem;
   }
+  .title-row { display: flex; align-items: center; gap: 1rem; }
   h1 { font-size: 2.5rem; font-weight: 950; letter-spacing: -1.5px; margin: 0; color: var(--text-main); }
+  
+  .subtle-shuffle-btn {
+    background: transparent;
+    color: var(--text-muted);
+    opacity: 0.5;
+    padding: 8px;
+    border-radius: 12px;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .subtle-shuffle-btn:hover {
+    opacity: 1;
+    color: var(--primary);
+    background: var(--surface-container-highest);
+  }
   .table-container { width: 100%; overflow-x: hidden; }
   .tracks-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 0.95rem; table-layout: fixed; }
   .tracks-table th { text-align: left; padding: 1rem; color: var(--text-muted); text-transform: uppercase; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; }

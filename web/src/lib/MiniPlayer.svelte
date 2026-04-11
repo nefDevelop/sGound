@@ -3,7 +3,7 @@
   import { fade } from 'svelte/transition';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { queue, currentIndex, audioQuality, effectiveQuality, isPlaying, showToast, volume } from './stores.js';
+  import { queue, currentIndex, audioQuality, effectiveQuality, isPlaying, showToast, volume, isShuffle, repeatMode } from './stores.js';
   import { get } from 'svelte/store';
   import Artwork from './Artwork.svelte';
   
@@ -16,8 +16,15 @@
     onopenFull,
     onedit,
     onhide,
-    ondeletePhysical
+    ondeletePhysical,
+    skipNext: skipNextBound = $bindable(),
+    skipBack: skipBackBound = $bindable()
   } = $props();
+
+  $effect(() => {
+    skipNextBound = skipNext;
+    skipBackBound = skipBack;
+  });
 
   let isMuted = $state(false);
   let showVolume = $state(false);
@@ -95,11 +102,35 @@
   function handleTrackEnded() {
      const q = get(queue);
      const idx = get(currentIndex);
+     const mode = get(repeatMode);
+     const shuffle = get(isShuffle);
+
+     if (mode === 'one') {
+        audioRef.currentTime = 0;
+        audioRef.play().catch(() => {});
+        return;
+     }
+
+     if (shuffle && q.length > 1) {
+        let nextIdx;
+        do {
+          nextIdx = Math.floor(Math.random() * q.length);
+        } while (nextIdx === idx);
+        currentIndex.set(nextIdx);
+        switchAudio();
+        return;
+     }
+
      if (idx < q.length - 1) {
         currentIndex.set(idx + 1);
         switchAudio();
      } else {
-        isPlaying.set(false);
+        if (mode === 'all') {
+           currentIndex.set(0);
+           switchAudio();
+        } else {
+           isPlaying.set(false);
+        }
      }
   }
 
@@ -144,12 +175,28 @@
     audioB.volume = v;
   }
 
+  function toggleRepeat() {
+    const modes = ['none', 'all', 'one'];
+    const current = get(repeatMode);
+    const next = modes[(modes.indexOf(current) + 1) % modes.length];
+    repeatMode.set(next);
+  }
+
   function skipNext() {
     const q = get(queue);
     const idx = get(currentIndex);
-    if (idx < q.length - 1) {
-      currentIndex.set(idx + 1);
-      const next = q[idx + 1];
+    const shuffle = get(isShuffle);
+
+    let nextIdx = idx + 1;
+    if (shuffle && q.length > 1) {
+       do {
+         nextIdx = Math.floor(Math.random() * q.length);
+       } while (nextIdx === idx);
+    }
+
+    if (nextIdx < q.length && nextIdx >= 0) {
+      currentIndex.set(nextIdx);
+      const next = q[nextIdx];
       currentPlaying = next;
       if (preloadedId === next.id) {
          switchAudio();
@@ -159,6 +206,9 @@
          audioRef.play().catch(() => {});
          preloadedId = null;
       }
+    } else if (get(repeatMode) === 'all' && q.length > 0) {
+      currentIndex.set(0);
+      switchAudio();
     }
   }
 
@@ -231,6 +281,9 @@
 
   <div class="right-actions">
     <div class="playback-btns">
+      <button class="sub-btn" class:active={$isShuffle} onclick={() => isShuffle.update(v => !v)} title="Aleatorio">
+        <Icon name="shuffle" size={18} />
+      </button>
       <button class="icon-btn" onclick={skipBack} title="Previous">
         <Icon name="skipBack" size={22} />
       </button>
@@ -239,6 +292,10 @@
       </button>
       <button class="icon-btn" onclick={skipNext} title="Next">
         <Icon name="skipForward" size={22} />
+      </button>
+      <button class="sub-btn" class:repeat-one={$repeatMode === 'one'} class:active={$repeatMode !== 'none'} onclick={toggleRepeat} title="Repetir">
+        <Icon name="repeat" size={18} />
+        {#if $repeatMode === 'one'}<span class="repeat-badge">1</span>{/if}
       </button>
     </div>
 
@@ -374,6 +431,43 @@
     display: flex;
     align-items: center;
     gap: 0.8rem;
+  }
+
+  .icon-btn {
+    background: none; border: none; color: white; opacity: 0.8; cursor: pointer; display: flex; align-items: center; transition: all 0.2s;
+  }
+  .icon-btn:hover { opacity: 1; transform: scale(1.1); }
+
+  .sub-btn { 
+    background: none; 
+    border: none; 
+    color: var(--text-muted); 
+    opacity: 0.5; 
+    cursor: pointer; 
+    display: flex; 
+    align-items: center; 
+    transition: all 0.2s; 
+    position: relative;
+    padding: 8px;
+  }
+  .sub-btn:hover { opacity: 0.8; color: var(--text-main); }
+  .sub-btn.active { opacity: 1; color: var(--primary); }
+
+  .repeat-badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    font-size: 8px;
+    font-weight: 950;
+    background: var(--primary);
+    color: white;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px solid var(--surface-container-highest);
   }
 
   .main-play-btn {

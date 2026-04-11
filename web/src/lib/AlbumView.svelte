@@ -5,7 +5,7 @@
   import TracksView from './TracksView.svelte';
   import { fade } from 'svelte/transition';
   
-  let { albumId, onplay, onback, onedit } = $props();
+  let { albumId, onplay, onback, onedit, onshuffle } = $props();
   
   let album = $state(null);
   let tracks = $state([]);
@@ -53,7 +53,14 @@
        </div>
        <div class="meta">
          <span class="type-label">Album</span>
-         <h1>{album.title}</h1>
+         <div class="title-row">
+           <h1>{album.title}</h1>
+           {#if tracks.length > 0}
+             <button class="subtle-shuffle-btn" onclick={() => onshuffle?.(tracks)} title="Aleatorio">
+               <Icon name="shuffle" size={24} />
+             </button>
+           {/if}
+         </div>
          <div class="artist-row">
             <span class="artist-name">{album.artist}</span>
             {#if album.year}
@@ -110,7 +117,24 @@
   .meta { display: flex; flex-direction: column; gap: 0.2rem; align-self: center; }
   .type-label { text-transform: uppercase; font-size: 0.8rem; font-weight: 950; letter-spacing: 2px; color: var(--primary); opacity: 0.8; }
   
+  .title-row { display: flex; align-items: center; gap: 1.2rem; }
   h1 { font-size: 2.8rem; font-weight: 950; margin: 0; letter-spacing: -1.5px; opacity: 1; line-height: 1.1; color: var(--text-main); }
+  
+  .subtle-shuffle-btn {
+    background: transparent;
+    color: var(--text-muted);
+    opacity: 0.5;
+    padding: 8px;
+    border-radius: 12px;
+    transition: all 0.2s;
+    cursor: pointer;
+    margin-bottom: -5px; /* Visual alignment with baseline */
+  }
+  .subtle-shuffle-btn:hover {
+    opacity: 1;
+    color: var(--primary);
+    background: var(--surface-container-highest);
+  }
   
   .artist-row { display: flex; align-items: center; gap: 0.8rem; font-size: 1.1rem; font-weight: 600; color: var(--text-muted); }
   .artist-name { color: var(--text-main); font-weight: 800; cursor: pointer; }

@@ -4,7 +4,7 @@
   import { showToast } from './stores.js';
   import { fade } from 'svelte/transition';
 
-  let { onfixTags } = $props();
+  let { onfixTags, subview = 'overview', onviewchange } = $props();
   
   let health = $state({
     missingTags: 0,
@@ -14,8 +14,15 @@
   });
   
   let currentList = $state([]);
-  let currentView = $state('overview'); // 'overview', 'duplicates', 'orphans', 'low-quality'
+  let currentView = $derived(subview); // 'overview', 'duplicates', 'orphans', 'low-quality'
   let loading = $state(false);
+
+  // Re-fetch details when subview changes via navigation
+  $effect(() => {
+    if (subview !== 'overview') {
+      fetchDetail(subview);
+    }
+  });
 
   onMount(fetchHealth);
 
@@ -32,7 +39,10 @@
   }
 
   async function loadDetail(view) {
-    currentView = view;
+    onviewchange?.(view);
+  }
+
+  async function fetchDetail(view) {
     loading = true;
     currentList = [];
     try {
@@ -78,7 +88,7 @@
     <div class="texts">
        <div class="title-row">
         {#if currentView !== 'overview'}
-          <button class="icon-btn back-btn" onclick={() => currentView = 'overview'} aria-label="Back to overview">
+          <button class="icon-btn back-btn" onclick={() => onviewchange?.('overview')} aria-label="Back to overview">
             <Icon name="arrowLeft" size={24} />
           </button>
         {/if}

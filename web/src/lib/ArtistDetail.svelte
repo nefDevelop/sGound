@@ -4,10 +4,22 @@
   import AlbumsGrid from './AlbumsGrid.svelte';
   import { fade } from 'svelte/transition';
   
-  let { artistId, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum } = $props();
+  let { artistId, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum, onshuffle } = $props();
   
   let artist = $state(null);
   let loading = $state(true);
+
+  async function handleShuffle() {
+    try {
+      const res = await fetch(`/api/tracks?artistId=${artistId}`);
+      if (res.ok) {
+        const tracks = await res.json();
+        onshuffle?.(tracks);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
 
   onMount(async () => {
     loading = true;
@@ -37,7 +49,12 @@
          </div>
          <div class="info">
            <span class="type">Artist</span>
-           <h1>{artist.name}</h1>
+            <div class="title-row">
+              <h1>{artist.name}</h1>
+              <button class="subtle-shuffle-btn" onclick={handleShuffle} title="Aleatorio">
+                <Icon name="shuffle" size={32} />
+              </button>
+            </div>
            <div class="stats">
              <span><b>{artist.albumCount || 0}</b> Albums</span>
              <span class="dot">•</span>
@@ -88,7 +105,24 @@
 
   .info { display: flex; flex-direction: column; gap: 0.2rem; }
   .type { text-transform: uppercase; font-size: 0.8rem; font-weight: 950; letter-spacing: 2px; color: var(--primary); opacity: 0.8; }
+  .title-row { display: flex; align-items: center; gap: 1.5rem; }
   h1 { font-size: 3.5rem; font-weight: 950; margin: 0; letter-spacing: -2px; line-height: 1.1; color: var(--text-main); }
+  
+  .subtle-shuffle-btn {
+    background: transparent;
+    color: var(--text-muted);
+    opacity: 0.4;
+    padding: 10px;
+    border-radius: 16px;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .subtle-shuffle-btn:hover {
+    opacity: 1;
+    color: var(--primary);
+    background: var(--surface-container-highest);
+    transform: scale(1.1);
+  }
   
   .stats { display: flex; gap: 1rem; font-size: 1.1rem; color: var(--text-muted); }
   .dot { opacity: 0.4; }

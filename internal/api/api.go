@@ -995,6 +995,12 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		args = append(args, genre)
 	}
 
+	artistId := r.URL.Query().Get("artistId")
+	if artistId != "" {
+		whereClause += " AND a.id = ?"
+		args = append(args, artistId)
+	}
+
 	query := fmt.Sprintf(`
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
 		       COALESCE(t.artist, a.name) as artist, al.title as album, al.year as year,

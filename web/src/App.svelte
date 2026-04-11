@@ -63,6 +63,7 @@
   let selectedTracks = $state([]);
   let selectedArtistId = $state(null);
   let selectedAlbumId = $state(null);
+  let selectedMaintenanceView = $state('overview');
   let playerSubView = $state("cover"); // "cover", "lyrics", "queue"
 
   let currentPlaying = $state(null);
@@ -87,8 +88,11 @@
   let pollingInterval = null;
   let dashRef = $state(null);
   let inboxRef = $state(null);
-  let playlistRef = $state(null);
   let smartRef = $state(null);
+  let playlistRef = $state(null);
+
+  let handleSkipNext = $state();
+  let handleSkipBack = $state();
   let confirmState = $state({ isOpen: false, title: "", message: "", confirmLabel: "Confirm", type: "info", icon: null, onconfirm: null, oncancel: null });
 
   function openConfirm(options) {
@@ -197,6 +201,8 @@
     if (params.albumId) selectedAlbumId = params.albumId;
     if (params.playlist) selectedPlaylist = params.playlist;
     if (params.smart) selectedSmart = params.smart;
+    if (params.subview) selectedMaintenanceView = params.subview;
+    else if (view === 'maintenance') selectedMaintenanceView = 'overview';
 
     // 3. Gestión del Historial del Navegador
     if (push || replace) {
@@ -354,6 +360,14 @@
       queue.set([track]);
       currentIndex.set(0);
     }
+    isPlaying.set(true);
+  }
+
+  function handleShufflePlay(trackList) {
+    if (!trackList || trackList.length === 0) return;
+    const shuffled = [...trackList].sort(() => Math.random() - 0.5);
+    queue.set(shuffled);
+    currentIndex.set(0);
     isPlaying.set(true);
   }
 
@@ -726,6 +740,7 @@
             onhide={handleReject}
             onbulkReject={handleBulkReject}
             ondeletePhysical={handleDeletePhysical}
+            onshuffle={handleShufflePlay}
           />
         {/if}
       {:else if currentView === "inbox"}
@@ -754,6 +769,7 @@
           onplayAlbum={(id) => handlePlayAlbum(id)}
           onqueueAlbum={(id) => handleQueueAlbum(id)}
           oneditAlbum={(album) => openEditor(album)}
+          onshuffle={handleShufflePlay}
         />
       {:else if currentView === "album"}
         <AlbumView
@@ -761,6 +777,7 @@
           onplay={handlePlay}
           onedit={openEditor}
           onback={() => history.back()}
+          onshuffle={handleShufflePlay}
         />
       {:else if currentView === "artists"}
         <ArtistsView
@@ -782,6 +799,7 @@
           onselectionChange={(selection) => handleSelectionChange(selection)}
           onhide={(track) => handleReject(track, () => smartRef?.fetchTracks())}
           ondeletePhysical={(track) => handleDeletePhysical(track, () => smartRef?.fetchTracks())}
+          onshuffle={handleShufflePlay}
         />
       {:else if currentView === "playlist"}
         <PlaylistsView
@@ -798,7 +816,11 @@
       {:else if currentView === "settings"}
         <Settings onscan={triggerScan} />
       {:else if currentView === "maintenance"}
-        <Maintenance onfixTags={() => { /* logic to open tag editor */ }} />
+        <Maintenance 
+          subview={selectedMaintenanceView} 
+          onviewchange={(v) => navigate('maintenance', { subview: v })}
+          onfixTags={() => { /* logic to open tag editor */ }} 
+        />
       {:else if currentView === "fullplayer"}
         <FullPlayer
           {currentPlaying}
@@ -811,6 +833,8 @@
           onedit={(track) => openEditor(track)}
           onhide={handleReject}
           ondeletePhysical={handleDeletePhysical}
+          onskipNext={() => handleSkipNext?.()}
+          onskipBack={() => handleSkipBack?.()}
         />
       {/if}
     </div>
@@ -831,6 +855,8 @@
         bind:progress
         bind:duration
         bind:currentTime
+        bind:skipNext={handleSkipNext}
+        bind:skipBack={handleSkipBack}
         onopenFull={() => navigate("fullplayer")}
         onedit={(track) => openEditor(track)}
         onhide={handleReject}
