@@ -137,7 +137,17 @@
   .avatar-container img { width: 100%; height: 100%; object-fit: cover; }
   .avatar-fallback { color: var(--text-muted); opacity: 0.5; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
 
-  .artist-name { font-weight: 900; font-size: 1.1rem; color: var(--text-main); margin-bottom: 0.2rem; display: block; }
+  .artist-name { 
+    font-weight: 900; 
+    font-size: 1.1rem; 
+    color: var(--text-main); 
+    margin-bottom: 0.2rem; 
+    display: block; 
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .album-count { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
 
   .status-box { padding: 4rem; text-align: center; color: var(--text-muted); font-weight: 700; }

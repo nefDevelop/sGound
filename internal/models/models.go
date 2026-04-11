@@ -3,8 +3,9 @@ package models
 // Basic models for the application.
 
 type Artist struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	AlbumCount int    `json:"albumCount"`
 }
 
 type Album struct {

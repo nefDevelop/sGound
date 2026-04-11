@@ -135,7 +135,9 @@ func (db *Database) initSchema() error {
 
 func (db *Database) GetDuplicates() ([]models.Track, error) {
 	query := `
-	SELECT t.id, t.title, a.title as album, art.name as artist, t.path, t.bit_rate, t.duration, t.format, t.file_hash
+	SELECT t.id, t.title, a.title as album, art.name as artist, t.path, 
+	       COALESCE(t.bit_rate, 0), COALESCE(t.duration, 0), 
+	       COALESCE(t.format, 'unknown'), COALESCE(t.file_hash, '')
 	FROM tracks t
 	JOIN albums a ON t.album_id = a.id
 	JOIN artists art ON a.artist_id = art.id
@@ -195,7 +197,7 @@ func (db *Database) GetOrphanedTracks() ([]models.Track, error) {
 
 func (db *Database) GetLowQualityTracks(threshold int) ([]models.Track, error) {
 	query := `
-	SELECT t.id, t.title, a.title as album, art.name as artist, t.path, t.bit_rate
+	SELECT t.id, t.title, a.title as album, art.name as artist, t.path, COALESCE(t.bit_rate, 0)
 	FROM tracks t
 	JOIN albums a ON t.album_id = a.id
 	JOIN artists art ON a.artist_id = art.id

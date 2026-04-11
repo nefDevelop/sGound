@@ -201,7 +201,9 @@
 </script>
 
 <footer class="player">
-  <div class="progress-bg" style="width: {progress}%"></div>
+  <div class="player-bg-clip">
+    <div class="progress-bg" style="width: {progress}%"></div>
+  </div>
   
   <div class="now-playing" onclick={onopenFull} oncontextmenu={showContextMenu} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && onopenFull?.()}>
     <div class="cover-container">
@@ -283,17 +285,25 @@
     padding: 0 2rem;
     height: 100px;
     margin: 0; 
-    border-radius: inherit;
+    border-radius: 28px;
     position: relative;
     overflow: visible;
     z-index: 1000;
   }
 
+  .player-bg-clip {
+    position: absolute;
+    inset: 0;
+    border-radius: 28px;
+    overflow: hidden;
+    z-index: -1;
+    pointer-events: none;
+  }
+  
   .progress-bg {
     position: absolute;
-    left: 1px; top: 1px; bottom: 1px;
-    background: rgba(var(--primary-rgb), 0.15);
-    z-index: -1;
+    left: 0; top: 0; bottom: 0;
+    background: rgba(var(--primary-rgb), 0.2);
     transition: width 0.3s linear;
   }
 

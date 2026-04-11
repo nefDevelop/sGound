@@ -102,6 +102,10 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/search", auth(s.handleSearch))
 	mux.HandleFunc("/api/dashboard", auth(s.handleDashboard))
 	mux.HandleFunc("/api/library/health", auth(s.handleLibraryHealth))
+	mux.HandleFunc("/api/library/duplicates", auth(s.handleLibraryDuplicates))
+	mux.HandleFunc("/api/library/orphans", auth(s.handleLibraryOrphans))
+	mux.HandleFunc("/api/library/low-quality", auth(s.handleLibraryLowQuality))
+	mux.HandleFunc("/api/library/cleanup", auth(s.handleLibraryCleanup))
 	mux.HandleFunc("/api/library/organize", auth(s.handleOrganizeLibrary))
 	mux.HandleFunc("/api/library/organize/status", auth(s.handleOrganizeStatus))
 	mux.HandleFunc("/api/library/status", auth(s.handleScanStatus))
@@ -593,11 +597,12 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := s.getDB(r).Conn.Query(`
-		SELECT DISTINCT ar.id, ar.name 
+		SELECT ar.id, ar.name, COUNT(DISTINCT al.id) as album_count
 		FROM artists ar
 		JOIN albums al ON ar.id = al.artist_id
 		JOIN tracks t ON al.id = t.album_id
 		WHERE t.status = 'active'
+		GROUP BY ar.id, ar.name
 		ORDER BY ar.name
 	`)
 	if err != nil {
@@ -606,17 +611,17 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var artists []map[string]string
+	var artists []models.Artist
 	for rows.Next() {
-		var id, name string
-		if err := rows.Scan(&id, &name); err != nil {
+		var a models.Artist
+		if err := rows.Scan(&a.ID, &a.Name, &a.AlbumCount); err != nil {
 			continue
 		}
-		artists = append(artists, map[string]string{"id": id, "name": name})
+		artists = append(artists, a)
 	}
 
 	if len(artists) == 0 {
-		artists = []map[string]string{}
+		artists = []models.Artist{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
