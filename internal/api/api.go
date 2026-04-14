@@ -78,7 +78,7 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 type contextKey string
 const userKey contextKey = "user"
 
-func (s *Server) SetupRoutes() *http.ServeMux {
+func (s *Server) SetupRoutes() http.Handler {
 	mux := http.NewServeMux()
 
 	// Helper to wrap with auth
@@ -158,7 +158,7 @@ func (s *Server) SetupRoutes() *http.ServeMux {
 		})
 	}
 
-	return mux
+	return s.securityHeaders(mux)
 }
 
 type dbKey string
@@ -203,6 +203,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   false, // Set to true if using HTTPS
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   86400,
 	})
 
@@ -465,6 +467,22 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		ctx = context.WithValue(ctx, databaseKey, userDB)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	}
+}
+
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' unpkg.com; style-src 'self' 'unsafe-inline' unpkg.com; img-src 'self' data: itunes.apple.com; connect-src 'self' lrclib.net api.lyrics.ovh itunes.apple.com")
+		
+		if r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // connectUserDB manages the pool of active user databases
@@ -831,6 +849,15 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	err := s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath)
 	if err != nil {
 		http.Error(w, "Track not found", http.StatusNotFound)
+		return
+	}
+
+	// Security: Validate path is within music directory
+	absMusicPath, _ := filepath.Abs(s.Config.MusicPath)
+	absTrackPath, _ := filepath.Abs(fpath)
+	if !strings.HasPrefix(absTrackPath, absMusicPath) {
+		slog.Error("Unauthorized file access attempt", "path", fpath, "user", r.Context().Value(userKey))
+		http.Error(w, "Unauthorized", http.StatusForbidden)
 		return
 	}
 
@@ -2391,6 +2418,15 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
+	}
+
+	// Security: Validate path is within music directory
+	absMusicPath, _ := filepath.Abs(s.Config.MusicPath)
+	absTrackPath, _ := filepath.Abs(fpath)
+	if !strings.HasPrefix(absTrackPath, absMusicPath) {
+		slog.Error("Unauthorized cover access attempt", "path", fpath, "user", r.Context().Value(userKey))
+		http.NotFound(w, r) // Using NotFound to not leak path existence
+		return
 	}
 
 	// 1. Intentar extraer embebida ligera

@@ -134,6 +134,22 @@ func (db *Database) initSchema() error {
 		}
 	}
 	
+	// Create indexes for performance
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_tracks_status ON tracks(status)",
+		"CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks(album_id)",
+		"CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre)",
+		"CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums(artist_id)",
+	}
+
+	for _, sql := range indexes {
+		if _, err := db.Conn.Exec(sql); err != nil {
+			slog.Error("Index creation failed", "sql", sql, "error", err)
+		} else {
+			slog.Debug("Index ensured", "sql", sql)
+		}
+	}
+
 	return nil
 }
 
