@@ -43,10 +43,8 @@ type Server struct {
 	MasterDB *db.MasterDatabase
 	Config   *config.Config
 
-	activeDBs    map[string]*db.Database
-	dbMutex      sync.RWMutex
-	jwtSecret    []byte
-	scanStatuses sync.Map // [string]*ScanStatus
+	jwtSecret        []byte
+	scanStatuses     sync.Map // [string]*ScanStatus
 	organizeStatuses sync.Map // [string]*OrganizeStatus
 }
 
@@ -68,7 +66,6 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 	return &Server{
 		MasterDB:         masterDB,
 		Config:           cfg,
-		activeDBs:        make(map[string]*db.Database),
 		jwtSecret:        []byte(secret),
 		scanStatuses:     sync.Map{},
 		organizeStatuses: sync.Map{},
@@ -275,42 +272,21 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 	hash, _ := auth.HashPassword(body.Password)
 	
-	// Definir la ruta de la DB específica de este usuario
-	userDBPath := filepath.Join(filepath.Dir(s.Config.DBPath), "library_"+body.Username+".db")
-
 	// Create user with perms from config
-	err := s.MasterDB.CreateUser(body.Username, hash, perms, userDBPath)
+	err := s.MasterDB.CreateUser(body.Username, hash, perms, "")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Trigger initial scan in background for the new user
-	initialStatus := &ScanStatus{Scanning: true, Processed: 0}
-	s.scanStatuses.Store(body.Username, initialStatus)
-
-	go func() {
-		slog.Info("Starting initial background scan for auto-configuration", "user", body.Username, "path", s.Config.MusicPath)
-		uDB, err := db.Connect(userDBPath)
-		if err == nil {
-			sc := scanner.NewScanner(uDB)
-			sc.OnProgress = func(path string, count int) {
-				initialStatus.Processed = count
-				s.scanStatuses.Store(body.Username, initialStatus)
-			}
-			
-			defer func() {
-				initialStatus.Scanning = false
-				s.scanStatuses.Store(body.Username, initialStatus)
-			}()
-
+	// Trigger initial global scan if it's the first user
+	userCount, _ := s.MasterDB.GetUserCount()
+	if userCount == 1 {
+		go func() {
+			sc := scanner.NewScanner(s.MasterDB)
 			sc.ScanDirectory(s.Config.MusicPath)
-		} else {
-			slog.Error("Auto-scan failed: could not connect to user DB", "user", body.Username, "error", err)
-			initialStatus.Scanning = false
-			s.scanStatuses.Store(body.Username, initialStatus)
-		}
-	}()
+		}()
+	}
 
 	// Automatic Session: Set JWT cookie so user lands directly in dashboard
 	token, err := auth.GenerateJWT(body.Username, s.jwtSecret)
@@ -397,16 +373,12 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var user *db.User
-		var effectivePerms string
 
 		// 1. Check JWT Cookie (Web Session)
 		if cookie, err := r.Cookie("sgound_token"); err == nil {
 			claims, err := auth.VerifyJWT(cookie.Value, s.jwtSecret)
 			if err == nil {
 				user, _ = s.MasterDB.GetUserByUsername(claims.Username)
-				if user != nil {
-					effectivePerms = user.Permissions
-				}
 			}
 		}
 
@@ -425,7 +397,6 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 					}
 					user, _ = s.MasterDB.GetUserByUsername(keyInfo.Username)
 					if user != nil {
-						effectivePerms = keyInfo.Permissions
 						// Extraer IP real (considerando proxies)
 						ip := r.Header.Get("X-Forwarded-For")
 						if ip == "" {
@@ -445,7 +416,7 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		// 3. Permission Guard for Mutation Methods
-		if r.Method != http.MethodGet && effectivePerms == "r" {
+		if r.Method != http.MethodGet && user.Permissions == "r" {
 			// Special case: we allow OPTIONS for CORS
 			if r.Method != http.MethodOptions {
 				http.Error(w, "Forbidden: Read-only access", http.StatusForbidden)
@@ -453,18 +424,7 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 
-		// 4. Database Connection Guard
-		// Intentamos obtener/conectar a la DB del usuario aquí de forma centralizada
-		userDB := s.connectUserDB(user)
-		if userDB == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]string{"error": "User database is temporarily unavailable (might be indexing)"})
-			return
-		}
-
 		ctx := context.WithValue(r.Context(), userKey, user)
-		ctx = context.WithValue(ctx, databaseKey, userDB)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	}
 }
@@ -485,34 +445,8 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// connectUserDB manages the pool of active user databases
-func (s *Server) connectUserDB(user *db.User) *db.Database {
-	s.dbMutex.RLock()
-	d, ok := s.activeDBs[user.DBPath]
-	s.dbMutex.RUnlock()
-	if ok {
-		return d
-	}
-	
-	s.dbMutex.Lock()
-	defer s.dbMutex.Unlock()
-	// Double check pattern
-	if d, ok := s.activeDBs[user.DBPath]; ok {
-		return d
-	}
-
-	newDB, err := db.Connect(user.DBPath)
-	if err != nil {
-		slog.Error("Failed to connect user DB", "path", user.DBPath, "err", err)
-		return nil
-	}
-	s.activeDBs[user.DBPath] = newDB
-	return newDB
-}
-
-func (s *Server) getDB(r *http.Request) *db.Database {
-	d, _ := r.Context().Value(databaseKey).(*db.Database)
-	return d
+func (s *Server) getDB(r *http.Request) *db.MasterDatabase {
+	return s.MasterDB
 }
 
 func (s *Server) extractID(r *http.Request, prefix string) string {
@@ -551,30 +485,28 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, _ := r.Context().Value(userKey).(*db.User)
-	
-	// Reset status
+	// Status global de escaneo
 	status := &ScanStatus{Scanning: true, Processed: 0}
-	s.scanStatuses.Store(user.Username, status)
+	s.scanStatuses.Store("global", status)
 
-	sc := scanner.NewScanner(s.getDB(r))
+	sc := scanner.NewScanner(s.MasterDB)
 	sc.OnProgress = func(path string, count int) {
 		status.Processed = count
-		s.scanStatuses.Store(user.Username, status)
+		s.scanStatuses.Store("global", status)
 	}
 
 	go func() {
 		defer func() {
 			status.Scanning = false
-			s.scanStatuses.Store(user.Username, status)
+			s.scanStatuses.Store("global", status)
 		}()
 		if err := sc.ScanDirectory(s.Config.MusicPath); err != nil {
-			slog.Error("Manual scan failed", "error", err)
+			slog.Error("Global scan failed", "error", err)
 		}
 	}()
 
 	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte(`{"status":"scan started"}`))
+	w.Write([]byte(`{"status":"global scan started"}`))
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -616,15 +548,26 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.getDB(r).Conn.Query(`
+	user, _ := r.Context().Value(userKey).(*db.User)
+	whereClause := "WHERE t.status = 'active'"
+	args := []interface{}{}
+
+	pathFilter, pathArgs := s.getPathFilter(user)
+	if pathFilter != "" {
+		whereClause += " AND " + pathFilter
+		args = append(args, pathArgs...)
+	}
+
+	query := fmt.Sprintf(`
 		SELECT ar.id, ar.name, COUNT(DISTINCT al.id) as album_count
 		FROM artists ar
 		JOIN albums al ON ar.id = al.artist_id
 		JOIN tracks t ON al.id = t.album_id
-		WHERE t.status = 'active'
+		%s
 		GROUP BY ar.id, ar.name
-		ORDER BY ar.name
-	`)
+		ORDER BY ar.name`, whereClause)
+
+	rows, err := s.getDB(r).Conn.Query(query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -681,13 +624,24 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 }
 
 func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r *http.Request) {
-	rows, err := s.getDB(r).Conn.Query(`
+	user, _ := r.Context().Value(userKey).(*db.User)
+	whereClause := "WHERE al.artist_id = ? AND t.status = 'active'"
+	args := []interface{}{artistID}
+
+	pathFilter, pathArgs := s.getPathFilter(user)
+	if pathFilter != "" {
+		whereClause += " AND " + pathFilter
+		args = append(args, pathArgs...)
+	}
+
+	query := fmt.Sprintf(`
 		SELECT DISTINCT al.id, al.title, COALESCE(al.year, 0) 
 		FROM albums al
 		JOIN tracks t ON al.id = t.album_id
-		WHERE al.artist_id = ? AND t.status = 'active'
-		ORDER BY al.year DESC
-	`, artistID)
+		%s
+		ORDER BY al.year DESC`, whereClause)
+
+	rows, err := s.getDB(r).Conn.Query(query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -713,15 +667,26 @@ func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r
 }
 
 func (s *Server) handleGetAlbums(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.getDB(r).Conn.Query(`
+	user, _ := r.Context().Value(userKey).(*db.User)
+	whereClause := "WHERE t.status = 'active'"
+	args := []interface{}{}
+
+	pathFilter, pathArgs := s.getPathFilter(user)
+	if pathFilter != "" {
+		whereClause += " AND " + pathFilter
+		args = append(args, pathArgs...)
+	}
+
+	query := fmt.Sprintf(`
 		SELECT DISTINCT al.id, al.title, COALESCE(al.year, 0), ar.name as artist, 
 		       (SELECT t2.id FROM tracks t2 WHERE t2.album_id = al.id AND t2.status = 'active' LIMIT 1) as sample_track_id
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
 		JOIN tracks t ON al.id = t.album_id
-		WHERE t.status = 'active'
-		ORDER BY al.title
-	`)
+		%s
+		ORDER BY al.title`, whereClause)
+
+	rows, err := s.getDB(r).Conn.Query(query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -786,14 +751,25 @@ func (s *Server) handleGetAlbum(albumID string, w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) handleGetAlbumTracks(albumID string, w http.ResponseWriter, r *http.Request) {
-	rows, err := s.getDB(r).Conn.Query(`
+	user, _ := r.Context().Value(userKey).(*db.User)
+	whereClause := "WHERE t.album_id = ? AND t.status = 'active'"
+	args := []interface{}{albumID}
+
+	pathFilter, pathArgs := s.getPathFilter(user)
+	if pathFilter != "" {
+		whereClause += " AND " + pathFilter
+		args = append(args, pathArgs...)
+	}
+
+	query := fmt.Sprintf(`
 		SELECT t.id, t.title, t.track_num, t.duration, t.genre, COALESCE(t.artist, a.name) as artist
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
-		WHERE t.album_id = ? AND t.status = 'active'
-		ORDER BY t.track_num
-	`, albumID)
+		%s
+		ORDER BY t.track_num`, whereClause)
+
+	rows, err := s.getDB(r).Conn.Query(query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -845,6 +821,8 @@ func (s *Server) handleTrackActions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	trackID := s.extractID(r, "/api/stream/")
+	user, _ := r.Context().Value(userKey).(*db.User)
+	
 	var fpath string
 	var rg float64
 	err := s.getDB(r).Conn.QueryRow("SELECT path, COALESCE(replay_gain, 0.0) FROM tracks WHERE id = ?", trackID).Scan(&fpath, &rg)
@@ -857,14 +835,14 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	absMusicPath, _ := filepath.Abs(s.Config.MusicPath)
 	absTrackPath, _ := filepath.Abs(fpath)
 	if !strings.HasPrefix(absTrackPath, absMusicPath) {
-		slog.Error("Unauthorized file access attempt", "path", fpath, "user", r.Context().Value(userKey))
+		slog.Error("Unauthorized file access attempt", "path", fpath, "user", user.Username)
 		http.Error(w, "Unauthorized", http.StatusForbidden)
 		return
 	}
 
-	// Registrar reproducción
+	// Registrar reproducción INDIVIDUAL
 	go func() {
-		s.getDB(r).Conn.Exec("UPDATE tracks SET last_played = CURRENT_TIMESTAMP, play_count = play_count + 1 WHERE id = ?", trackID)
+		s.MasterDB.UpdateTrackUserData(user.Username, trackID, -1, true)
 	}()
 
 	bitrate := r.URL.Query().Get("bitrate")
@@ -1017,25 +995,23 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user, _ := r.Context().Value(userKey).(*db.User)
 	status := r.URL.Query().Get("status")
 	if status == "" {
 		status = "active"
 	}
 	
-	whereClause := "WHERE t.status = ?"
-	args := []interface{}{status}
-	if status == "all" {
-		whereClause = "WHERE 1=1"
-		args = []interface{}{}
+	whereClause := "WHERE 1=1"
+	args := []interface{}{}
+	
+	if status != "all" {
+		whereClause += " AND t.status = ?"
+		args = append(args, status)
 	}
 
 	genre := r.URL.Query().Get("genre")
 	if genre != "" {
-		if status == "all" {
-			whereClause += " AND t.genre = ?"
-		} else {
-			whereClause += " AND t.genre = ?"
-		}
+		whereClause += " AND t.genre = ?"
 		args = append(args, genre)
 	}
 
@@ -1049,14 +1025,20 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
 		       COALESCE(t.artist, a.name) as artist, al.title as album, al.year as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
-		       t.composer, t.comment, t.status, t.rating, t.instrumental, t.track_total, t.disc_total
+		       t.composer, t.comment, t.status, 
+		       COALESCE(ut.rating, 0) as rating, 
+		       t.instrumental, t.track_total, t.disc_total,
+		       COALESCE(ut.play_count, 0) as play_count
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
+		LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
 		%s
 		ORDER BY a.name, al.year, t.track_num`, whereClause)
 
-	rows, err := s.getDB(r).Conn.Query(query, args...)
+	// Prepend username to args for the LEFT JOIN
+	finalArgs := append([]interface{}{user.Username}, args...)
+	rows, err := s.getDB(r).Conn.Query(query, finalArgs...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1066,9 +1048,9 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	tracks := make([]map[string]interface{}, 0)
 	for rows.Next() {
 		var id, title, genre, artist, album, format, composer, comment, tStatus string
-		var trackNum, discNum, duration, year, bitRate, sampleRate, rating, instrumental, trackTotal, discTotal int
+		var trackNum, discNum, duration, year, bitRate, sampleRate, rating, instrumental, trackTotal, discTotal, playCount int
 		var size int64
-		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating, &instrumental, &trackTotal, &discTotal); err != nil {
+		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating, &instrumental, &trackTotal, &discTotal, &playCount); err != nil {
 			slog.Error("Scan error", "err", err)
 			continue
 		}
@@ -1078,6 +1060,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 			"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
 			"composer": composer, "comment": comment, "status": tStatus, "rating": rating,
 			"instrumental": instrumental == 1, "trackTotal": trackTotal, "discTotal": discTotal,
+			"playCount": playCount,
 		})
 	}
 
@@ -1388,6 +1371,7 @@ func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user, _ := r.Context().Value(userKey).(*db.User)
 	var data struct {
 		ID     string `json:"id"`
 		Rating int    `json:"rating"`
@@ -1397,8 +1381,8 @@ func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Actualizar DB
-	_, err := s.getDB(r).Conn.Exec("UPDATE tracks SET rating = ? WHERE id = ?", data.Rating, data.ID)
+	// 1. Actualizar DB Centralizada (user_tracks)
+	err := s.MasterDB.UpdateTrackUserData(user.Username, data.ID, data.Rating, false)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1406,14 +1390,12 @@ func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Sincronizar con Tags del archivo
 	editor := tags.NewEditor(s.getDB(r))
-	// Usamos un mapa para UpdateTags que ya maneja la lógica de escritura física
 	tagData := map[string]interface{}{
-		"rating": float64(data.Rating), // El editor espera float64 de los JSON decoders genéricos aveces
+		"rating": float64(data.Rating),
 	}
 	
 	if err := editor.UpdateTags(data.ID, tagData); err != nil {
 		slog.Error("Failed to sync rating to tags", "id", data.ID, "error", err)
-		// No fallamos la petición completa si solo falla el tag físico
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -1654,14 +1636,15 @@ func (s *Server) handleLibraryMetadata(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	user, _ := r.Context().Value(userKey).(*db.User)
 	stats := make(map[string]interface{})
 	
-	// Contadores básicos - Filtrando por status='active'
+	// Contadores básicos - Mezcla de Global y Personal
 	var tTracks, tAlbums, tArtists, tPlaylists, tGenres int
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active'").Scan(&tTracks)
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT album_id) FROM tracks WHERE status = 'active'").Scan(&tAlbums)
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT ar.id) FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id WHERE t.status = 'active'").Scan(&tArtists)
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM playlists").Scan(&tPlaylists)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM playlists WHERE username = ?", user.Username).Scan(&tPlaylists)
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT genre) FROM tracks WHERE status = 'active' AND genre != ''").Scan(&tGenres)
 	stats["totalTracks"] = tTracks
 	stats["totalAlbums"] = tAlbums
@@ -1669,19 +1652,22 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	stats["totalPlaylists"] = tPlaylists
 	stats["totalGenres"] = tGenres
 
-	// Inbox count (pendientes de aprobar)
+	// Inbox count (pendientes de aprobar compartidos)
 	var pendingCount int
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&pendingCount)
 	stats["inboxCount"] = pendingCount
 
-	// Joyas olvidadas (9 canciones aleatorias para redescubrir) - Solo activas
+	// Joyas olvidadas (Personales: pistas que el usuario ha escuchado poco)
 	gems := make([]map[string]interface{}, 0)
 	rows, err := s.getDB(r).Conn.Query(`
-		SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist 
-		FROM tracks 
-		WHERE status = 'active'
-		ORDER BY RANDOM() LIMIT 9
-	`)
+		SELECT t.id, t.title, a.name as artist 
+		FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists a ON al.artist_id = a.id
+		LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
+		WHERE t.status = 'active'
+		ORDER BY COALESCE(ut.play_count, 0) ASC, RANDOM() LIMIT 9
+	`, user.Username)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -1692,14 +1678,17 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	stats["forgottenGems"] = gems
 
-	// Lo más escuchado (Top 10) - Solo activas
+	// Lo más escuchado (Top 10 PERSONAL)
 	topPlays := make([]map[string]interface{}, 0)
 	rows2, err := s.getDB(r).Conn.Query(`
-		SELECT id, title, (SELECT name FROM artists WHERE id = (SELECT artist_id FROM albums WHERE id = tracks.album_id)) as artist, play_count 
-		FROM tracks 
-		WHERE play_count > 0 AND status = 'active'
-		ORDER BY play_count DESC LIMIT 10
-	`)
+		SELECT t.id, t.title, a.name as artist, ut.play_count 
+		FROM tracks t 
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists a ON al.artist_id = a.id
+		JOIN user_tracks ut ON t.id = ut.track_id
+		WHERE ut.username = ? AND ut.play_count > 0 AND t.status = 'active'
+		ORDER BY ut.play_count DESC LIMIT 10
+	`, user.Username)
 	if err == nil {
 		defer rows2.Close()
 		for rows2.Next() {
@@ -1711,18 +1700,19 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	stats["mostPlayed"] = topPlays
 
-	// Recientemente añadidos con Lógica de Discovery (Moods/Energy)
+	// Recientemente añadidos (Globales para descubrimiento)
 	recentAlbums := make([]map[string]interface{}, 0)
 	rows3, err := s.getDB(r).Conn.Query(`
 		SELECT a.id, a.title, art.name, MAX(t.created_at) as added_at, 
-		       COALESCE(MAX(t.genre), '') as genre, MAX(t.bit_rate) as bitrate, MAX(t.play_count) as pc
+		       COALESCE(MAX(t.genre), '') as genre, MAX(t.bit_rate) as bitrate,
+		       COALESCE((SELECT ut.play_count FROM user_tracks ut WHERE ut.track_id = t.id AND ut.username = ?), 0) as pc
 		FROM albums a
 		JOIN artists art ON a.artist_id = art.id
 		JOIN tracks t ON a.id = t.album_id
 		WHERE t.status = 'active'
 		GROUP BY a.id, a.title, art.name
 		ORDER BY added_at DESC LIMIT 6
-	`)
+	`, user.Username)
 	if err == nil {
 		defer rows3.Close()
 		for rows3.Next() {
@@ -1764,7 +1754,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	stats["discovery"] = recentAlbums
 	
-	// Trends: Top 3 genres by track count
+	// Trends: Top 3 genres by track count (Globales)
 	trends := make([]map[string]interface{}, 0)
 	var totalActiveWithGenre int
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active' AND genre != ''").Scan(&totalActiveWithGenre)
@@ -1798,25 +1788,20 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
-	user, _ := r.Context().Value(userKey).(*db.User)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// Obtener estado del escaneo
+	// Obtener estado del escaneo GLOBAL
 	scanning := false
 	processed := 0
-	if val, ok := s.scanStatuses.Load(user.Username); ok {
+	if val, ok := s.scanStatuses.Load("global"); ok {
 		sStatus := val.(*ScanStatus)
 		scanning = sStatus.Scanning
 		processed = sStatus.Processed
 	}
 
-	// Obtener contador de inbox (pendientes)
+	// Obtener contador de inbox (pendientes compartidos)
 	var inboxCount int
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&inboxCount)
+	s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&inboxCount)
 
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"scanning":   scanning,
 		"processed":  processed,
@@ -2144,6 +2129,7 @@ func (s *Server) handleLyricsSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePlaylists(w http.ResponseWriter, r *http.Request) {
+	user, _ := r.Context().Value(userKey).(*db.User)
 	if r.Method == http.MethodPost {
 		var body struct {
 			Name    string `json:"name"`
@@ -2171,7 +2157,7 @@ func (s *Server) handlePlaylists(w http.ResponseWriter, r *http.Request) {
 			ruleSQL = s.generateRuleSQL(body.Rules)
 		}
 
-		_, err := s.getDB(r).Conn.Exec("INSERT INTO playlists (id, name, is_smart, rule_sql) VALUES (?, ?, ?, ?)", id, body.Name, isSmart, ruleSQL)
+		err := s.MasterDB.CreatePlaylist(user.Username, id, body.Name, "", isSmart, ruleSQL)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -2180,7 +2166,7 @@ func (s *Server) handlePlaylists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.getDB(r).Conn.Query("SELECT id, name, is_smart, rule_sql FROM playlists")
+	rows, err := s.getDB(r).Conn.Query("SELECT id, name, is_smart, rule_sql FROM playlists WHERE username = ?", user.Username)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -2345,17 +2331,19 @@ func (s *Server) handlePlaylistActions(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/playlists/")
 	id = strings.TrimSuffix(id, "/tracks")
+	user, _ := r.Context().Value(userKey).(*db.User)
+	
 	// 1. Obtener info de la playlist
 	var isSmart int
 	var ruleSQL string
-	err := s.getDB(r).Conn.QueryRow("SELECT is_smart, rule_sql FROM playlists WHERE id = ?", id).Scan(&isSmart, &ruleSQL)
+	err := s.getDB(r).Conn.QueryRow("SELECT is_smart, rule_sql FROM playlists WHERE id = ? AND username = ?", id, user.Username).Scan(&isSmart, &ruleSQL)
 	if err != nil {
 		http.Error(w, "Playlist not found", http.StatusNotFound)
 		return
 	}
 
 	var rows *sql.Rows
-	fields := "t.id, t.title, t.track_num, t.disc_num, t.duration, t.genre, a.name, al.title, al.year, t.rating, t.composer, t.comment, t.instrumental, t.track_total, t.disc_total"
+	fields := "t.id, t.title, t.track_num, t.disc_num, t.duration, t.genre, a.name, al.title, al.year, COALESCE(ut.rating, 0), t.composer, t.comment, t.instrumental, t.track_total, t.disc_total"
 	
 	if isSmart == 1 && ruleSQL != "" {
 		// Ejecutar regla dinámica
@@ -2364,9 +2352,10 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 			FROM tracks t
 			JOIN albums al ON t.album_id = al.id
 			JOIN artists a ON al.artist_id = a.id
+			LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
 			WHERE t.id IN (` + ruleSQL + `)
 			ORDER BY a.name, al.title, t.track_num
-		`)
+		`, user.Username)
 	} else {
 		// Lista estática tradicional
 		rows, err = s.getDB(r).Conn.Query(`
@@ -2375,9 +2364,10 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 			JOIN playlist_tracks pt ON t.id = pt.track_id
 			JOIN albums al ON t.album_id = al.id
 			JOIN artists a ON al.artist_id = a.id
+			LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
 			WHERE pt.playlist_id = ? AND t.status = 'active'
 			ORDER BY pt.position ASC
-		`, id)
+		`, user.Username, id)
 	}
 
 	if err != nil {

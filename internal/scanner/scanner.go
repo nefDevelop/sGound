@@ -17,15 +17,14 @@ import (
 	"sgound/internal/tags"
 
 	"github.com/dhowden/tag"
-	"github.com/go-flac/go-flac"
 )
 
 type Scanner struct {
-	DB         *db.Database
+	DB         *db.MasterDatabase
 	OnProgress func(path string, count int)
 }
 
-func NewScanner(database *db.Database) *Scanner {
+func NewScanner(database *db.MasterDatabase) *Scanner {
 	return &Scanner{DB: database}
 }
 

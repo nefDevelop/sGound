@@ -56,6 +56,77 @@ func (db *MasterDatabase) initSchema() error {
 		permissions TEXT NOT NULL,
 		db_path TEXT NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS artists (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL
+	);
+	
+	CREATE TABLE IF NOT EXISTS albums (
+		id TEXT PRIMARY KEY,
+		artist_id TEXT NOT NULL,
+		title TEXT NOT NULL,
+		year INTEGER,
+		FOREIGN KEY (artist_id) REFERENCES artists(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS tracks (
+		id TEXT PRIMARY KEY,
+		album_id TEXT NOT NULL,
+		artist TEXT,
+		title TEXT NOT NULL,
+		track_num INTEGER,
+		track_total INTEGER,
+		disc_num INTEGER,
+		disc_total INTEGER,
+		path TEXT NOT NULL,
+		duration INTEGER,
+		genre TEXT,
+		size INTEGER,
+		format TEXT,
+		composer TEXT,
+		comment TEXT,
+		bit_rate INTEGER,
+		sample_rate INTEGER,
+		replay_gain REAL DEFAULT 0.0,
+		file_mtime INTEGER,
+		file_hash TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		status TEXT DEFAULT 'active',
+		FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS user_tracks (
+		username TEXT,
+		track_id TEXT,
+		rating INTEGER DEFAULT 0,
+		play_count INTEGER DEFAULT 0,
+		last_played DATETIME,
+		PRIMARY KEY (username, track_id),
+		FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE,
+		FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS playlists (
+		id TEXT PRIMARY KEY,
+		username TEXT NOT NULL,
+		name TEXT NOT NULL,
+		description TEXT,
+		is_smart INTEGER DEFAULT 0,
+		rule_sql TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS playlist_tracks (
+		playlist_id TEXT,
+		track_id TEXT,
+		position INTEGER,
+		PRIMARY KEY (playlist_id, track_id),
+		FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+		FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+	);
+
 	CREATE TABLE IF NOT EXISTS api_keys (
 		key TEXT PRIMARY KEY,
 		username TEXT NOT NULL,
@@ -67,6 +138,7 @@ func (db *MasterDatabase) initSchema() error {
 		is_active BOOLEAN DEFAULT 1,
 		FOREIGN KEY(username) REFERENCES users(username)
 	);
+
 	CREATE TABLE IF NOT EXISTS settings (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
@@ -76,15 +148,9 @@ func (db *MasterDatabase) initSchema() error {
 		return err
 	}
 
-	// 2. Migración: Si la columna 'permissions' no existe, añadirla
-	// Intentamos añadirla (si ya existe, el error será ignorado)
+	// Migraciones básicas
 	db.Conn.Exec("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT 'r'")
-
-	// Migraciones para api_keys
-	db.Conn.Exec("ALTER TABLE api_keys ADD COLUMN last_ip TEXT DEFAULT ''")
-	db.Conn.Exec("ALTER TABLE api_keys ADD COLUMN last_used_at DATETIME")
-	db.Conn.Exec("ALTER TABLE api_keys ADD COLUMN user_agent TEXT DEFAULT ''")
-	db.Conn.Exec("ALTER TABLE api_keys ADD COLUMN is_active BOOLEAN DEFAULT 1")
+	db.Conn.Exec("ALTER TABLE tracks ADD COLUMN replay_gain REAL DEFAULT 0.0")
 
 	return nil
 }
@@ -180,6 +246,148 @@ func (db *MasterDatabase) GetUserByUsername(username string) (*User, error) {
 	return u, nil
 }
 
+func (db *MasterDatabase) GetDuplicates() ([]models.Track, error) {
+	query := `
+	SELECT t.id, t.title, a.title as album, art.name as artist, t.path, 
+	       COALESCE(t.bit_rate, 0), COALESCE(t.duration, 0), 
+	       COALESCE(t.format, 'unknown'), COALESCE(t.file_hash, '')
+	FROM tracks t
+	JOIN albums a ON t.album_id = a.id
+	JOIN artists art ON a.artist_id = art.id
+	WHERE t.status = 'active' AND (
+		(t.file_hash IS NOT NULL AND t.file_hash IN (SELECT t2.file_hash FROM tracks t2 WHERE t2.status = 'active' AND t2.file_hash IS NOT NULL GROUP BY t2.file_hash HAVING COUNT(*) > 1))
+		OR
+		(t.title, t.duration) IN (SELECT t3.title, t3.duration FROM tracks t3 WHERE t3.status = 'active' GROUP BY t3.title, t3.duration HAVING COUNT(*) > 1)
+		OR
+		(art.id, a.id, t.title) IN (
+			SELECT a2.artist_id, t2.album_id, t2.title
+			FROM tracks t2
+			JOIN albums a2 ON t2.album_id = a2.id
+			WHERE t2.status = 'active'
+			GROUP BY a2.artist_id, t2.album_id, t2.title
+			HAVING COUNT(*) > 1
+		)
+	)
+	ORDER BY art.name, a.title, t.title`
+
+	rows, err := db.Conn.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tracks []models.Track
+	for rows.Next() {
+		var t models.Track
+		if err := rows.Scan(&t.ID, &t.Title, &t.Album, &t.Artist, &t.Path, &t.BitRate, &t.Duration, &t.Format, &t.FileHash); err != nil {
+			return nil, err
+		}
+		tracks = append(tracks, t)
+	}
+	return tracks, nil
+}
+
+func (db *MasterDatabase) GetOrphanedTracks() ([]models.Track, error) {
+	rows, err := db.Conn.Query("SELECT id, path, title FROM tracks")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orphans []models.Track
+	for rows.Next() {
+		var t models.Track
+		if err := rows.Scan(&t.ID, &t.Path, &t.Title); err != nil {
+			return nil, err
+		}
+		
+		if _, err := os.Stat(t.Path); os.IsNotExist(err) {
+			orphans = append(orphans, t)
+		}
+	}
+	return orphans, nil
+}
+
+func (db *MasterDatabase) GetLowQualityTracks(threshold int) ([]models.Track, error) {
+	query := `
+	SELECT t.id, t.title, a.title as album, art.name as artist, t.path, COALESCE(t.bit_rate, 0)
+	FROM tracks t
+	JOIN albums a ON t.album_id = a.id
+	JOIN artists art ON a.artist_id = art.id
+	WHERE t.status = 'active' AND t.bit_rate > 0 AND t.bit_rate < ?
+	ORDER BY t.bit_rate ASC`
+
+	rows, err := db.Conn.Query(query, threshold*1000)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tracks []models.Track
+	for rows.Next() {
+		var t models.Track
+		if err := rows.Scan(&t.ID, &t.Title, &t.Album, &t.Artist, &t.Path, &t.BitRate); err != nil {
+			return nil, err
+		}
+		tracks = append(tracks, t)
+	}
+	return tracks, nil
+}
+
+func (db *MasterDatabase) DeleteTracks(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf("DELETE FROM tracks WHERE id IN (%s)", strings.Join(placeholders, ","))
+	_, err := db.Conn.Exec(query, args...)
+	return err
+}
+
+func (db *MasterDatabase) GetTrackUserData(username, trackID string) (rating, playCount int, lastPlayed string) {
+	db.Conn.QueryRow("SELECT rating, play_count, COALESCE(last_played, '') FROM user_tracks WHERE username = ? AND track_id = ?", 
+		username, trackID).Scan(&rating, &playCount, &lastPlayed)
+	return
+}
+
+func (db *MasterDatabase) UpdateTrackUserData(username, trackID string, rating int, playIncrement bool) error {
+	playSQL := ""
+	if playIncrement {
+		playSQL = ", play_count = play_count + 1, last_played = CURRENT_TIMESTAMP"
+	}
+	
+	_, err := db.Conn.Exec(`
+		INSERT INTO user_tracks (username, track_id, rating, play_count, last_played) 
+		VALUES (?, ?, ?, CASE WHEN ? THEN 1 ELSE 0 END, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END)
+		ON CONFLICT(username, track_id) DO UPDATE SET 
+			rating = CASE WHEN ? >= 0 THEN ? ELSE rating END
+			`+playSQL,
+		username, trackID, rating, playIncrement, playIncrement, rating >= 0, rating)
+	return err
+}
+
+func (db *MasterDatabase) CreatePlaylist(username, id, name, description string) error {
+	_, err := db.Conn.Exec("INSERT INTO playlists (id, username, name, description) VALUES (?, ?, ?, ?)", 
+		id, username, name, description)
+	return err
+}
+
+func (db *MasterDatabase) AddToPlaylist(playlistID, trackID string) error {
+	var count int
+	err := db.Conn.QueryRow("SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?", playlistID).Scan(&count)
+	if err != nil {
+		return err
+	}
+	_, err = db.Conn.Exec("INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)", 
+		playlistID, trackID, count)
+	return err
+}
+
 func (db *MasterDatabase) GetUserCount() (int, error) {
 	var count int
 	err := db.Conn.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
@@ -194,5 +402,10 @@ func (db *MasterDatabase) GetJWTSecret() (string, error) {
 
 func (db *MasterDatabase) SetJWTSecret(secret string) error {
 	_, err := db.Conn.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES ('jwt_secret', ?)", secret)
+	return err
+}
+
+func (db *MasterDatabase) DeletePlaylist(id, username string) error {
+	_, err := db.Conn.Exec("DELETE FROM playlists WHERE id = ? AND username = ?", id, username)
 	return err
 }
