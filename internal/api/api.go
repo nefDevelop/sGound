@@ -516,13 +516,16 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	status := &ScanStatus{Scanning: true, Processed: 0}
 	s.scanStatuses.Store("global", status)
 
-	sc := scanner.NewScanner(s.MasterDB)
-	sc.OnProgress = func(path string, count int) {
-		status.Processed = count
-		s.scanStatuses.Store("global", status)
-	}
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"status":"global scan started"}`))
 
 	go func() {
+		sc := scanner.NewScanner(s.MasterDB)
+		sc.OnProgress = func(path string, count int) {
+			status.Processed = count
+			s.scanStatuses.Store("global", status)
+		}
+
 		defer func() {
 			status.Scanning = false
 			s.scanStatuses.Store("global", status)
@@ -531,9 +534,6 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 			slog.Error("Global scan failed", "error", err)
 		}
 	}()
-
-	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte(`{"status":"global scan started"}`))
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {

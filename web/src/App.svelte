@@ -117,38 +117,41 @@
       
       const wasScanning = scanStatus.scanning;
       const prevProcessed = scanStatus.processed;
+      const prevInbox = $inboxCount;
+      
       scanStatus = data;
       inboxCount.set(data.inboxCount);
 
-      // If progress increased significantly, refresh views
-      if (data.scanning && data.processed > prevProcessed) {
-        // Refresh periodically during scan
-        if (data.processed % 5 === 0 || data.processed < 10) {
-           if (currentView === 'library' || currentView === 'tracks') fetchTracks();
-           if (currentView === 'inbox') fetchInbox();
-           if (currentView === 'dashboard' && dashRef) dashRef.refresh();
-        }
+      // REGLA: Si algo ha cambiado (procesados o inbox), refrescar la vista actual
+      if (data.processed !== prevProcessed || data.inboxCount !== prevInbox) {
+         if (currentView === 'library' || currentView === 'tracks') fetchTracks();
+         if (currentView === 'inbox') inboxRef?.fetchInbox();
+         if (currentView === 'dashboard') dashRef?.refresh();
       }
 
+      // Si el escaneo ha terminado ahora mismo
       if (wasScanning && !data.scanning) {
+        stopPolling();
         fetchTracks();
         fetchPlaylists();
-        fetchInbox();
-        if (dashRef) dashRef.refresh();
-        showToast("Biblioteca actualizada: <b>" + data.processed + "</b> canciones", "success");
+        inboxRef?.fetchInbox();
+        dashRef?.refresh();
+        showToast("Escaneo finalizado: <b>" + data.processed + "</b> archivos procesados", "success");
       }
 
+      // Si detectamos que hay un escaneo en marcha y no tenemos polling, activarlo
       if (data.scanning && !pollingInterval) {
         startPolling();
-      } else if (!data.scanning && pollingInterval) {
-        stopPolling();
       }
-    } catch (e) { }
+    } catch (e) {
+      console.error("Error checking scan status", e);
+    }
   }
 
   function startPolling() {
     if (pollingInterval) return;
-    pollingInterval = setInterval(checkScanStatus, 2000);
+    // Polling más rápido (cada segundo) durante el escaneo
+    pollingInterval = setInterval(checkScanStatus, 1000);
   }
 
   function stopPolling() {
@@ -332,6 +335,9 @@
       const res = await fetch("/api/scan", { method: "POST" });
       if (res.ok) {
         showToast("Library scan started!", "success");
+        // Reiniciar status local para activar el polling
+        scanStatus = { scanning: true, processed: 0 };
+        startPolling();
         checkScanStatus();
       }
     } catch (e) {
@@ -749,7 +755,18 @@
       {:else if currentView === "library"}
         {#if tracks.length === 0}
           <div class="empty-state">
-            <p>No tracks found. Click Scan Library to index your music.</p>
+            {#if scanStatus.scanning}
+              <div class="spinner"></div>
+              <p>Escaneando biblioteca... ({scanStatus.processed} procesados)</p>
+            {:else if $inboxCount > 0}
+              <div class="inbox-alert">
+                <Icon name="inbox" size="48" />
+                <p>Tu biblioteca está vacía, pero tienes <b>{$inboxCount}</b> canciones en el Inbox pendientes de aprobar.</p>
+                <button class="primary-btn" onclick={() => navigate('inbox')}>Ir al Inbox</button>
+              </div>
+            {:else}
+              <p>No se han encontrado canciones. Haz clic en "Escanear Biblioteca" en Ajustes.</p>
+            {/if}
           </div>
         {:else}
           <TracksView
