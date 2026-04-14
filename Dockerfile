@@ -20,7 +20,7 @@ RUN go build -o sgound-server ./cmd/sgound
 # Stage 3: Runtime
 FROM alpine:3.19
 WORKDIR /app
-RUN apk add --no-cache ca-certificates tini
+RUN apk add --no-cache ca-certificates tini ffmpeg
 
 # Create non-root user
 RUN addgroup -S sgound && adduser -S sgound -G sgound -u 1000

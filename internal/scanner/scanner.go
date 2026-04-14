@@ -7,7 +7,9 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -154,6 +156,22 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		composer = metadata.Composer()
 		comment = metadata.Comment()
 
+		// EXTRACCIÓN DE REPLAYGAIN
+		// Buscamos en los metadatos crudos según el formato
+		for k, v := range raw {
+			key := strings.ToUpper(k)
+			if strings.Contains(key, "REPLAYGAIN_TRACK_GAIN") {
+				if val, ok := v.(string); ok {
+					// El formato suele ser "-7.53 dB"
+					cleanVal := strings.TrimSuffix(strings.ToLower(val), " db")
+					var gain float64
+					fmt.Sscanf(cleanVal, "%f", &gain)
+					replayGain = gain
+					break
+				}
+			}
+		}
+
 		// HEURÍSTICA MEJORADA: Normalizamos el artista principal para agrupar.
 		// Esto une "Artista A" y "Artista A ft. B" en el mismo álbum de forma inteligente.
 		albumGroupingKey := NormalizeArtist(albumArtist)
@@ -162,18 +180,11 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		albumId = GenerateID(albumGroupingKey + albumName)
 	}
 
-	// EXTRACCIÓN DE DURACIÓN (Mejora)
+	// EXTRACCIÓN DE DURACIÓN (Mejora: Usar ffprobe para precisión)
 	duration := 0
-	if fileExt == "flac" {
-		f, err := flac.ParseFile(path)
-		if err == nil {
-			for _, m := range f.Meta {
-				if m.Type == flac.StreamInfo {
-				}
-			}
-		}
+	if val, err := getDurationWithFFprobe(path); err == nil {
+		duration = val
 	}
-	// TODO: Añadir parser de MP3 para duración precisa
 
 	// IDENTIFICACIÓN: Primero intentamos por persistente (pero de forma rápida)
 	// Como ya sabemos si es .mp3 o .flac, podemos ser específicos
@@ -223,6 +234,19 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		trackId, albumId, artistName, title, trackNum, discNum, path, duration, genre, fileSize, fileExt, composer, comment, 0, 44100, status, 0, instrumental, replayGain, fileMtime, hash,
 	)
 	return err
+}
+
+func getDurationWithFFprobe(path string) (int, error) {
+	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil {
+		return 0, err
+	}
+	return int(f), nil
 }
 
 func GenerateID(input string) string {

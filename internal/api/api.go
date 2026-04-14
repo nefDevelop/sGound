@@ -846,7 +846,8 @@ func (s *Server) handleTrackActions(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	trackID := s.extractID(r, "/api/stream/")
 	var fpath string
-	err := s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath)
+	var rg float64
+	err := s.getDB(r).Conn.QueryRow("SELECT path, COALESCE(replay_gain, 0.0) FROM tracks WHERE id = ?", trackID).Scan(&fpath, &rg)
 	if err != nil {
 		http.Error(w, "Track not found", http.StatusNotFound)
 		return
@@ -867,24 +868,38 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	bitrate := r.URL.Query().Get("bitrate")
+	useFFmpeg := false
+	ffmpegArgs := []string{"-i", fpath}
+
+	// 1. ReplayGain Filter
+	if s.Config.ReplayGainEnabled && rg != 0 {
+		useFFmpeg = true
+		ffmpegArgs = append(ffmpegArgs, "-af", fmt.Sprintf("volume=%.2fdB", rg))
+	}
+
+	// 2. Transcoding / Bitrate
 	if bitrate != "" && bitrate != "original" {
-		// Basic validation: must be something like "128k" or "192k"
-		// Only allow alphanumeric characters and 'k'
+		useFFmpeg = true
+		// Basic validation
 		for _, char := range bitrate {
 			if !((char >= '0' && char <= '9') || char == 'k' || char == 'm') {
 				http.Error(w, "Invalid bitrate format", http.StatusBadRequest)
 				return
 			}
 		}
+		ffmpegArgs = append(ffmpegArgs, "-ab", bitrate)
+	}
 
-		// Transcoding requested
+	if useFFmpeg {
 		w.Header().Set("Content-Type", "audio/mpeg")
-		// Use ffmpeg to transcode on the fly
-		// We use mp3 as a safe universal format for now
-		cmd := exec.Command("ffmpeg", "-i", fpath, "-f", "mp3", "-ab", bitrate, "-map_metadata", "-1", "pipe:1")
+		// Force MP3 for compatibility when processing with ffmpeg
+		ffmpegArgs = append(ffmpegArgs, "-f", "mp3", "-map_metadata", "-1", "pipe:1")
+		
+		cmd := exec.Command("ffmpeg", ffmpegArgs...)
 		cmd.Stdout = w
 		if err := cmd.Start(); err != nil {
-			http.Error(w, "Transcoding failed", http.StatusInternalServerError)
+			slog.Error("FFmpeg streaming failed", "error", err, "args", ffmpegArgs)
+			http.Error(w, "Streaming failed", http.StatusInternalServerError)
 			return
 		}
 		cmd.Wait()
