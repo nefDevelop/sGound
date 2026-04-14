@@ -5,6 +5,7 @@
   const dispatch = createEventDispatcher();
   let username = $state('');
   let password = $state('');
+  let showPassword = $state(false);
   let loading = $state(false);
   let error = $state('');
 
@@ -53,7 +54,9 @@
 <div class="login-page">
   <div class="login-card glass">
     <div class="brand">
-      <div class="logo"></div>
+      <div class="logo">
+        <div class="logo-icon"></div>
+      </div>
       <h1>Sgound</h1>
       <p>Entra en tu universo musical</p>
     </div>
@@ -71,7 +74,10 @@
         <label for="password">Contraseña</label>
         <div class="input-wrapper">
           <Icon name="lock" size={18} color="var(--text-muted)" />
-          <input type="password" id="password" bind:value={password} placeholder="••••••••" />
+          <input type={showPassword ? "text" : "password"} id="password" bind:value={password} placeholder="••••••••" />
+          <button type="button" class="icon-btn" onclick={() => showPassword = !showPassword}>
+            <Icon name={showPassword ? "eyeOff" : "eye"} size={18} color="var(--text-muted)" />
+          </button>
         </div>
       </div>
 
@@ -81,7 +87,11 @@
 
       <button type="submit" class="login-btn" disabled={loading}>
         {loading ? 'Entrando...' : 'Acceder'}
-        {#if !loading}<Icon name="logIn" size={18} />{/if}
+        {#if loading}
+          <div class="spin"><Icon name="refresh" size={18} /></div>
+        {:else}
+          <Icon name="logIn" size={18} />
+        {/if}
       </button>
     </form>
 
@@ -128,6 +138,17 @@
     border-radius: 20px; 
     margin: 0 auto 1.5rem;
     box-shadow: 0 10px 30px var(--primary-10);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+  }
+  .logo-icon {
+    width: 40px;
+    height: 40px;
+    background-color: currentColor;
+    -webkit-mask: url('/icons.svg?v=2') no-repeat center / contain;
+    mask: url('/icons.svg?v=2') no-repeat center / contain;
   }
   h1 { font-size: 2.5rem; font-weight: 950; letter-spacing: -2px; margin: 0; }
   p { color: var(--text-muted); font-weight: 600; margin-top: 0.5rem; }
@@ -152,6 +173,21 @@
   input { 
     background: transparent; border: none; color: white; padding: 1.2rem 0; 
     width: 100%; outline: none; font-weight: 600; font-size: 1.1rem;
+  }
+
+  .icon-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+  }
+  .icon-btn:hover {
+    opacity: 1;
   }
 
   .error-msg { 
@@ -179,6 +215,15 @@
   }
   .login-btn:hover { transform: translateY(-3px); filter: brightness(1.1); box-shadow: 0 20px 45px var(--primary-10); }
   .login-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  .spin {
+    display: flex;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
 
   .footer { margin-top: 3rem; text-align: center; opacity: 0.3; font-size: 0.8rem; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; }
 </style>

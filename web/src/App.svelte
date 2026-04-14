@@ -575,7 +575,9 @@
 <main class="app-layout">
   <aside class="sidebar">
     <div class="brand">
-      <div class="logo"></div>
+      <div class="logo">
+        <div class="logo-icon"></div>
+      </div>
       <h2>Sgound</h2>
     </div>
 
@@ -948,6 +950,18 @@
     background: var(--primary);
     border-radius: 12px;
     box-shadow: 0 4px 15px var(--primary-20);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+  }
+
+  .logo-icon {
+    width: 22px;
+    height: 22px;
+    background-color: currentColor;
+    -webkit-mask: url('/icons.svg?v=2') no-repeat center / contain;
+    mask: url('/icons.svg?v=2') no-repeat center / contain;
   }
 
   .brand h2 { font-size: 1.5rem; margin: 0; font-weight: 900; letter-spacing: -0.8px; }
