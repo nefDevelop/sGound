@@ -9,7 +9,7 @@ import (
 
 func BenchmarkParseAndSaveFile(b *testing.B) {
 	// Setup: BD en memoria para máxima velocidad de test
-	database, _ := db.Connect(":memory:")
+	database, _ := db.ConnectMaster(":memory:")
 	s := NewScanner(database)
 
 	// Crear un archivo de prueba (aunque no sea un audio real, el parser fallará rápido

@@ -273,7 +273,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	hash, _ := auth.HashPassword(body.Password)
 	
 	// Create user with perms from config
-	err := s.MasterDB.CreateUser(body.Username, hash, perms, "")
+	err := s.MasterDB.CreateUser(body.Username, hash, perms, "", "*")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -447,6 +447,33 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 
 func (s *Server) getDB(r *http.Request) *db.MasterDatabase {
 	return s.MasterDB
+}
+
+func (s *Server) getPathFilter(user *db.User) (string, []interface{}) {
+	if user == nil || user.AllowedPaths == "*" || user.AllowedPaths == "" {
+		return "", nil
+	}
+	
+	paths := strings.Split(user.AllowedPaths, ",")
+	var conditions []string
+	var args []interface{}
+	
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" { continue }
+		// Asegurar que termina en barra para el LIKE
+		if !strings.HasSuffix(p, "/") && !strings.HasSuffix(p, "\\") {
+			p = p + "/"
+		}
+		conditions = append(conditions, "t.path LIKE ?")
+		args = append(args, p+"%")
+	}
+	
+	if len(conditions) == 0 {
+		return "", nil
+	}
+	
+	return "(" + strings.Join(conditions, " OR ") + ")", args
 }
 
 func (s *Server) extractID(r *http.Request, prefix string) string {
@@ -2319,7 +2346,8 @@ func (s *Server) handlePlaylistActions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodDelete {
-		s.getDB(r).DeletePlaylist(id)
+		user, _ := r.Context().Value(userKey).(*db.User)
+		s.getDB(r).DeletePlaylist(id, user.Username)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"success"}`))
 		return
@@ -2543,48 +2571,16 @@ func (s *Server) HandleFileEvent(path string) {
 		return
 	}
 
-	users, err := s.MasterDB.GetUsers()
-	if err != nil {
-		slog.Error("Watcher: Failed to get users", "error", err)
-		return
-	}
-
-	for _, user := range users {
-		// We use a local copy to avoid pointer issues in the loop
-		u := user
-		uDB := s.connectUserDB(&u)
-		if uDB == nil {
-			continue
-		}
-		
-		sc := scanner.NewScanner(uDB)
-		if err := sc.ParseAndSaveFile(path); err != nil {
-			slog.Error("Watcher: Failed to process file", "user", u.Username, "path", path, "error", err)
-		}
+	sc := scanner.NewScanner(s.MasterDB)
+	if err := sc.ParseAndSaveFile(path); err != nil {
+		slog.Error("Watcher: Failed to process file", "path", path, "error", err)
 	}
 }
 
 func (s *Server) TriggerGlobalScan() {
 	slog.Info("Starting scheduled global scan")
-	users, err := s.MasterDB.GetUsers()
-	if err != nil {
-		slog.Error("Scheduled scan: failed to get users", "error", err)
-		return
-	}
-
-	for _, user := range users {
-		u := user
-		uDB := s.connectUserDB(&u)
-		if uDB == nil {
-			continue
-		}
-		
-		go func(username string, db *db.Database) {
-			slog.Info("Scheduled scan: processing user", "user", username)
-			sc := scanner.NewScanner(db)
-			if err := sc.ScanDirectory(s.Config.MusicPath); err != nil {
-				slog.Error("Scheduled scan: failed for user", "user", username, "error", err)
-			}
-		}(u.Username, uDB)
+	sc := scanner.NewScanner(s.MasterDB)
+	if err := sc.ScanDirectory(s.Config.MusicPath); err != nil {
+		slog.Error("Scheduled scan: failed", "error", err)
 	}
 }

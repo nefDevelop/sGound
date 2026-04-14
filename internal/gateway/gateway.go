@@ -10,10 +10,10 @@ import (
 // SubsonicGateway actúa como el patrón Adapter para recibir tráfico OpenSubsonic
 // y derivarlo al sistema interno o devolver respuestas formateadas
 type SubsonicGateway struct {
-	DB *db.Database
+	DB *db.MasterDatabase
 }
 
-func NewSubsonicGateway(database *db.Database) *SubsonicGateway {
+func NewSubsonicGateway(database *db.MasterDatabase) *SubsonicGateway {
 	return &SubsonicGateway{DB: database}
 }
 

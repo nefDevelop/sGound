@@ -15,25 +15,19 @@ func TestConnectAndInitSchema(t *testing.T) {
 	f.Close()
 	defer os.Remove(dbPath)
 
-	database, err := Connect(dbPath)
+	database, err := ConnectMaster(dbPath)
 	if err != nil {
 		t.Fatalf("Expected no error connecting to DB, got %v", err)
 	}
 	defer database.Conn.Close()
 
-	// Verify tables are created
-	rows, err := database.Conn.Query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('artists', 'albums', 'tracks');")
-	if err != nil {
-		t.Fatalf("Expected no error querying schema, got %v", err)
-	}
-	defer rows.Close()
-
-	count := 0
-	for rows.Next() {
-		count++
-	}
-
-	if count != 3 {
-		t.Errorf("Expected 3 tables created, got %d", count)
+	// Verify key tables are created in the centralized schema
+	tables := []string{"users", "artists", "albums", "tracks", "user_tracks", "playlists"}
+	for _, table := range tables {
+		var name string
+		err := database.Conn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name = ?;", table).Scan(&name)
+		if err != nil {
+			t.Errorf("Table %s was not created", table)
+		}
 	}
 }

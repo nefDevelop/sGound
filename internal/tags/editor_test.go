@@ -8,15 +8,8 @@ import (
 	"time"
 )
 
-func setupTestDB() *db.Database {
-	database, _ := db.Connect(":memory:")
-	database.Conn.Exec("CREATE TABLE IF NOT EXISTS artists (id TEXT PRIMARY KEY, name TEXT NOT NULL)")
-	database.Conn.Exec("CREATE TABLE IF NOT EXISTS albums (id TEXT PRIMARY KEY, artist_id TEXT NOT NULL, title TEXT NOT NULL, year INTEGER)")
-	database.Conn.Exec(`CREATE TABLE IF NOT EXISTS tracks (
-		id TEXT PRIMARY KEY, album_id TEXT NOT NULL, title TEXT NOT NULL, 
-		track_num INTEGER, disc_num INTEGER, path TEXT NOT NULL, 
-		format TEXT, genre TEXT, bit_rate INTEGER, file_mtime INTEGER
-	)`)
+func setupTestDB() *db.MasterDatabase {
+	database, _ := db.ConnectMaster(":memory:")
 	return database
 }
 

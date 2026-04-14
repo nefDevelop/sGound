@@ -22,7 +22,7 @@ func TestGetArtistsEmpty(t *testing.T) {
 	defer mDB.Conn.Close()
 
 	// Mock user for test
-	mDB.CreateUser("admin", "hash", "rw", dbPath)
+	mDB.CreateUser("admin", "hash", "rw", dbPath, "*")
 	mDB.CreateAPIKey("test-key", "admin", "rw", "test")
 
 	cfg := &config.Config{MusicPath: "/tmp", Port: "8088"}
@@ -56,7 +56,7 @@ func TestStreamNotFound(t *testing.T) {
 	mDB, _ := db.ConnectMaster(dbPath)
 	defer mDB.Conn.Close()
 
-	mDB.CreateUser("admin", "hash", "rw", dbPath)
+	mDB.CreateUser("admin", "hash", "rw", dbPath, "*")
 	mDB.CreateAPIKey("test-key", "admin", "rw", "test")
 
 	cfg := &config.Config{MusicPath: "/tmp", Port: "8088"}
@@ -89,9 +89,8 @@ func TestStreamTranscoding(t *testing.T) {
 	mDB, _ := db.ConnectMaster(dbPath)
 	defer mDB.Conn.Close()
 
-	mDB.CreateUser("admin", "hash", "rw", dbPath)
+	mDB.CreateUser("admin", "hash", "rw", dbPath, "*")
 	mDB.CreateAPIKey("test-key", "admin", "rw", "test")
-	userDB, _ := db.Connect(dbPath) // Same path for test simplicity
 	
 	// Insert a dummy track
 	tempMusic, _ := os.CreateTemp("", "test-*.mp3")
@@ -99,7 +98,7 @@ func TestStreamTranscoding(t *testing.T) {
 	tempMusic.Close()
 	defer os.Remove(tempMusicPath)
 
-	userDB.Conn.Exec("INSERT INTO tracks (id, album_id, title, track_num, disc_num, path, duration, genre, size, format, bit_rate, sample_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	mDB.Conn.Exec("INSERT INTO tracks (id, album_id, title, track_num, disc_num, path, duration, genre, size, format, bit_rate, sample_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		"test-track", "album-1", "Test Track", 1, 1, tempMusicPath, 10, "Genre", 100, "mp3", 128000, 44100)
 
 	cfg := &config.Config{MusicPath: "/tmp", Port: "8088"}

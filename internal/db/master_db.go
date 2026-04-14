@@ -2,9 +2,15 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"sgound/internal/models"
+
+	_ "modernc.org/sqlite"
 )
 
 type MasterDatabase struct {
@@ -16,6 +22,7 @@ type User struct {
 	PasswordHash string
 	Permissions  string // "r" or "rw"
 	DBPath       string
+	AllowedPaths string // Comma-separated list of paths, or "*" for all
 }
 
 type APIKeyInfo struct {
@@ -54,7 +61,8 @@ func (db *MasterDatabase) initSchema() error {
 		username TEXT PRIMARY KEY,
 		password_hash TEXT NOT NULL,
 		permissions TEXT NOT NULL,
-		db_path TEXT NOT NULL
+		db_path TEXT NOT NULL,
+		allowed_paths TEXT DEFAULT '*'
 	);
 
 	CREATE TABLE IF NOT EXISTS artists (
@@ -150,20 +158,23 @@ func (db *MasterDatabase) initSchema() error {
 
 	// Migraciones básicas
 	db.Conn.Exec("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT 'r'")
+	db.Conn.Exec("ALTER TABLE users ADD COLUMN allowed_paths TEXT DEFAULT '*'")
 	db.Conn.Exec("ALTER TABLE tracks ADD COLUMN replay_gain REAL DEFAULT 0.0")
 
 	return nil
 }
 
-func (db *MasterDatabase) CreateUser(username, passwordHash, permissions, userDBPath string) error {
+func (db *MasterDatabase) CreateUser(username, passwordHash, permissions, userDBPath, allowedPaths string) error {
 	// Asegurar que el directorio de la DB del usuario existe
-	dir := filepath.Dir(userDBPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
+	if userDBPath != "" {
+		dir := filepath.Dir(userDBPath)
+		os.MkdirAll(dir, 0755)
 	}
 
-	_, err := db.Conn.Exec("INSERT INTO users (username, password_hash, permissions, db_path) VALUES (?, ?, ?, ?)", 
-		username, passwordHash, permissions, userDBPath)
+	if allowedPaths == "" { allowedPaths = "*" }
+
+	_, err := db.Conn.Exec("INSERT INTO users (username, password_hash, permissions, db_path, allowed_paths) VALUES (?, ?, ?, ?, ?)", 
+		username, passwordHash, permissions, userDBPath, allowedPaths)
 	return err
 }
 
@@ -219,7 +230,7 @@ func (db *MasterDatabase) GetAPIKeyInfo(key string) (*APIKeyInfo, error) {
 }
 
 func (db *MasterDatabase) GetUsers() ([]User, error) {
-	rows, err := db.Conn.Query("SELECT username, permissions, db_path FROM users")
+	rows, err := db.Conn.Query("SELECT username, permissions, db_path, allowed_paths FROM users")
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +239,7 @@ func (db *MasterDatabase) GetUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.Username, &u.Permissions, &u.DBPath); err != nil {
+		if err := rows.Scan(&u.Username, &u.Permissions, &u.DBPath, &u.AllowedPaths); err != nil {
 			continue
 		}
 		users = append(users, u)
@@ -238,8 +249,8 @@ func (db *MasterDatabase) GetUsers() ([]User, error) {
 
 func (db *MasterDatabase) GetUserByUsername(username string) (*User, error) {
 	u := &User{}
-	err := db.Conn.QueryRow("SELECT username, password_hash, permissions, db_path FROM users WHERE username = ?", username).
-		Scan(&u.Username, &u.PasswordHash, &u.Permissions, &u.DBPath)
+	err := db.Conn.QueryRow("SELECT username, password_hash, permissions, db_path, allowed_paths FROM users WHERE username = ?", username).
+		Scan(&u.Username, &u.PasswordHash, &u.Permissions, &u.DBPath, &u.AllowedPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -371,9 +382,9 @@ func (db *MasterDatabase) UpdateTrackUserData(username, trackID string, rating i
 	return err
 }
 
-func (db *MasterDatabase) CreatePlaylist(username, id, name, description string) error {
-	_, err := db.Conn.Exec("INSERT INTO playlists (id, username, name, description) VALUES (?, ?, ?, ?)", 
-		id, username, name, description)
+func (db *MasterDatabase) CreatePlaylist(username, id, name, description string, isSmart int, ruleSQL string) error {
+	_, err := db.Conn.Exec("INSERT INTO playlists (id, username, name, description, is_smart, rule_sql) VALUES (?, ?, ?, ?, ?, ?)", 
+		id, username, name, description, isSmart, ruleSQL)
 	return err
 }
 

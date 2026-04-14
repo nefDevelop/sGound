@@ -32,7 +32,7 @@ func TestScanDirectoryEmpty(t *testing.T) {
 	f.Close()
 	defer os.Remove(dbPath)
 
-	database, _ := db.Connect(dbPath)
+	database, _ := db.ConnectMaster(dbPath)
 	defer database.Conn.Close()
 
 	s := NewScanner(database)

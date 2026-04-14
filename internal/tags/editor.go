@@ -88,10 +88,10 @@ func WritePersistentID(path string, id string) error {
 }
 
 type Editor struct {
-	DB *db.Database
+	DB *db.MasterDatabase
 }
 
-func NewEditor(database *db.Database) *Editor {
+func NewEditor(database *db.MasterDatabase) *Editor {
 	return &Editor{DB: database}
 }
 
