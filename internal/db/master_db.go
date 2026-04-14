@@ -42,7 +42,9 @@ type Settings struct {
 
 func ConnectMaster(dbPath string) (*MasterDatabase, error) {
 	slog.Info("Connecting to master database", "path", dbPath)
-	conn, err := sql.Open("sqlite", dbPath)
+	// Añadimos parámetros para mejorar la concurrencia y evitar bloqueos (Busy Timeout y modo WAL)
+	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", dbPath)
+	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -84,9 +86,9 @@ func (db *MasterDatabase) initSchema() error {
 		artist TEXT,
 		title TEXT NOT NULL,
 		track_num INTEGER,
-		track_total INTEGER,
+		track_total INTEGER DEFAULT 0,
 		disc_num INTEGER,
-		disc_total INTEGER,
+		disc_total INTEGER DEFAULT 0,
 		path TEXT NOT NULL,
 		duration INTEGER,
 		genre TEXT,
@@ -97,6 +99,7 @@ func (db *MasterDatabase) initSchema() error {
 		bit_rate INTEGER,
 		sample_rate INTEGER,
 		replay_gain REAL DEFAULT 0.0,
+		instrumental INTEGER DEFAULT 0,
 		file_mtime INTEGER,
 		file_hash TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -160,6 +163,7 @@ func (db *MasterDatabase) initSchema() error {
 	db.Conn.Exec("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT 'r'")
 	db.Conn.Exec("ALTER TABLE users ADD COLUMN allowed_paths TEXT DEFAULT '*'")
 	db.Conn.Exec("ALTER TABLE tracks ADD COLUMN replay_gain REAL DEFAULT 0.0")
+	db.Conn.Exec("ALTER TABLE tracks ADD COLUMN instrumental INTEGER DEFAULT 0")
 
 	return nil
 }

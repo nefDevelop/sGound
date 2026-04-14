@@ -122,9 +122,10 @@
 
       // If progress increased significantly, refresh views
       if (data.scanning && data.processed > prevProcessed) {
-        // Only refresh every 10 new tracks to avoid overloading
-        if (data.processed % 10 === 0 || data.processed < 10) {
-           if (currentView === 'library') fetchTracks();
+        // Refresh periodically during scan
+        if (data.processed % 5 === 0 || data.processed < 10) {
+           if (currentView === 'library' || currentView === 'tracks') fetchTracks();
+           if (currentView === 'inbox') fetchInbox();
            if (currentView === 'dashboard' && dashRef) dashRef.refresh();
         }
       }
@@ -132,6 +133,7 @@
       if (wasScanning && !data.scanning) {
         fetchTracks();
         fetchPlaylists();
+        fetchInbox();
         if (dashRef) dashRef.refresh();
         showToast("Biblioteca actualizada: <b>" + data.processed + "</b> canciones", "success");
       }

@@ -23,7 +23,7 @@ func main() {
 	cfg := config.LoadConfig()
 
 	// Initialize Master Database
-	masterDB, err := db.ConnectMaster("master.db")
+	masterDB, err := db.ConnectMaster(cfg.DBPath)
 	if err != nil {
 		slog.Error("Failed to initialize master database", "error", err)
 		os.Exit(1)

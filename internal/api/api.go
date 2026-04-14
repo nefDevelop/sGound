@@ -1054,7 +1054,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		       t.size, t.format, t.bit_rate, t.sample_rate,
 		       t.composer, t.comment, t.status, 
 		       COALESCE(ut.rating, 0) as rating, 
-		       t.instrumental, t.track_total, t.disc_total,
+		       t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0),
 		       COALESCE(ut.play_count, 0) as play_count
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
@@ -2261,7 +2261,7 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''),
 		       a.name as artist, al.title as album, al.year as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
-		       t.composer, t.comment, t.instrumental, t.track_total, t.disc_total
+		       t.composer, t.comment, t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0)
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id`
@@ -2371,7 +2371,7 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 	}
 
 	var rows *sql.Rows
-	fields := "t.id, t.title, t.track_num, t.disc_num, t.duration, t.genre, a.name, al.title, al.year, COALESCE(ut.rating, 0), t.composer, t.comment, t.instrumental, t.track_total, t.disc_total"
+	fields := "t.id, t.title, t.track_num, t.disc_num, t.duration, t.genre, a.name, al.title, al.year, COALESCE(ut.rating, 0), t.composer, t.comment, t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0)"
 	
 	if isSmart == 1 && ruleSQL != "" {
 		// Ejecutar regla dinámica

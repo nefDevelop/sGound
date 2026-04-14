@@ -228,9 +228,9 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 	_, err = s.DB.Conn.Exec(
 		`INSERT OR REPLACE INTO tracks 
-		(id, album_id, artist, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, rating, instrumental, replay_gain, file_mtime, file_hash) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		trackId, albumId, artistName, title, trackNum, discNum, path, duration, genre, fileSize, fileExt, composer, comment, 0, 44100, status, 0, instrumental, replayGain, fileMtime, hash,
+		(id, album_id, artist, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, instrumental, replay_gain, file_mtime, file_hash) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		trackId, albumId, artistName, title, trackNum, discNum, path, duration, genre, fileSize, fileExt, composer, comment, 0, 44100, status, instrumental, replayGain, fileMtime, hash,
 	)
 	return err
 }
