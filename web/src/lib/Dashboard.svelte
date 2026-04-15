@@ -395,17 +395,17 @@
   .gem-cover:hover .overlay { opacity: 1; }
 
   /* Discovery Mosaic */
-  .discovery-tile { grid-column: span 1; grid-row: span 2; }
-  .mosaic-grid { display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr); gap: 0.6rem; flex: 1; min-height: 240px; }
-  .mosaic-item { position: relative; border-radius: 16px; overflow: hidden; background: var(--surface-container-highest); border: 1px solid rgba(255,255,255,0.05); }
+  .discovery-tile { grid-column: span 2; grid-row: span 2; }
+  .mosaic-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; flex: 1; }
+  .mosaic-item { position: relative; border-radius: 16px; overflow: hidden; background: var(--surface-container-highest); border: 1px solid rgba(255,255,255,0.05); aspect-ratio: 1 / 1; }
   .mosaic-item img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.4s; }
   .mosaic-item:hover img { transform: scale(1.1); }
   .mosaic-item.i0 { grid-column: span 2; grid-row: span 2; }
-  .mosaic-item.i1 { grid-column: span 2; grid-row: span 1; }
+  .mosaic-item.i1 { grid-column: span 1; grid-row: span 1; }
   .mosaic-item.i2 { grid-column: span 1; grid-row: span 1; }
   .mosaic-item.i3 { grid-column: span 1; grid-row: span 1; }
-  .mosaic-item.i4 { grid-column: span 2; grid-row: span 1; }
-  .mosaic-item.i5 { grid-column: span 2; grid-row: span 1; }
+  .mosaic-item.i4 { grid-column: span 1; grid-row: span 1; }
+  .mosaic-item.i5 { grid-column: span 2; grid-row: span 2; }
 
   .tag-badge {
     position: absolute;
