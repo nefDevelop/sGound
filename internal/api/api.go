@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/dhowden/tag"
 	"github.com/disintegration/imaging"
@@ -42,6 +43,7 @@ type ScanStatus struct {
 type Server struct {
 	MasterDB *db.MasterDatabase
 	Config   *config.Config
+	externalMeta *metadata.ExternalMetadata
 
 	jwtSecret        []byte
 	scanStatuses     sync.Map // [string]*ScanStatus
@@ -63,13 +65,19 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 		masterDB.SetJWTSecret(secret)
 	}
 
-	return &Server{
+	s := &Server{
 		MasterDB:         masterDB,
 		Config:           cfg,
+		externalMeta:     metadata.NewExternalMetadata(),
 		jwtSecret:        []byte(secret),
 		scanStatuses:     sync.Map{},
 		organizeStatuses: sync.Map{},
 	}
+
+	// Iniciar enriquecimiento de artistas al arrancar
+	s.EnrichArtists()
+
+	return s
 }
 
 type contextKey string
@@ -498,6 +506,47 @@ func (s *Server) extractID(r *http.Request, prefix string) string {
 	return id
 }
 
+func (s *Server) EnrichArtists() {
+	go func() {
+		slog.Info("🚀 Background artist enrichment started")
+		rows, err := s.MasterDB.Conn.Query("SELECT id, name FROM artists WHERE (image_url IS NULL OR image_url = '') OR (bio IS NULL OR bio = '') OR (tags IS NULL OR tags = '')")
+		if err != nil {
+			slog.Error("Failed to query artists for enrichment", "error", err)
+			return
+		}
+		defer rows.Close()
+
+		var artists []struct{ ID, Name string }
+		for rows.Next() {
+			var a struct{ ID, Name string }
+			if err := rows.Scan(&a.ID, &a.Name); err == nil {
+				artists = append(artists, a)
+			}
+		}
+
+		if len(artists) == 0 {
+			slog.Info("✨ All artists are already enriched")
+			return
+		}
+
+		slog.Info("📈 Enrolling artists for enrichment", "count", len(artists))
+
+		for _, a := range artists {
+			ext, err := s.externalMeta.GetArtistInfo(a.Name)
+			if err == nil && ext != nil {
+				tagsStr := strings.Join(ext.Tags, ",")
+				similarStr := strings.Join(ext.Similar, ",")
+				_, _ = s.MasterDB.Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?", 
+					ext.Image, ext.Biography, tagsStr, similarStr, a.ID)
+				slog.Debug("Artist enriched", "name", a.Name)
+			}
+			// Wait to avoid Wikipedia/Last.fm rate limits
+			time.Sleep(1500 * time.Millisecond)
+		}
+		slog.Info("🏁 Background enrichment finished")
+	}()
+}
+
 func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -521,6 +570,8 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			status.Scanning = false
 			s.scanStatuses.Store("global", status)
+			// Trigger enrichment for new artists
+			s.EnrichArtists()
 		}()
 		if err := sc.ScanDirectory(s.Config.MusicPath); err != nil {
 			slog.Error("Global scan failed", "error", err)
@@ -578,12 +629,12 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := fmt.Sprintf(`
-		SELECT ar.id, ar.name, COUNT(DISTINCT al.id) as album_count
+		SELECT ar.id, ar.name, COUNT(DISTINCT al.id) as album_count, COALESCE(ar.image_url, '')
 		FROM artists ar
 		JOIN albums al ON ar.id = al.artist_id
 		JOIN tracks t ON al.id = t.album_id
 		%s
-		GROUP BY ar.id, ar.name
+		GROUP BY ar.id, ar.name, ar.image_url
 		ORDER BY ar.name`, whereClause)
 
 	rows, err := s.getDB(r).Conn.Query(query, args...)
@@ -596,7 +647,7 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 	var artists []models.Artist
 	for rows.Next() {
 		var a models.Artist
-		if err := rows.Scan(&a.ID, &a.Name, &a.AlbumCount); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.AlbumCount, &a.ImageURL); err != nil {
 			continue
 		}
 		artists = append(artists, a)
@@ -626,7 +677,8 @@ func (s *Server) handleArtistActions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http.Request) {
 	var name string
-	err := s.getDB(r).Conn.QueryRow("SELECT name FROM artists WHERE id = ?", artistID).Scan(&name)
+	var cachedImage, cachedBio, cachedTags, cachedSimilar sql.NullString
+	err := s.getDB(r).Conn.QueryRow("SELECT name, image_url, bio, tags, similar FROM artists WHERE id = ?", artistID).Scan(&name, &cachedImage, &cachedBio, &cachedTags, &cachedSimilar)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -636,10 +688,39 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT id) FROM albums WHERE artist_id = ?", artistID).Scan(&albumCount)
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks t JOIN albums a ON t.album_id = a.id WHERE a.artist_id = ? AND t.status = 'active'", artistID).Scan(&trackCount)
 
+	biography := cachedBio.String
+	externalImage := cachedImage.String
+	tags := strings.Split(cachedTags.String, ",")
+	similar := strings.Split(cachedSimilar.String, ",")
+
+	// Clean empty slices from Split
+	if cachedTags.String == "" { tags = []string{} }
+	if cachedSimilar.String == "" { similar = []string{} }
+
+	// If no cached info or tags, fetch it
+	if biography == "" || externalImage == "" || len(tags) == 0 {
+		ext, _ := s.externalMeta.GetArtistInfo(name)
+		if ext != nil {
+			biography = ext.Biography
+			externalImage = ext.Image
+			tags = ext.Tags
+			similar = ext.Similar
+			// Update cache in DB
+			tagsStr := strings.Join(tags, ",")
+			similarStr := strings.Join(similar, ",")
+			_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET bio = ?, image_url = ?, tags = ?, similar = ? WHERE id = ?", 
+				biography, externalImage, tagsStr, similarStr, artistID)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	response := map[string]interface{}{
 		"id": artistID, "name": name, "albumCount": albumCount, "trackCount": trackCount,
-	})
+		"biography": biography, "imageUrl": externalImage,
+		"tags": tags, "similar": similar,
+	}
+
+	json.NewEncoder(w).Encode(response)
 }
 
 func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r *http.Request) {

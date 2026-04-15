@@ -69,9 +69,11 @@ func (db *MasterDatabase) initSchema() error {
 
 	CREATE TABLE IF NOT EXISTS artists (
 		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL
+		name TEXT NOT NULL,
+		image_url TEXT,
+		bio TEXT
 	);
-	
+
 	CREATE TABLE IF NOT EXISTS albums (
 		id TEXT PRIMARY KEY,
 		artist_id TEXT NOT NULL,
@@ -159,11 +161,16 @@ func (db *MasterDatabase) initSchema() error {
 		return err
 	}
 
-	// Migraciones básicas
+	// Migraciones básicas y nuevas columnas
 	db.Conn.Exec("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT 'r'")
 	db.Conn.Exec("ALTER TABLE users ADD COLUMN allowed_paths TEXT DEFAULT '*'")
 	db.Conn.Exec("ALTER TABLE tracks ADD COLUMN replay_gain REAL DEFAULT 0.0")
 	db.Conn.Exec("ALTER TABLE tracks ADD COLUMN instrumental INTEGER DEFAULT 0")
+	db.Conn.Exec("ALTER TABLE tracks ADD COLUMN rating INTEGER DEFAULT 0")
+	db.Conn.Exec("ALTER TABLE artists ADD COLUMN image_url TEXT")
+	db.Conn.Exec("ALTER TABLE artists ADD COLUMN bio TEXT")
+	db.Conn.Exec("ALTER TABLE artists ADD COLUMN tags TEXT")
+	db.Conn.Exec("ALTER TABLE artists ADD COLUMN similar TEXT")
 
 	return nil
 }

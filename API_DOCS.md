@@ -14,10 +14,26 @@ Base URL Nativa: `http://localhost:8088`
 **Ruta:** `/api/artists`  
 Devuelve una lista de todos los artistas únicos indexados en la base de datos.
 
+### Obtener detalles de un artista
+**Método:** `GET`  
+**Ruta:** `/api/artists/{artist_id}`  
+Devuelve información enriquecida del artista, incluyendo estadísticas de la biblioteca y metadatos externos.
+**Respuesta (JSON):** 
+```json
+{
+  "id": "...",
+  "name": "Nombre del Artista",
+  "albumCount": 5,
+  "trackCount": 42,
+  "biography": "Resumen biográfico de Wikipedia...",
+  "externalImage": "https://url-imagen-alta-resolucion.jpg"
+}
+```
+
 ### Obtener álbumes de un artista
 **Método:** `GET`  
 **Ruta:** `/api/artists/{artist_id}/albums`  
-Devuelve los álbumes asociados a un identificador de artista.
+Devuelve los álbumes asociados a un identificador de artista, ordenados por año descendente.
 
 ---
 

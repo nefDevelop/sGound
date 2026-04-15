@@ -27,6 +27,15 @@ components:
           type: string
         name:
           type: string
+        albumCount:
+          type: integer
+        trackCount:
+          type: integer
+        biography:
+          type: string
+        externalImage:
+          type: string
+          format: uri
     Album:
       type: object
       properties:
@@ -148,6 +157,23 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Artist'
+
+  /api/artists/{id}:
+    get:
+      summary: Obtener detalles enriquecidos de un artista
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Información detallada del artista
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artist'
 
   /api/artists/{id}/albums:
     get:

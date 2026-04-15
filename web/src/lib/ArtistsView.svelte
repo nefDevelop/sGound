@@ -28,22 +28,27 @@
   });
 
   function getAvatarUrl(artist) {
-    // Assuming there might be an endpoint or placeholder logic
-    // For now, let's use a placeholder if no image is available
     return `/api/artists/${artist.id}/image`; 
   }
 
-  function handleImageError(e) {
-    e.target.style.display = 'none';
-    e.target.nextElementSibling.style.display = 'flex';
+  function handleImageError(e, artist) {
+    // Si la imagen local falla y tenemos una URL externa, la probamos
+    if (artist.imageUrl && e.target.src !== artist.imageUrl) {
+      e.target.src = artist.imageUrl;
+    } else {
+      // Si todo falla, mostrar el fallback
+      e.target.style.display = 'none';
+      const fallback = e.target.nextElementSibling;
+      if (fallback) fallback.style.display = 'flex';
+    }
   }
 </script>
 
 <div class="artists-view" in:fade>
   <header class="section-header">
     <div class="texts">
-      <h1>Artists</h1>
-      <p class="subtitle">{artists.length} creators in your collection.</p>
+      <h1>Artistas</h1>
+      <p class="subtitle">{artists.length} creadores en tu colección.</p>
     </div>
   </header>
 
@@ -54,7 +59,7 @@
       <div class="faded-icon">
         <Icon name="users" size={64} />
       </div>
-      <p>No artists match your criteria.</p>
+      <p>No se han encontrado artistas.</p>
     </div>
   {:else}
     <div class="artist-grid">
@@ -64,14 +69,14 @@
             <img 
               src={getAvatarUrl(artist)} 
               alt={artist.name} 
-              onerror={handleImageError} 
+              onerror={(e) => handleImageError(e, artist)} 
             />
             <div class="avatar-fallback" style="display: none;">
               <Icon name="users" size={40} />
             </div>
           </div>
           <span class="artist-name">{artist.name}</span>
-          <span class="album-count">{artist.albumCount || 0} albums</span>
+          <span class="album-count">{artist.albumCount || 0} álbumes</span>
         </button>
       {/each}
     </div>
@@ -89,9 +94,6 @@
   }
 
   h1 { font-size: 2.5rem; font-weight: 950; letter-spacing: -1.5px; margin: 0; color: var(--text-main); }
-
-  .subtitle { color: var(--text-muted); font-size: 1.1rem; font-weight: 500; margin-top: 0.5rem; }
-
   .subtitle { color: var(--text-muted); font-size: 1.1rem; font-weight: 500; margin-top: 0.5rem; }
 
   .artist-grid {
@@ -102,7 +104,6 @@
 
   .artist-card {
     background: var(--surface-container);
-    border: 1px solid var(--border-color);
     padding: 1.8rem;
     border-radius: 32px;
     display: flex;
@@ -111,10 +112,9 @@
     text-align: center;
     cursor: pointer;
     transition: all 0.4s cubic-bezier(0.2, 0, 0, 1);
-    color: inherit;
     border: none;
     appearance: none;
-    -webkit-appearance: none;
+    color: inherit;
   }
   .artist-card:hover { transform: translateY(-8px); background: var(--surface-container-high); box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
 
@@ -154,7 +154,6 @@
   .empty-state { padding: 8rem 2rem; text-align: center; color: var(--text-muted); display: flex; flex-direction: column; align-items: center; gap: 1.5rem; }
 
   @media (max-width: 900px) {
-    .section-header { flex-direction: column; align-items: flex-start; gap: 1.5rem; }
     .artist-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1rem; }
     .artist-card { padding: 1.2rem; border-radius: 24px; }
     .avatar-container { width: 100px; height: 100px; }

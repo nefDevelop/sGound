@@ -179,10 +179,12 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		albumId = GenerateID(albumGroupingKey + albumName)
 	}
 
-	// EXTRACCIÓN DE DURACIÓN (Mejora: Usar ffprobe para precisión)
+	// EXTRACCIÓN DE DURACIÓN Y REPLAYGAIN (Usar ffprobe para precisión)
 	duration := 0
-	if val, err := getDurationWithFFprobe(path); err == nil {
-		duration = val
+	replayGain := 0.0
+	if data, err := getAudioMetadataWithFFprobe(path); err == nil {
+		duration = data.duration
+		replayGain = data.replayGain
 	}
 
 	// IDENTIFICACIÓN: Primero intentamos por persistente (pero de forma rápida)
@@ -235,17 +237,41 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	return err
 }
 
-func getDurationWithFFprobe(path string) (int, error) {
-	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path)
+type audioMetadata struct {
+	duration   int
+	replayGain float64
+}
+
+func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
+	// Pedimos duración y tags
+	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration:format_tags=REPLAYGAIN_TRACK_GAIN,replaygain_track_gain", "-of", "default=noprint_wrappers=1:nokey=1", path)
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, err
+		return audioMetadata{}, err
 	}
-	f, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
-	if err != nil {
-		return 0, err
+	
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	data := audioMetadata{}
+	
+	if len(lines) > 0 {
+		if dur, err := strconv.ParseFloat(lines[0], 64); err == nil {
+			data.duration = int(dur)
+		}
 	}
-	return int(f), nil
+	
+	// Buscar la ganancia en las líneas siguientes (puede variar la posición según el archivo)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasSuffix(line, " dB") {
+			line = strings.TrimSuffix(line, " dB")
+			if val, err := strconv.ParseFloat(line, 64); err == nil {
+				data.replayGain = val
+				break
+			}
+		}
+	}
+	
+	return data, nil
 }
 
 func GenerateID(input string) string {

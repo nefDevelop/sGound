@@ -894,9 +894,8 @@
           bind:progress
           bind:duration
           bind:currentTime
-          subView={playerSubView}
-          onedit={(track) => openEditor(track)}
-          onhide={handleReject}
+          bind:subView={playerSubView}
+          onedit={(track) => openEditor(track)}          onhide={handleReject}
           ondeletePhysical={handleDeletePhysical}
           onskipNext={() => handleSkipNext?.()}
           onskipBack={() => handleSkipBack?.()}
@@ -1164,14 +1163,26 @@
     margin: 0 !important;
   }
 
-  .app-layout.is-cinema .sidebar {
+  .app-layout.is-cinema .sidebar,
+  .app-layout.is-cinema .top-bar {
     display: none !important;
   }
 
-  .app-layout.is-cinema .content.full-player-view {
+  .app-layout.is-cinema .content {
     margin: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+    width: 100% !important;
+    height: 100vh !important;
     border: none !important;
     border-radius: 0 !important;
+  }
+
+  .app-layout.is-cinema .scroll-view {
+    padding: 0 !important;
+    margin: 0 !important;
+    height: 100vh !important;
+    overflow: hidden !important;
   }
 
   .top-bar {

@@ -266,6 +266,28 @@
           </select>
         </section>
       </div>
+
+      <div class="settings-card">
+        <h2>Audio & Playback</h2>
+        <section class="setting-item">
+          <div class="info">
+            <div class="title-with-help">
+              <h3>Normalización de Volumen</h3>
+              <div class="tooltip-wrap">
+                <Icon name="info" size={14} color="var(--text-muted)" />
+                <span class="tooltip">Aplica ReplayGain para que todas las canciones suenen al mismo nivel.</span>
+              </div>
+            </div>
+            <p>Utiliza FFmpeg para ajustar el volumen según los metadatos del archivo.</p>
+          </div>
+          <div class="control">
+            <label class="switch">
+              <input type="checkbox" bind:checked={config.replayGainEnabled} />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </section>
+      </div>
     </div>
 
     <div class="settings-column">
@@ -510,6 +532,39 @@
     transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
   }
   .save-btn:hover { transform: translateY(-4px); box-shadow: 0 10px 30px var(--primary-20); }
+
+  /* Switch UI */
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 52px;
+    height: 32px;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background-color: var(--surface-container-highest);
+    transition: .4s;
+    border-radius: 34px;
+  }
+  .slider:before {
+    position: absolute;
+    content: "";
+    height: 24px;
+    width: 24px;
+    left: 4px;
+    bottom: 4px;
+    background-color: var(--text-muted);
+    transition: .4s;
+    border-radius: 50%;
+  }
+  input:checked + .slider { background-color: var(--primary); }
+  input:checked + .slider:before {
+    transform: translateX(20px);
+    background-color: white;
+  }
 
   @media (max-width: 768px) {
     .settings-card { padding: 1.5rem; border-radius: 24px; gap: 2rem; }

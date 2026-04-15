@@ -6,6 +6,7 @@ type Artist struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	AlbumCount int    `json:"albumCount"`
+	ImageURL   string `json:"imageUrl,omitempty"`
 }
 
 type Album struct {
