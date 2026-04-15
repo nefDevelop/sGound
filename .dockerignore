@@ -1,0 +1,12 @@
+node_modules
+web/node_modules
+dist
+web/dist
+.git
+.gitignore
+*.db
+*.db-shm
+*.db-wal
+sgound-server
+music/
+data/

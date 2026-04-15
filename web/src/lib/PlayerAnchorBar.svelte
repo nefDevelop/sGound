@@ -55,6 +55,9 @@
           <button class="menu-item" class:active={view === 'queue'} onclick={() => selectView('queue')}>
             <Icon name="list" size={18} /> Cola
           </button>
+          <button class="menu-item" class:active={view === 'cinema'} onclick={() => selectView('cinema')}>
+            <Icon name="maximize" size={18} /> Cine
+          </button>
         </div>
       {/if}
       <button class="view-toggle-btn" onclick={() => showMenu = !showMenu} title="Cambiar vista">

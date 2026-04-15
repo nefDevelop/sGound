@@ -289,6 +289,44 @@
                 </div>
               {/if}
             </div>
+          {:else if subView === 'cinema'}
+            <div class="view-panel cinema-panel" in:fade>
+              <div class="cinema-background">
+                <img src="/api/cover/{currentPlaying.id}" alt="" class="bg-blur-image" />
+                <div class="bg-overlay"></div>
+              </div>
+
+              <div class="cinema-content">
+                <div class="cinema-artwork-box">
+                   <div class="artwork-glare"></div>
+                   <img src="/api/cover/{currentPlaying.id}" alt="" class="cinema-artwork" />
+                </div>
+                
+                <div class="cinema-meta">
+                  <h1 class="cinema-title">{currentPlaying.title}</h1>
+                  <p class="cinema-artist">{currentPlaying.artist}</p>
+                </div>
+
+                <div class="cinema-controls">
+                  <div class="cinema-timeline">
+                    <span class="time-small">{formatTime(currentTime)}</span>
+                    <div class="modern-slider progress-slider-mini">
+                      <input type="range" class="knobless-range" min="0" max="100" value={progress} oninput={handleSeek} />
+                      <div class="slider-fill" style="width: {progress}%"></div>
+                    </div>
+                    <span class="time-small">{formatTime(duration)}</span>
+                  </div>
+                  
+                  <div class="cinema-btns">
+                    <button class="c-btn" onclick={onskipBack}><Icon name="skipBack" size={28} /></button>
+                    <button class="c-btn play-c" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()}>
+                      <Icon name={audioRef?.paused ? 'play' : 'pause'} size={44} />
+                    </button>
+                    <button class="c-btn" onclick={onskipNext}><Icon name="skipForward" size={28} /></button>
+                  </div>
+                </div>
+              </div>
+            </div>
           {/if}
         </div>
       </div>
@@ -491,5 +529,108 @@
   .lyric-line.active { color: white; transform: scale(1.05); }
 
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Cinema Mode Styles */
+  .cinema-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    background: black;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .cinema-background {
+    position: absolute;
+    inset: -50px;
+    z-index: 1;
+  }
+
+  .bg-blur-image {
+    width: 110%;
+    height: 110%;
+    object-fit: cover;
+    filter: blur(80px) brightness(0.4) saturate(1.5);
+    transform: scale(1.1);
+    animation: drift 30s infinite alternate linear;
+  }
+
+  .bg-overlay {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at center, rgba(0,0,0,0) 0%, rgba(0,0,0,0.4) 100%);
+  }
+
+  @keyframes drift {
+    from { transform: scale(1.1) translate(-2%, -2%) rotate(0deg); }
+    to { transform: scale(1.2) translate(2%, 2%) rotate(2deg); }
+  }
+
+  .cinema-content {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3rem;
+    width: 100%;
+    max-width: 1200px;
+    padding: 2rem;
+  }
+
+  .cinema-artwork-box {
+    position: relative;
+    width: 40vh;
+    height: 40vh;
+    max-width: 450px;
+    max-height: 450px;
+    border-radius: 32px;
+    box-shadow: 0 50px 100px -20px rgba(0,0,0,0.8), 0 0 40px rgba(255,255,255,0.05);
+    overflow: hidden;
+    transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .cinema-artwork-box:hover { transform: scale(1.02); }
+
+  .cinema-artwork { width: 100%; height: 100%; object-fit: cover; }
+  
+  .artwork-glare {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 50%);
+    z-index: 2;
+  }
+
+  .cinema-meta { text-align: center; }
+  .cinema-title { font-size: 3.5rem; font-weight: 950; letter-spacing: -2px; margin: 0; line-height: 1.1; text-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+  .cinema-artist { font-size: 1.4rem; font-weight: 700; opacity: 0.6; margin: 0.8rem 0 0 0; letter-spacing: -0.5px; }
+
+  .cinema-controls {
+    width: 100%;
+    max-width: 600px;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    margin-top: 1rem;
+    opacity: 0.3;
+    transition: opacity 0.3s ease;
+  }
+  .cinema-panel:hover .cinema-controls { opacity: 1; }
+
+  .cinema-timeline { display: flex; align-items: center; gap: 1.5rem; width: 100%; }
+  .time-small { font-size: 0.8rem; font-weight: 800; opacity: 0.5; font-variant-numeric: tabular-nums; }
+  .progress-slider-mini { flex: 1; height: 4px; background: rgba(255,255,255,0.1); border-radius: 10px; }
+
+  .cinema-btns { display: flex; align-items: center; justify-content: center; gap: 3rem; }
+  .c-btn { background: none; border: none; color: white; opacity: 0.6; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; }
+  .c-btn:hover { opacity: 1; transform: scale(1.1); }
+  .play-c { background: rgba(255,255,255,0.1); width: 80px; height: 80px; border-radius: 50%; backdrop-filter: blur(10px); }
+  .play-c:hover { background: rgba(255,255,255,0.2); }
+
+  @media (max-width: 768px) {
+    .cinema-title { font-size: 2.2rem; }
+    .cinema-artwork-box { width: 30vh; height: 30vh; }
+    .cinema-content { gap: 2rem; }
+  }
 </style>
->

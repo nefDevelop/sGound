@@ -9,13 +9,20 @@ RUN npm run build
 # Stage 2: Build the backend
 FROM golang:1.22-alpine3.19 AS backend-builder
 WORKDIR /app
-# Optimize Go dependency caching
+
+# Step 1: Cache Go modules
 COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
-# Copy frontend dist from previous stage
+
+# Step 2: Copy only necessary backend files
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+
+# Step 3: Copy frontend dist from previous stage
 COPY --from=frontend-builder /web/dist /app/web/dist
-RUN go build -o sgound-server ./cmd/sgound
+
+# Step 4: Build binary (statically linked and stripped)
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o sgound-server ./cmd/sgound
 
 # Stage 3: Runtime
 FROM alpine:3.19

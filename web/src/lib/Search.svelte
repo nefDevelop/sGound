@@ -121,7 +121,7 @@
             <div class="section">
               <div class="section-header">Canciones</div>
               {#each results.tracks as track}
-                <div class="result-item" onclick={() => handleSelect('track', track)}>
+                <div class="result-item" role="button" tabindex="0" onclick={() => handleSelect('track', track)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect('track', track); }}}>
                   <div class="icon-box">
                     <Icon name="music" size={16} />
                   </div>
@@ -141,7 +141,7 @@
             <div class="section">
               <div class="section-header">Álbumes</div>
               {#each results.albums as album}
-                <div class="result-item" onclick={() => handleSelect('album', album)}>
+                <div class="result-item" role="button" tabindex="0" onclick={() => handleSelect('album', album)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect('album', album); }}}>
                   <div class="icon-box disc">
                     <Icon name="disc" size={16} />
                   </div>
@@ -158,7 +158,7 @@
             <div class="section">
               <div class="section-header">Artistas</div>
               {#each results.artists as artist}
-                <div class="result-item" onclick={() => handleSelect('artist', artist)}>
+                <div class="result-item" role="button" tabindex="0" onclick={() => handleSelect('artist', artist)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect('artist', artist); }}}>
                   <div class="icon-box artist">
                     <Icon name="user" size={16} />
                   </div>
@@ -174,7 +174,7 @@
             <div class="section">
               <div class="section-header">Géneros</div>
               {#each results.genres as genre}
-                <div class="result-item" onclick={() => handleSelect('genre', genre)}>
+                <div class="result-item" role="button" tabindex="0" onclick={() => handleSelect('genre', genre)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect('genre', genre); }}}>
                   <div class="icon-box genre">
                     <Icon name="layers" size={16} />
                   </div>
@@ -190,7 +190,7 @@
             <div class="section">
               <div class="section-header">Playlists</div>
               {#each results.playlists as pl}
-                <div class="result-item" onclick={() => handleSelect('playlist', pl)}>
+                <div class="result-item" role="button" tabindex="0" onclick={() => handleSelect('playlist', pl)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect('playlist', pl); }}}>
                   <div class="icon-box playlist">
                     <Icon name="list" size={16} />
                   </div>

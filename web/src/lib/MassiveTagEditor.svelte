@@ -126,6 +126,10 @@
     }
   }
 
+  function focusOnMount(node) {
+    node.focus();
+  }
+
   let initialized = $state(false);
   // Pre-poblar campos si son comunes a todos los tracks (solo al abrir)
   $effect(() => {
@@ -396,7 +400,7 @@
                           bind:value={track.title} 
                           onkeydown={handleEditKeydown}
                           onblur={() => { editingTrackId = null; editingField = null; }}
-                          autoFocus
+                          use:focusOnMount
                           class="inline-edit"
                         />
                       {:else}

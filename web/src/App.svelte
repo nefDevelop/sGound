@@ -84,6 +84,20 @@
   let duration = $state(0);
   let currentTime = $state(0);
 
+  // Dynamic Favicon Effect
+  $effect(() => {
+    const favicon = document.querySelector('link[rel="icon"]');
+    if (!favicon) return;
+    
+    if (currentPlaying) {
+      favicon.href = `/api/cover/${currentPlaying.id}`;
+      favicon.type = "image/jpeg";
+    } else {
+      favicon.href = "/favicons.svg";
+      favicon.type = "image/svg+xml";
+    }
+  });
+
   let scanStatus = $state({ scanning: false, processed: 0, inboxCount: 0 });
   let pollingInterval = null;
   let dashRef = $state(null);
@@ -585,7 +599,7 @@
       loadTheme(); 
     }} />
 {:else}
-<main class="app-layout">
+<main class="app-layout" class:is-cinema={currentView === 'fullplayer' && playerSubView === 'cinema'}>
   <aside class="sidebar">
     <div class="brand">
       <div class="logo">
@@ -1139,6 +1153,25 @@
     width: auto;
     overflow: visible;
     z-index: 100;
+    transition: all 0.4s ease;
+  }
+
+  /* Cinema Mode Overrides */
+  .app-layout.is-cinema .player-area {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+  }
+
+  .app-layout.is-cinema .sidebar {
+    display: none !important;
+  }
+
+  .app-layout.is-cinema .content.full-player-view {
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
   }
 
   .top-bar {

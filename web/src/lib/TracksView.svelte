@@ -168,6 +168,10 @@
     suggestions = [];
   }
 
+  function focusOnMount(node) {
+    node.focus();
+  }
+
   function handleKeyDown(e) {
     if (e.key === 'Enter') {
       if (suggestionIdx >= 0) {
@@ -316,7 +320,7 @@
                           oninput={handleValueChange}
                           onkeydown={handleKeyDown}
                           onblur={saveEdit}
-                          autoFocus 
+                          use:focusOnMount 
                         />
                       </div>
                     {:else}
@@ -339,12 +343,12 @@
                       oninput={handleValueChange}
                       onkeydown={handleKeyDown}
                       onblur={saveEdit}
-                      autoFocus 
+                      use:focusOnMount 
                     />
                     {#if suggestions.length > 0}
                       <div class="suggestions-popover">
                         {#each suggestions as s, i}
-                          <div class="suggestion-item" class:active={i === suggestionIdx} onmousedown={() => { editingValue = s; saveEdit(); }}>{s}</div>
+                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); editingValue = s; saveEdit(); }}>{s}</button>
                         {/each}
                       </div>
                     {/if}
@@ -376,12 +380,12 @@
                       oninput={handleValueChange}
                       onkeydown={handleKeyDown}
                       onblur={saveEdit}
-                      autoFocus 
+                      use:focusOnMount 
                     />
                     {#if suggestions.length > 0}
                       <div class="suggestions-popover">
                         {#each suggestions as s, i}
-                          <div class="suggestion-item" class:active={i === suggestionIdx} onmousedown={() => { editingValue = s; saveEdit(); }}>{s}</div>
+                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); editingValue = s; saveEdit(); }}>{s}</button>
                         {/each}
                       </div>
                     {/if}
@@ -417,7 +421,7 @@
                       oninput={handleValueChange}
                       onkeydown={handleKeyDown}
                       onblur={saveEdit}
-                      autoFocus 
+                      use:focusOnMount 
                     />
                   </div>
                 {:else}
