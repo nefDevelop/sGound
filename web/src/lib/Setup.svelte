@@ -42,7 +42,10 @@
 <div class="setup-page">
   <div class="setup-card glass">
     <div class="brand">
-      <div class="logo"></div>
+      <div class="logo">
+        <div class="logo-icon"></div>
+      </div>
+      <div class="brand-name">Sgound</div>
       <h1>Hola {username}</h1>
       <p>Configura tu nueva contraseña para comenzar</p>
     </div>
@@ -109,7 +112,34 @@
   }
 
   .brand { text-align: center; margin-bottom: 3rem; }
-  .logo { transform: rotate(-10deg); width: 80px; height: 80px; background: var(--primary); border-radius: 24px; margin: 0 auto 2rem; box-shadow: 0 15px 40px var(--primary-10); }
+  .logo { 
+    width: 80px; height: 80px; 
+    background: var(--primary); 
+    border-radius: 24px; 
+    margin: 0 auto 1rem; 
+    box-shadow: 0 15px 40px var(--primary-10); 
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    transform: rotate(-10deg);
+  }
+  .logo-icon {
+    width: 48px;
+    height: 48px;
+    background-color: currentColor;
+    -webkit-mask: url('/icons.svg?v=2') no-repeat center / contain;
+    mask: url('/icons.svg?v=2') no-repeat center / contain;
+  }
+  
+  .brand-name {
+    font-size: 1.5rem;
+    font-weight: 950;
+    letter-spacing: -1px;
+    margin-bottom: 2.5rem;
+    color: var(--text-main);
+    text-transform: none;
+  }
   
   h1 { font-size: 2.2rem; font-weight: 900; letter-spacing: -1.5px; margin: 0; color: white; }
   p { color: var(--text-muted); font-weight: 600; margin-top: 0.8rem; font-size: 1.1rem; }

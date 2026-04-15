@@ -182,6 +182,10 @@
         fetchPlaylists();
         checkScanStatus();
       }
+
+      // 4. Mantener un chequeo periódico lento (15s) para detectar escaneos de fondo
+      setInterval(checkScanStatus, 15000);
+
     } catch (e) {
       console.error("Initialization check failed:", e);
     }
@@ -278,6 +282,7 @@
       const res = await fetch("/api/tracks");
       if (!res.ok) throw new Error("Failed to fetch tracks");
       tracks = (await res.json()) || [];
+      error = null;
     } catch (e) {
       error = e.message;
     }
@@ -729,7 +734,13 @@
 
     <div class="scroll-view">
       {#if error}
-        <p class="error">{error}</p>
+        <div class="error-state">
+          <Icon name="alertCircle" size={48} color="var(--primary)" />
+          <p class="error-msg">{error}</p>
+          <button class="retry-btn" onclick={fetchTracks}>
+            <Icon name="refreshCw" size={16} /> Reintentar carga
+          </button>
+        </div>
       {:else if currentView === "dashboard"}
         <Dashboard 
           bind:this={dashRef}
@@ -1180,7 +1191,50 @@
   }
   .scroll-view::-webkit-scrollbar-track { background: transparent; }
 
-  .error { color: #f87171; background: rgba(248, 113, 113, 0.1); padding: 1rem; border-radius: 12px; margin: 1rem; }
+  .error-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    padding: 4rem 2rem;
+    text-align: center;
+    background: rgba(248, 113, 113, 0.05);
+    border: 1px dashed rgba(248, 113, 113, 0.2);
+    border-radius: 24px;
+    margin: 2rem;
+    animation: fadeIn 0.4s ease;
+  }
+  .error-msg {
+    color: #fca5a5;
+    font-weight: 700;
+    font-size: 1.1rem;
+    margin: 0;
+    max-width: 400px;
+    line-height: 1.4;
+  }
+  .retry-btn {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 0.8rem 1.8rem;
+    border-radius: 14px;
+    font-weight: 800;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+    box-shadow: 0 4px 15px var(--primary-20);
+  }
+  .retry-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px var(--primary-30);
+    background: var(--primary-high);
+  }
+  .retry-btn:active {
+    transform: translateY(0);
+  }
   .empty-state { text-align: center; margin-top: 6rem; color: var(--text-muted); }
 
   .scan-status-item {

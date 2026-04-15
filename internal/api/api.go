@@ -279,14 +279,6 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Trigger initial global scan if it's the first user
-	userCount, _ := s.MasterDB.GetUserCount()
-	if userCount == 1 {
-		go func() {
-			sc := scanner.NewScanner(s.MasterDB)
-			sc.ScanDirectory(s.Config.MusicPath)
-		}()
-	}
 
 	// Automatic Session: Set JWT cookie so user lands directly in dashboard
 	token, err := auth.GenerateJWT(body.Username, s.jwtSecret)
@@ -1031,6 +1023,12 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	whereClause := "WHERE 1=1"
 	args := []interface{}{}
 	
+	pathFilter, pathArgs := s.getPathFilter(user)
+	if pathFilter != "" {
+		whereClause += " AND " + pathFilter
+		args = append(args, pathArgs...)
+	}
+
 	if status != "all" {
 		whereClause += " AND t.status = ?"
 		args = append(args, status)
@@ -1668,33 +1666,53 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	
 	// Contadores básicos - Mezcla de Global y Personal
 	var tTracks, tAlbums, tArtists, tPlaylists, tGenres int
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active'").Scan(&tTracks)
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT album_id) FROM tracks WHERE status = 'active'").Scan(&tAlbums)
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT ar.id) FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id WHERE t.status = 'active'").Scan(&tArtists)
+	pathFilter, pathArgs := s.getPathFilter(user)
+	whereActive := "WHERE status = 'active'"
+	if pathFilter != "" {
+		whereActive += " AND " + pathFilter
+	}
+
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks t "+whereActive, pathArgs...).Scan(&tTracks)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT album_id) FROM tracks t " + whereActive, pathArgs...).Scan(&tAlbums)
+	
+	artistQuery := fmt.Sprintf(`SELECT COUNT(DISTINCT ar.id) FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id %s AND t.status = 'active'`, "WHERE 1=1")
+	if pathFilter != "" {
+		artistQuery = fmt.Sprintf(`SELECT COUNT(DISTINCT ar.id) FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id WHERE %s AND t.status = 'active'`, pathFilter)
+	}
+	s.getDB(r).Conn.QueryRow(artistQuery, pathArgs...).Scan(&tArtists)
+	
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM playlists WHERE username = ?", user.Username).Scan(&tPlaylists)
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT genre) FROM tracks WHERE status = 'active' AND genre != ''").Scan(&tGenres)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT genre) FROM tracks t " + whereActive + " AND genre != ''", pathArgs...).Scan(&tGenres)
 	stats["totalTracks"] = tTracks
 	stats["totalAlbums"] = tAlbums
 	stats["totalArtists"] = tArtists
 	stats["totalPlaylists"] = tPlaylists
 	stats["totalGenres"] = tGenres
 
-	// Inbox count (pendientes de aprobar compartidos)
+	// Inbox count (pendientes de aprobar filtrados por path)
 	var pendingCount int
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&pendingCount)
+	wherePending := "WHERE status = 'pending'"
+	if pathFilter != "" {
+		wherePending += " AND " + pathFilter
+	}
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks t " + wherePending, pathArgs...).Scan(&pendingCount)
 	stats["inboxCount"] = pendingCount
 
 	// Joyas olvidadas (Personales: pistas que el usuario ha escuchado poco)
 	gems := make([]map[string]interface{}, 0)
-	rows, err := s.getDB(r).Conn.Query(`
+	whereGems := "WHERE t.status = 'active'"
+	if pathFilter != "" {
+		whereGems += " AND " + pathFilter
+	}
+	rows, err := s.getDB(r).Conn.Query(fmt.Sprintf(`
 		SELECT t.id, t.title, a.name as artist 
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
 		LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
-		WHERE t.status = 'active'
+		%s
 		ORDER BY COALESCE(ut.play_count, 0) ASC, RANDOM() LIMIT 9
-	`, user.Username)
+	`, whereGems), append([]interface{}{user.Username}, pathArgs...)...)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -1727,19 +1745,23 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	stats["mostPlayed"] = topPlays
 
-	// Recientemente añadidos (Globales para descubrimiento)
+	// Recientemente añadidos (Globales para descubrimiento filtrados por permiso)
 	recentAlbums := make([]map[string]interface{}, 0)
-	rows3, err := s.getDB(r).Conn.Query(`
+	whereRecent := "WHERE t.status = 'active'"
+	if pathFilter != "" {
+		whereRecent += " AND " + pathFilter
+	}
+	rows3, err := s.getDB(r).Conn.Query(fmt.Sprintf(`
 		SELECT a.id, a.title, art.name, MAX(t.created_at) as added_at, 
 		       COALESCE(MAX(t.genre), '') as genre, MAX(t.bit_rate) as bitrate,
 		       COALESCE((SELECT ut.play_count FROM user_tracks ut WHERE ut.track_id = t.id AND ut.username = ?), 0) as pc
 		FROM albums a
 		JOIN artists art ON a.artist_id = art.id
 		JOIN tracks t ON a.id = t.album_id
-		WHERE t.status = 'active'
+		%s
 		GROUP BY a.id, a.title, art.name
 		ORDER BY added_at DESC LIMIT 6
-	`, user.Username)
+	`, whereRecent), append([]interface{}{user.Username}, pathArgs...)...)
 	if err == nil {
 		defer rows3.Close()
 		for rows3.Next() {
@@ -1824,9 +1846,15 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 		processed = sStatus.Processed
 	}
 
-	// Obtener contador de inbox (pendientes compartidos)
+	// Obtener contador de inbox (pendientes filtrados por permiso)
+	user, _ := r.Context().Value(userKey).(*db.User)
+	pathFilter, pathArgs := s.getPathFilter(user)
+	whereInbox := "WHERE status = 'pending'"
+	if pathFilter != "" {
+		whereInbox += " AND " + pathFilter
+	}
 	var inboxCount int
-	s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&inboxCount)
+	s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks t " + whereInbox, pathArgs...).Scan(&inboxCount)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -2578,9 +2606,23 @@ func (s *Server) HandleFileEvent(path string) {
 }
 
 func (s *Server) TriggerGlobalScan() {
-	slog.Info("Starting scheduled global scan")
+	status := &ScanStatus{Scanning: true, Processed: 0}
+	s.scanStatuses.Store("global", status)
+
+	slog.Info("Starting global scan")
 	sc := scanner.NewScanner(s.MasterDB)
+	sc.OnProgress = func(path string, count int) {
+		status.Processed = count
+		s.scanStatuses.Store("global", status)
+	}
+
+	defer func() {
+		status.Scanning = false
+		s.scanStatuses.Store("global", status)
+		slog.Info("Global scan completed", "total", status.Processed)
+	}()
+
 	if err := sc.ScanDirectory(s.Config.MusicPath); err != nil {
-		slog.Error("Scheduled scan: failed", "error", err)
+		slog.Error("Global scan failed", "error", err)
 	}
 }

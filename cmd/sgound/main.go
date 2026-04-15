@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"time"
 
 	"sgound/internal/api"
 	"sgound/internal/config"
@@ -48,13 +47,8 @@ func main() {
 		}
 	}
 
-	// Periodic Polling (seguro ante fallos del watcher o red)
-	ticker := time.NewTicker(6 * time.Hour)
-	go func() {
-		for range ticker.C {
-			apiServer.TriggerGlobalScan()
-		}
-	}()
+	// Trigger initial scan at startup
+	go apiServer.TriggerGlobalScan()
 
 	slog.Info("Listening on HTTP port", "port", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, mux); err != nil {
