@@ -176,7 +176,9 @@
           <Icon name="archive" size={20} color="var(--primary)" />
           <h3>Forgotten Gems</h3>
       </div>
-      <div class="gems-grid">
+      <div class="gems-grid" 
+           class:lone-gem={stats.forgottenGems.length === 1}
+           class:few-gems={stats.forgottenGems.length > 1 && stats.forgottenGems.length <= 4}>
         {#each stats.forgottenGems as gem}
           <button 
             class="gem-cover" 
@@ -388,7 +390,11 @@
 
   /* Gems Tile */
   .gems-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; overflow: visible; }
+  .gems-grid.lone-gem { grid-template-columns: 1fr; }
+  .gems-grid.few-gems { grid-template-columns: repeat(2, 1fr); }
+  
   .gem-cover { background: var(--surface-container-highest); padding: 0; border: 1px solid var(--border-color); aspect-ratio: 1/1; border-radius: 16px; overflow: hidden; cursor: pointer; position: relative; }
+  .gems-grid.lone-gem .gem-cover { aspect-ratio: 16/9; max-height: 280px; }
   .gem-cover img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s; }
   .gem-cover:hover img { transform: scale(1.1); }
   .gem-cover .overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; backdrop-filter: blur(2px); }

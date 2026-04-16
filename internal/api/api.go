@@ -1861,19 +1861,20 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks t " + wherePending, pathArgs...).Scan(&pendingCount)
 	stats["inboxCount"] = pendingCount
 
-	// Joyas olvidadas (Personales: pistas que el usuario ha escuchado poco)
+	// Joyas olvidadas (Deduplicadas por álbum + artista para evitar repetir carátulas)
 	gems := make([]map[string]interface{}, 0)
 	whereGems := "WHERE t.status = 'active'"
 	if pathFilter != "" {
 		whereGems += " AND " + pathFilter
 	}
 	rows, err := s.getDB(r).Conn.Query(fmt.Sprintf(`
-		SELECT t.id, t.title, a.name as artist 
+		SELECT MIN(t.id) as id, t.title, art.name as artist 
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
-		JOIN artists a ON al.artist_id = a.id
+		JOIN artists art ON al.artist_id = art.id
 		LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
 		%s
+		GROUP BY TRIM(UPPER(al.title)), TRIM(UPPER(art.name))
 		ORDER BY COALESCE(ut.play_count, 0) ASC, RANDOM() LIMIT 9
 	`, whereGems), append([]interface{}{user.Username}, pathArgs...)...)
 	if err == nil {
