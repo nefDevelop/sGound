@@ -76,7 +76,7 @@
     {#if currentPlaying}
       <div class="quality-badge" class:transcoded={$audioQuality !== 'original'}>
         {#if $audioQuality === 'original'}
-          {currentPlaying.format?.toUpperCase()} {Math.round(currentPlaying.bit_rate / 1000)}k
+          {currentPlaying.format?.toUpperCase()} {currentPlaying.bit_rate ? Math.round(currentPlaying.bit_rate / 1000) : '--'}k
         {:else}
           TRANS {$audioQuality.toUpperCase()}
         {/if}

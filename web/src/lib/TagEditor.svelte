@@ -31,12 +31,28 @@
           genre: track.genre,
           year: parseInt(track.year) || 0,
           trackNum: parseInt(track.trackNum) || 0,
+          trackTotal: parseInt(track.trackTotal) || 0,
           discNum: parseInt(track.discNum) || 0,
+          discTotal: parseInt(track.discTotal) || 0,
           composer: track.composer,
           comment: track.comment,
-          instrumental: track.instrumental
+          instrumental: !!track.instrumental
         })
       });
+
+      const result = await res.json();
+      
+      // Verificación de integridad: si el servidor reportó error de validación
+      if (!res.ok) {
+        if (result.status === "error" && result.changes) {
+          const mismatches = result.changes.filter(c => c.new !== c.actual);
+          if (mismatches.length > 0) {
+            const list = mismatches.map(m => m.field).join(", ");
+            throw new Error(`Integridad fallida en campos: ${list}. El archivo físico no coincide con lo solicitado.`);
+          }
+        }
+        throw new Error(result.message || "Failed to update tags");
+      }
 
       // 2. Guardar Letras si existen
       if (track.lyrics) {
@@ -47,8 +63,6 @@
         });
       }
       
-      if (!res.ok) throw new Error("Failed to update tags");
-      
       saveSuccess = true;
       setTimeout(() => {
         saveSuccess = false;
@@ -57,7 +71,7 @@
       
     } catch (e) {
       console.error(e);
-      showToast("Error saving tags: " + e.message, "error");
+      showToast(e.message, "error");
     } finally {
       loading = false;
     }
@@ -89,19 +103,32 @@
   }
 
   async function fetchSuggestions(field, value) {
-    if (value.length < 1) {
+    let query = value;
+    if (field === 'genre') {
+      const parts = value.split(/[;/]/);
+      query = parts[parts.length - 1].trim();
+    }
+
+    if (query.length < 1) {
       suggestions = [];
       return;
     }
     try {
-      const res = await fetch(`/api/autocomplete?field=${field}&q=${encodeURIComponent(value)}`);
+      const res = await fetch(`/api/autocomplete?field=${field}&q=${encodeURIComponent(query)}`);
       suggestions = await res.json();
       activeSuggestionField = field;
     } catch (e) { console.error(e); }
   }
 
   function selectSuggestion(val) {
-    track[activeSuggestionField] = val;
+    if (activeSuggestionField === 'genre') {
+      const parts = track.genre.split(/[;/]/);
+      // Reemplazar el último segmento (lo que el usuario estaba escribiendo)
+      parts[parts.length - 1] = " " + val;
+      track.genre = parts.join("; ").trim();
+    } else {
+      track[activeSuggestionField] = val;
+    }
     suggestions = [];
   }
 

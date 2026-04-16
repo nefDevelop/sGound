@@ -25,6 +25,14 @@ func GenerateUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
+// TagChange representa un cambio en un metadato con validación
+type TagChange struct {
+	Field    string `json:"field"`
+	Original string `json:"original"`
+	New      string `json:"new"`
+	Actual   string `json:"actual"`
+}
+
 // ReadPersistentID lee el SGOUND_ID del archivo físico
 func ReadPersistentID(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
@@ -87,6 +95,108 @@ func WritePersistentID(path string, id string) error {
 	return nil
 }
 
+// ReadTagsFromFile lee todos los metadatos soportados de un archivo
+func ReadTagsFromFile(path string) (map[string]string, error) {
+	tags := make(map[string]string)
+	ext := strings.ToLower(filepath.Ext(path))
+
+	if ext == ".mp3" {
+		tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
+		if err != nil { return nil, err }
+		defer tag.Close()
+
+		tags["title"] = tag.Title()
+		tags["artist"] = tag.Artist()
+		tags["album"] = tag.Album()
+		tags["genre"] = tag.Genre()
+		tags["year"] = tag.Year()
+		
+		trck := tag.GetTextFrame("TRCK").Text
+		if trck != "" {
+			parts := strings.Split(trck, "/")
+			tags["trackNum"] = parts[0]
+			if len(parts) > 1 { tags["trackTotal"] = parts[1] }
+		}
+
+		tpos := tag.GetTextFrame("TPOS").Text
+		if tpos != "" {
+			parts := strings.Split(tpos, "/")
+			tags["discNum"] = parts[0]
+			if len(parts) > 1 { tags["discTotal"] = parts[1] }
+		}
+
+		tags["composer"] = tag.GetTextFrame("TCOM").Text
+		
+		comments := tag.GetFrames(tag.CommonID("Comments"))
+		if len(comments) > 0 {
+			if cf, ok := comments[0].(id3v2.CommentFrame); ok {
+				tags["comment"] = cf.Text
+			}
+		}
+
+		// Rating
+		rating := tag.GetTextFrame("Rating").Text
+		if rating == "" {
+			// POPM Fallback
+			popms := tag.GetFrames("POPM")
+			if len(popms) > 0 {
+				if uf, ok := popms[0].(id3v2.UnknownFrame); ok && len(uf.Body) > 0 {
+					// POPM body: email\x00rating
+					parts := strings.Split(string(uf.Body), "\x00")
+					if len(parts) > 1 {
+						val := int(uf.Body[len(uf.Body)-1])
+						// Map 0-255 back to 1-5
+						if val >= 252 { tags["rating"] = "5" } else if val >= 193 { tags["rating"] = "4" } else if val >= 124 { tags["rating"] = "3" } else if val >= 60 { tags["rating"] = "2" } else if val >= 1 { tags["rating"] = "1" }
+					}
+				}
+			}
+		} else {
+			tags["rating"] = rating
+		}
+
+		// Instrumental
+		txxxs := tag.GetFrames(tag.CommonID("User defined text information"))
+		for _, f := range txxxs {
+			if tf, ok := f.(id3v2.UserDefinedTextFrame); ok {
+				if tf.Description == "INSTRUMENTAL" {
+					tags["instrumental"] = tf.Value
+				}
+			}
+		}
+
+	} else if ext == ".flac" {
+		f, err := flac.ParseFile(path)
+		if err != nil { return nil, err }
+		for _, block := range f.Meta {
+			if block.Type == flac.VorbisComment {
+				cm, _ := flacvorbis.ParseFromMetaDataBlock(*block)
+				if cm == nil { continue }
+				
+				get := func(k string) string {
+					v, _ := cm.Get(k)
+					if len(v) > 0 { return v[0] }
+					return ""
+				}
+
+				tags["title"] = get("TITLE")
+				tags["artist"] = get("ARTIST")
+				tags["album"] = get("ALBUM")
+				tags["genre"] = get("GENRE")
+				tags["year"] = get("DATE")
+				tags["trackNum"] = get("TRACKNUMBER")
+				tags["trackTotal"] = get("TRACKTOTAL")
+				tags["discNum"] = get("DISCNUMBER")
+				tags["discTotal"] = get("DISCTOTAL")
+				tags["composer"] = get("COMPOSER")
+				tags["comment"] = get("COMMENT")
+				tags["rating"] = get("RATING")
+				tags["instrumental"] = get("INSTRUMENTAL")
+			}
+		}
+	}
+	return tags, nil
+}
+
 type Editor struct {
 	DB *db.MasterDatabase
 }
@@ -95,26 +205,79 @@ func NewEditor(database *db.MasterDatabase) *Editor {
 	return &Editor{DB: database}
 }
 
-// UpdateTags escribe metadatos en el archivo físico y sincroniza el título localmente
-func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) error {
+// UpdateTags escribe metadatos en el archivo físico y sincroniza el título localmente.
+// Retorna la lista de cambios validados.
+func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) ([]TagChange, error) {
 	var path string
 	err := e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
 	if err != nil {
-		return fmt.Errorf("coud not find track id: %w", err)
+		return nil, fmt.Errorf("coud not find track id: %w", err)
 	}
+
+	// 1. Leer etiquetas originales (antes de la edición)
+	originalTags, _ := ReadTagsFromFile(path)
+	if originalTags == nil { originalTags = make(map[string]string) }
 
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext == ".mp3" {
-		if err := updateMP3(path, data); err != nil {
-			return fmt.Errorf("failed to rewrite mp3 ID3 tags: %w", err)
+		if err := updateMP3(path, trackID, data); err != nil {
+			return nil, fmt.Errorf("failed to rewrite mp3 ID3 tags: %w", err)
 		}
 	} else if ext == ".flac" {
-		if err := updateFLAC(path, data); err != nil {
-			return fmt.Errorf("failed to rewrite flac tags: %w", err)
+		if err := updateFLAC(path, trackID, data); err != nil {
+			return nil, fmt.Errorf("failed to rewrite flac tags: %w", err)
 		}
 	} else {
-		// Log warning but continue with DB update
 		fmt.Printf("Physical tag editing not yet supported for format %s, only DB will be updated\n", ext)
+	}
+
+	// 2. Asegurar que el ID persistente se mantiene/escribe en el archivo
+	// Esto es CRÍTICO para que el Watcher/Scanner no crea que es una canción nueva
+	WritePersistentID(path, trackID)
+
+	// 2. Leer etiquetas finales (después de la edición)
+	actualTags, _ := ReadTagsFromFile(path)
+	if actualTags == nil { actualTags = make(map[string]string) }
+
+	// 3. Construir reporte de cambios y validación
+	var changes []TagChange
+	mismatches := []string{}
+
+	for field, requestedValueRaw := range data {
+		// Ignorar campos que no son metadatos directos o procesados
+		if field == "id" { continue }
+
+		requestedValue := ""
+		switch v := requestedValueRaw.(type) {
+		case string: requestedValue = v
+		case float64: requestedValue = fmt.Sprintf("%d", int(v))
+		case int: requestedValue = fmt.Sprintf("%d", v)
+		case bool: 
+			if v { requestedValue = "1" } else { requestedValue = "0" }
+		}
+
+		actualValue := actualTags[field]
+		originalValue := originalTags[field]
+
+		change := TagChange{
+			Field:    field,
+			Original: originalValue,
+			New:      requestedValue,
+			Actual:   actualValue,
+		}
+		changes = append(changes, change)
+
+		// Validación: Si el valor final es distinto al solicitado (y no estaba vacío ya de por sí)
+		if requestedValue != "" && requestedValue != "0" && requestedValue != actualValue {
+			// En MP3 a veces el track total se omite si es 0, etc. Ignorar pequeñas discrepancias de formato si el valor base coincide.
+			if !isSoftMatch(field, requestedValue, actualValue) {
+				mismatches = append(mismatches, fmt.Sprintf("%s (solicitado '%s', en archivo '%s')", field, requestedValue, actualValue))
+			}
+		}
+	}
+
+	if len(mismatches) > 0 {
+		return changes, fmt.Errorf("tag verification failed for: %s", strings.Join(mismatches, ", "))
 	}
 
 	// Sincronizar cambios en la BD
@@ -143,7 +306,7 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) error {
 		getInt("rating"), getBoolInt("instrumental"), trackID)
 	
 	if err != nil {
-		return err
+		return changes, err
 	}
 
 	// Actualizar año en la tabla albums relacionada
@@ -153,8 +316,20 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) error {
 		e.DB.Conn.Exec("UPDATE albums SET year = ? WHERE id = ?", getInt("year"), albumID)
 	}
 
-	log.Printf("✓ Etiquetas y año actualizados para el track: %s", trackID)
-	return nil
+	log.Printf("✓ Etiquetas validadas y sincronizadas para el track: %s", trackID)
+	return changes, nil
+}
+
+// isSoftMatch maneja pequeñas diferencias de formato (ej: Track 01 vs 1)
+func isSoftMatch(field, requested, actual string) bool {
+	if requested == actual { return true }
+	if field == "trackNum" || field == "discNum" || field == "year" {
+		// Comparar como strings de números
+		r := strings.TrimLeft(requested, "0")
+		a := strings.TrimLeft(actual, "0")
+		return r == a
+	}
+	return false
 }
 
 // OrganizeFile mueve el archivo físico según el patrón configurado
@@ -491,7 +666,7 @@ func updateMP3Lyrics(path string, lyrics string) error {
 	return err
 }
 
-func updateMP3(path string, data map[string]interface{}) error {
+func updateMP3(path string, trackID string, data map[string]interface{}) error {
 	tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
 	if err != nil {
 		return err
@@ -574,6 +749,13 @@ func updateMP3(path string, data map[string]interface{}) error {
 		Value:       instrumental,
 	})
 
+	// Persistent ID
+	tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
+		Encoding:    id3v2.EncodingUTF8,
+		Description: "SGOUND_ID",
+		Value:       trackID,
+	})
+
 	err = tag.Save()
 	if err == nil {
 		fmt.Printf("✓ Etiquetas guardadas correctamente en MP3: %s\n", path)
@@ -581,7 +763,7 @@ func updateMP3(path string, data map[string]interface{}) error {
 	return err
 }
 
-func updateFLAC(path string, data map[string]interface{}) error {
+func updateFLAC(path string, trackID string, data map[string]interface{}) error {
 	f, err := flac.ParseFile(path)
 	if err != nil {
 		return err
@@ -648,6 +830,9 @@ func updateFLAC(path string, data map[string]interface{}) error {
 	instrumental := "0"
 	if v, ok := data["instrumental"].(bool); ok && v { instrumental = "1" }
 	setField("INSTRUMENTAL", instrumental)
+	
+	// Persistent ID
+	setField("SGOUND_ID", trackID)
 
 	block := cm.Marshal()
 	if cmIdx != -1 {

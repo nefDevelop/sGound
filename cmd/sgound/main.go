@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 
 	"sgound/internal/api"
 	"sgound/internal/config"
@@ -13,7 +14,17 @@ import (
 
 func main() {
 	// Initialize logger
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	level := slog.LevelDebug
+	if envLevel := os.Getenv("SGOUND_LOG_LEVEL"); envLevel != "" {
+		switch strings.ToLower(envLevel) {
+		case "debug": level = slog.LevelDebug
+		case "info":  level = slog.LevelInfo
+		case "warn":  level = slog.LevelWarn
+		case "error": level = slog.LevelError
+		}
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(logger)
 
 	slog.Info("Starting sgound server")

@@ -1066,8 +1066,11 @@ func (s *Server) handleEditTags(trackID string, w http.ResponseWriter, r *http.R
 	}
 
 	editor := tags.NewEditor(s.getDB(r))
-	if err := editor.UpdateTags(trackID, body); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	changes, err := editor.UpdateTags(trackID, body)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "error", "message": err.Error(), "changes": changes})
 		return
 	}
 
@@ -1076,8 +1079,9 @@ func (s *Server) handleEditTags(trackID string, w http.ResponseWriter, r *http.R
 		editor.OrganizeFile(trackID, s.Config.MusicPath, s.Config.RenamePattern)
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"success"}`))
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "changes": changes})
 }
 
 func (s *Server) handleManualOrganize(trackID string, w http.ResponseWriter, r *http.Request) {
@@ -1268,8 +1272,8 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	approvedCount := 0
 	for _, oldID := range data.IDs {
-		// Al aprobar, generamos el ID persistente REAL y lo escribimos en el archivo
 		db := s.getDB(r)
 		var path string
 		err := db.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", oldID).Scan(&path)
@@ -1277,39 +1281,42 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 
 		newID := tags.GenerateUUID()
 		
+		// 1. Lo activamos PRIMERO en la DB
+		db.Conn.Exec("UPDATE tracks SET status = 'active' WHERE id = ?", oldID)
+		approvedCount++
+
 		// Lógica de Carátulas: Si no tiene interna, buscar local e incrustar
 		go func(p string, tid string) {
-			f, err := os.Open(p)
-			if err != nil { return }
-			defer f.Close()
-			metadata, _ := tag.ReadFrom(f)
-			if metadata == nil || metadata.Picture() == nil {
-				// No tiene interna, buscamos local
-				dir := filepath.Dir(p)
-				common := []string{"cover", "folder", "front", "album"}
-				entries, _ := os.ReadDir(dir)
-				for _, ent := range entries {
-					name := strings.ToLower(ent.Name())
-					ext := filepath.Ext(name)
-					if ext != ".jpg" && ext != ".jpeg" && ext != ".png" { continue }
-					base := strings.TrimSuffix(name, ext)
-					for _, c := range common {
-						if base == c {
-							imgData, _ := os.ReadFile(filepath.Join(dir, ent.Name()))
-							mime := "image/jpeg"
-							if ext == ".png" { mime = "image/png" }
-							tags.NewEditor(s.getDB(r)).EmbedCover(tid, imgData, mime)
-							return
+			f, _ := os.Open(p)
+			if f != nil {
+				defer f.Close()
+				metadata, _ := tag.ReadFrom(f)
+				if metadata == nil || metadata.Picture() == nil {
+					dir := filepath.Dir(p)
+					common := []string{"cover", "folder", "front", "album"}
+					entries, _ := os.ReadDir(dir)
+					for _, ent := range entries {
+						name := strings.ToLower(ent.Name())
+						ext := filepath.Ext(name)
+						if ext != ".jpg" && ext != ".jpeg" && ext != ".png" { continue }
+						base := strings.TrimSuffix(name, ext)
+						for _, c := range common {
+							if base == c {
+								imgData, _ := os.ReadFile(filepath.Join(dir, ent.Name()))
+								mime := "image/jpeg"
+								if ext == ".png" { mime = "image/png" }
+								tags.NewEditor(s.MasterDB).EmbedCover(tid, imgData, mime)
+								return
+							}
 						}
 					}
 				}
 			}
-		}(path, oldID)
+		}(path, newID)
 
 		if err := tags.WritePersistentID(path, newID); err == nil {
-			// Si se escribió correctamente, actualizamos el ID en la DB y lo activamos
-			// Usamos una transacción o simplemente actualizamos por partes
-			_, err = db.Conn.Exec("UPDATE tracks SET id = ?, status = 'active' WHERE id = ?", newID, oldID)
+			// 2. Si se escribió correctamente el ID físico, actualizamos el ID en la DB
+			_, err = db.Conn.Exec("UPDATE tracks SET id = ? WHERE id = ?", newID, oldID)
 			if err != nil {
 				slog.Error("Failed to update track ID in DB after physical write", "oldID", oldID, "newID", newID, "err", err)
 			} else {
@@ -1320,13 +1327,15 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			slog.Error("Failed to write persistent ID to file during approval", "path", path, "err", err)
-			// Fallback: lo activamos con el ID antiguo si falla la escritura física (para no perder el track)
-			db.Conn.Exec("UPDATE tracks SET status = 'active' WHERE id = ?", oldID)
 		}
 	}
 
+	var totalActive int
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active'").Scan(&totalActive)
+	fmt.Printf("✅ %d tracks aprobadas. Total en biblioteca activa: %d\n", approvedCount, totalActive)
+
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"success"}`))
+	w.Write([]byte(fmt.Sprintf(`{"status":"success", "approved":%d, "total":%d}`, approvedCount, totalActive)))
 }
 
 func (s *Server) handleRejectTracks(w http.ResponseWriter, r *http.Request) {
@@ -1571,10 +1580,10 @@ func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
 	tagData := map[string]interface{}{
 		"rating": float64(data.Rating),
 	}
-	
-	if err := editor.UpdateTags(data.ID, tagData); err != nil {
-		slog.Error("Failed to sync rating to tags", "id", data.ID, "error", err)
-	}
+			// data.ID es el track ID
+			if _, err := editor.UpdateTags(data.ID, tagData); err != nil {
+				slog.Error("Failed to update tags in massive editor", "track", data.ID, "err", err)
+			}
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))

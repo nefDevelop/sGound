@@ -21,7 +21,8 @@
     isInbox = false,
     columns = ['checkbox', 'title', 'artist', 'album', 'rating', 'genre'],
     showHeader = true,
-    title = "Tracks"
+    title = "Tracks",
+    onsearch = undefined
   } = $props();
   
   let selectedIds = $state(new Set());
@@ -124,12 +125,33 @@
 
   async function handleValueChange(e) {
     editingValue = e.target.value;
-    if (['artist', 'album', 'genre'].includes(editingCell.field) && editingValue.length > 1) {
-      const res = await fetch(`/api/autocomplete?field=${editingCell.field}&q=${encodeURIComponent(editingValue)}`);
+    let query = editingValue;
+
+    if (editingCell.field === 'genre' && (editingValue.includes(';') || editingValue.includes('/'))) {
+      const parts = editingValue.split(/;|\//);
+      query = parts[parts.length - 1].trim();
+    }
+
+    if (['artist', 'album', 'genre'].includes(editingCell.field) && query.length > 0) {
+      const res = await fetch(`/api/autocomplete?field=${editingCell.field}&q=${encodeURIComponent(query)}`);
       if (res.ok) suggestions = await res.json();
     } else {
       suggestions = [];
     }
+  }
+
+  function applySuggestion(s) {
+    if (editingCell.field === 'genre') {
+      const separator = editingValue.includes('/') ? '/' : ';';
+      const parts = editingValue.split(/;|\//);
+      parts[parts.length - 1] = s;
+      editingValue = parts.map(p => p.trim()).join(separator + ' ');
+    } else {
+      editingValue = s;
+    }
+    suggestions = [];
+    suggestionIdx = -1;
+    saveEdit();
   }
 
   async function saveEdit() {
@@ -175,11 +197,10 @@
   function handleKeyDown(e) {
     if (e.key === 'Enter') {
       if (suggestionIdx >= 0) {
-        editingValue = suggestions[suggestionIdx];
-        suggestions = [];
-        suggestionIdx = -1;
+        applySuggestion(suggestions[suggestionIdx]);
+      } else {
+        saveEdit();
       }
-      saveEdit();
     } else if (e.key === 'Escape') {
       cancelEdit();
     } else if (e.key === 'ArrowDown' && suggestions.length > 0) {
@@ -313,16 +334,23 @@
                   <div class="info-stack">
                     {#if editingCell.trackId === track.id && editingCell.field === 'title'}
                       <div class="inline-edit-wrap">
-                        <input 
-                          type="text" 
-                          class="inline-input" 
-                          value={editingValue} 
-                          oninput={handleValueChange}
-                          onkeydown={handleKeyDown}
-                          onblur={saveEdit}
-                          use:focusOnMount 
-                        />
+                    <input 
+                      type="text" 
+                      class="inline-input" 
+                      value={editingValue} 
+                      oninput={handleValueChange}
+                      onkeydown={handleKeyDown}
+                      onblur={saveEdit}
+                      use:focusOnMount 
+                    />
+                    {#if suggestions.length > 0}
+                      <div class="suggestions-popover">
+                        {#each suggestions as s, i}
+                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
+                        {/each}
                       </div>
+                    {/if}
+                  </div>
                     {:else}
                       <span class="title-text">{track.title}</span>
                       <span class="mobile-subtitle">{track.artist}</span>
@@ -348,7 +376,7 @@
                     {#if suggestions.length > 0}
                       <div class="suggestions-popover">
                         {#each suggestions as s, i}
-                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); editingValue = s; saveEdit(); }}>{s}</button>
+                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
                         {/each}
                       </div>
                     {/if}
@@ -385,7 +413,7 @@
                     {#if suggestions.length > 0}
                       <div class="suggestions-popover">
                         {#each suggestions as s, i}
-                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); editingValue = s; saveEdit(); }}>{s}</button>
+                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
                         {/each}
                       </div>
                     {/if}
@@ -423,9 +451,24 @@
                       onblur={saveEdit}
                       use:focusOnMount 
                     />
+                    {#if suggestions.length > 0}
+                      <div class="suggestions-popover">
+                        {#each suggestions as s, i}
+                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
+                        {/each}
+                      </div>
+                    {/if}
                   </div>
                 {:else}
-                  <span class="genre-tag">{track.genre || '-'}</span>
+                  <div class="genre-list">
+                    {#if track.genre}
+                      {#each track.genre.split(/;|\//).map(g => g.trim()) as g}
+                        <button class="genre-tag" onclick={(e) => { e.stopPropagation(); onsearch?.(g); }}>{g}</button>
+                      {/each}
+                    {:else}
+                      <span class="muted">-</span>
+                    {/if}
+                  </div>
                 {/if}
               </td>
             {/if}
@@ -514,7 +557,28 @@
   .info-stack { display: flex; flex-direction: column; overflow: hidden; gap: 2px; }
   
   .title-text { font-weight: 700; color: var(--text-main); }
-  .genre-tag { color: var(--secondary); font-size: 0.75rem; font-weight: 800; background: var(--secondary-10); padding: 0.25rem 0.6rem; border-radius: 6px; text-transform: uppercase; }
+  .genre-list { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .genre-tag { 
+    background: var(--surface-container-highest); 
+    color: var(--text-muted); 
+    font-size: 0.72rem; 
+    padding: 0.2rem 0.6rem; 
+    border-radius: 6px; 
+    font-weight: 800; 
+    border: 1px solid rgba(255,255,255,0.05);
+    cursor: pointer;
+    transition: all 0.2s;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+  .genre-tag:hover {
+    background: var(--primary);
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px var(--primary-20);
+    border-color: transparent;
+  }
+  .muted { opacity: 0.3; }
   
   .mobile-subtitle { display: none; font-size: 0.8rem; color: var(--text-muted); font-weight: 600; }
 
@@ -562,7 +626,7 @@
 
   /* Table Column Widths */
   .num-col { width: 40px; text-align: center; color: var(--text-muted); font-weight: 600; }
-  .dur-col { width: 80px; text-align: right; color: var(--text-muted); font-weight: 600; padding-right: 2rem !important; }
+  .dur-col { width: 100px; text-align: right; color: var(--text-muted); font-weight: 600; padding-right: 1.5rem !important; }
   .col-artist { width: 20%; }
   .col-album { width: 20%; }
   .col-rating { width: 130px; }

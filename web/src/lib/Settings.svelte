@@ -198,7 +198,7 @@
         </section>
       </div>
 
-      <div class="settings-card" style="margin-top: 2rem;">
+      <div class="settings-card">
         <h2>Library & Playback</h2>
         <section class="setting-item">
           <div class="info">
@@ -320,7 +320,7 @@
         </section>
       </div>
 
-      <div class="settings-card" style="margin-top: 2rem;">
+      <div class="settings-card">
         <h2>API Keys</h2>
         <p class="section-desc">Tokens for external apps and mobile clients.</p>
         
@@ -408,6 +408,12 @@
     grid-template-columns: 1fr;
     gap: 2rem;
     align-items: start;
+  }
+
+  .settings-column {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
   }
 
   @media (min-width: 1100px) {

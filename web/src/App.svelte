@@ -69,6 +69,7 @@
   let currentPlaying = $state(null);
   let audioRef = $state(null);
   let isFullPlayerOpen = $state(false);
+  let maintenanceRefresh = $state();
 
   // Sync currentPlaying with queue
   $effect(() => {
@@ -805,6 +806,7 @@
             onbulkReject={handleBulkReject}
             ondeletePhysical={handleDeletePhysical}
             onshuffle={handleShufflePlay}
+            onsearch={handleSearch}
           />
         {/if}
       {:else if currentView === "inbox"}
@@ -885,6 +887,8 @@
           subview={selectedMaintenanceView} 
           onviewchange={(v) => navigate('maintenance', { subview: v })}
           onfixTags={() => { /* logic to open tag editor */ }} 
+          onedit={(track) => openEditor(track)}
+          bind:refresh={maintenanceRefresh}
         />
       {:else if currentView === "fullplayer"}
         <FullPlayer
@@ -934,13 +938,13 @@
 <TagEditor
   bind:isOpen={isTagEditorOpen}
   bind:track={trackToEdit}
-  onclose={fetchTracks}
+  onclose={() => { fetchTracks(); maintenanceRefresh?.(); }}
 />
 
 <MassiveTagEditor
   bind:isOpen={isMassiveEditorOpen}
   {selectedTracks}
-  onclose={fetchTracks}
+  onclose={() => { fetchTracks(); maintenanceRefresh?.(); }}
 />
 
 <Toast />

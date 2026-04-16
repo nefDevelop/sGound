@@ -169,19 +169,31 @@
   });
 
   async function fetchSuggestions(field, value) {
-    if (value.length < 1) {
+    let query = value;
+    if (field === 'genre') {
+      const parts = value.split(/[;/]/);
+      query = parts[parts.length - 1].trim();
+    }
+
+    if (query.length < 1) {
       suggestions = [];
       return;
     }
     try {
-      const res = await fetch(`/api/autocomplete?field=${field}&q=${encodeURIComponent(value)}`);
+      const res = await fetch(`/api/autocomplete?field=${field}&q=${encodeURIComponent(query)}`);
       suggestions = await res.json();
       activeSuggestionField = field;
     } catch (e) { console.error(e); }
   }
 
   function selectSuggestion(val) {
-    bulkData[activeSuggestionField] = val;
+    if (activeSuggestionField === 'genre') {
+      const parts = bulkData.genre.split(/[;/]/);
+      parts[parts.length - 1] = " " + val;
+      bulkData.genre = parts.join("; ").trim();
+    } else {
+      bulkData[activeSuggestionField] = val;
+    }
     suggestions = [];
   }
 
@@ -207,6 +219,13 @@
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
+        }).then(async res => {
+          const result = await res.json();
+          if (!res.ok) {
+            console.error(`[Bulk Error] ${track.title}:`, result.message);
+            throw new Error(`Failed to update ${track.title}: ${result.message}`);
+          }
+          return result;
         });
 
         const p2 = track.lyrics ? fetch(`/api/lyrics/${track.id}`, {

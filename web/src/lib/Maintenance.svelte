@@ -1,10 +1,11 @@
 <script>
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
+  import ContextMenu from './ContextMenu.svelte';
   import { showToast } from './stores.js';
   import { fade } from 'svelte/transition';
 
-  let { onfixTags, subview = 'overview', onviewchange } = $props();
+  let { onfixTags, subview = 'overview', onviewchange, onedit, refresh = $bindable() } = $props();
   
   let health = $state({
     missingTags: 0,
@@ -16,6 +17,14 @@
   let currentList = $state([]);
   let currentView = $derived(subview); // 'overview', 'duplicates', 'orphans', 'low-quality'
   let loading = $state(false);
+  
+  let contextMenu = $state({
+    visible: false,
+    x: 0,
+    y: 0,
+    track: null,
+    items: []
+  });
 
   // Re-fetch details when subview changes via navigation
   $effect(() => {
@@ -88,6 +97,98 @@
       showToast("Deletion failed", "error");
     }
   }
+  function formatDuration(seconds) {
+    if (!seconds) return '--:--';
+    const min = Math.floor(seconds / 60);
+    const sec = Math.floor(seconds % 60);
+    return `${min}:${sec.toString().padStart(2, '0')}`;
+  }
+
+  function syncScroll(e, groupIndex) {
+    const scrollLeft = e.target.scrollLeft;
+    const groupScrollers = document.querySelectorAll(`.scroller-group-${groupIndex}`);
+    groupScrollers.forEach(s => {
+      if (s !== e.target) s.scrollLeft = scrollLeft;
+    });
+  }
+
+  function showTrackMenu(track, e) {
+    if (e) e.preventDefault();
+    contextMenu = {
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      track,
+      items: [
+        { label: 'Editar Tags', icon: 'edit', action: () => onedit?.(track) },
+        { divider: true },
+        { label: 'Borrar pista', icon: 'trash', color: 'danger', action: () => deleteTrack(track) }
+      ]
+    };
+  }
+
+  async function renameTrack(track) {
+    const newTitle = prompt("Enter new track title:", track.title);
+    if (!newTitle || newTitle === track.title) return;
+
+    try {
+      const res = await fetch(`/api/tracks/tags?id=${encodeURIComponent(track.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle })
+      });
+      if (res.ok) {
+        showToast("Track renamed successfully", "success");
+        if (currentView !== 'overview') fetchDetail(currentView);
+      } else {
+        throw new Error("Failed to rename");
+      }
+    } catch (e) {
+      showToast("Error renaming: " + e.message, "error");
+    }
+  }
+
+  function dragToScroll(node) {
+    let isDown = false;
+    let startX;
+    let scrollLeft;
+
+    const onMouseDown = (e) => {
+      isDown = true;
+      startX = e.pageX - node.offsetLeft;
+      scrollLeft = node.scrollLeft;
+    };
+
+    const onMouseLeave = () => { isDown = false; };
+    const onMouseUp = () => { isDown = false; };
+
+    const onMouseMove = (e) => {
+      if (!isDown) return;
+      e.preventDefault();
+      const x = e.pageX - node.offsetLeft;
+      const walk = (x - startX) * 2;
+      node.scrollLeft = scrollLeft - walk;
+    };
+
+    node.addEventListener('mousedown', onMouseDown);
+    node.addEventListener('mouseleave', onMouseLeave);
+    node.addEventListener('mouseup', onMouseUp);
+    node.addEventListener('mousemove', onMouseMove);
+
+    return {
+      destroy() {
+        node.removeEventListener('mousedown', onMouseDown);
+        node.removeEventListener('mouseleave', onMouseLeave);
+        node.removeEventListener('mouseup', onMouseUp);
+        node.removeEventListener('mousemove', onMouseMove);
+      }
+    };
+  }
+  // Expose refresh function to parent
+  refresh = () => {
+    fetchHealth();
+    if (currentView !== 'overview') fetchDetail(currentView);
+  };
 </script>
 
 <div class="maintenance-view" in:fade>
@@ -185,44 +286,66 @@
                    
                    <table class="m-table">
                      <tbody>
-                       {#each group as track}
-                         <tr class:is-best={track.id === best.id}>
-                           <td>
-                             <div class="title-cell">
-                               <div class="top">
-                                 <span class="track-title">{track.title}</span>
-                                 {#if track.id === best.id}
-                                   <span class="best-badge"><Icon name="award" size={12} /> BEST QUALITY</span>
-                                 {/if}
-                               </div>
-                               <span class="track-sub">{track.artist} inner tags</span>
-                             </div>
-                           </td>
-                           <td>
-                             <div class="attr-badges">
-                               {#if track.bit_rate}
-                                 <span class="quality-badge">{Math.round(track.bit_rate / 1000)}kbps</span>
-                               {/if}
-                               <span class="format-badge">{track.format?.toUpperCase()}</span>
-                               {#if track.fileHash}
-                                 <span class="hash-badge" title="Physical match verified">HASH MATCH</span>
-                               {/if}
-                             </div>
-                           </td>
-                           <td>
-                             <code class="path-snippet" title={track.path}>{track.path}</code>
-                           </td>
-                           <td class="actions-col">
-                             <button 
-                               class="icon-btn danger-hover" 
-                               onclick={() => deleteTrack(track)} 
-                               title={track.id === best.id ? "Keep this one" : "Delete redundant copy"}
-                             >
-                               <Icon name="trash" size={18} />
-                             </button>
-                           </td>
-                         </tr>
-                       {/each}
+                        {#each group as track, i}
+                          <tr 
+                            class:is-best={track.id === best.id} 
+                            class="duplicate-row {track.id === best.id ? 'best-row' : ''} row-{i%2 === 0 ? 'even' : 'odd'}"
+                            oncontextmenu={(e) => showTrackMenu(track, e)}
+                          >
+                            <td class="main-info-col">
+                              <div class="title-cell">
+                                <span class="track-sub">
+                                  {#if track.id === best.id}
+                                    <Icon name="award" size={14} color="var(--primary)" />
+                                  {/if}
+                                  {track.artist}
+                                </span>
+                                
+                                <div class="attr-badges">
+                                  <span class="format-badge-mini" title={track.format?.toUpperCase()}>
+                                     <Icon name="file" size={12} />
+                                     {track.format?.toUpperCase()}
+                                  </span>
+                                  <span class="quality-badge" title="Bitrate">
+                                    <Icon name="activity" size={12} />
+                                    {track.bit_rate ? Math.round(track.bit_rate / 1000) : '---'}k
+                                  </span>
+                                  <span class="time-badge">
+                                    <Icon name="clock" size={12} />
+                                    {formatDuration(track.duration)}
+                                  </span>
+                                  {#if track.fileHash}
+                                    <span class="hash-badge" title="Physical match verified">
+                                      <Icon name="link" size={12} />
+                                      MATCH
+                                    </span>
+                                  {/if}
+                                </div>
+                              </div>
+                            </td>
+                            <td class="path-col">
+                              <div class="path-outer">
+                                <div 
+                                  use:dragToScroll 
+                                  class="path-scroller scroller-group-{(group[0].id).slice(0,8)}" 
+                                  onscroll={(e) => syncScroll(e, (group[0].id).slice(0,8))} 
+                                  title={track.path}
+                                >
+                                  <code>{track.path}</code>
+                                </div>
+                              </div>
+                            </td>
+                            <td class="actions-col">
+                              <button 
+                                class="icon-btn danger-hover" 
+                                onclick={() => deleteTrack(track)} 
+                                title={track.id === best.id ? "Keep this one" : "Delete redundant copy"}
+                              >
+                                <Icon name="trash" size={18} />
+                              </button>
+                            </td>
+                          </tr>
+                        {/each}
                      </tbody>
                    </table>
                  </div>
@@ -248,10 +371,15 @@
                       </div>
                     </td>
                     <td>
-                      {#if track.bit_rate}
-                        <span class="quality-badge">{Math.round(track.bit_rate / 1000)}kbps</span>
-                      {/if}
-                      <span class="format-badge">{track.format?.toUpperCase() || 'AUDIO'}</span>
+                      <div class="attr-badges">
+                        {#if track.bit_rate}
+                          <span class="quality-badge">
+                            <Icon name="activity" size={12} />
+                            {Math.round(track.bit_rate / 1000)}k
+                          </span>
+                        {/if}
+                        <span class="format-badge-mini">{track.format?.toUpperCase() || 'AUDIO'}</span>
+                      </div>
                     </td>
                     <td>
                        <code class="path-snippet" title={track.path}>{track.path}</code>
@@ -270,6 +398,13 @@
       {/if}
     </div>
   {/if}
+
+  <ContextMenu 
+    bind:visible={contextMenu.visible} 
+    x={contextMenu.x} 
+    y={contextMenu.y} 
+    items={contextMenu.items} 
+  />
 </div>
 
 <style>
@@ -357,76 +492,121 @@
     letter-spacing: 1px;
   }
 
-  tr.is-best td { background: var(--surface-container-highest); border-color: var(--primary-20); }
+  /* best-row handles this now */
 
-  .top { display: flex; align-items: center; gap: 1rem; }
+  .m-table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 1rem; }
+  .m-table th { text-align: left; padding: 1rem 1.5rem; color: var(--text-muted); font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+  .m-table td { padding: 1.5rem; border-top: 1px solid rgba(255,255,255,0.03); vertical-align: middle; }
+  .m-table tr:first-child td { border-top: none; }
+
+  .duplicate-row { transition: all 0.2s; }
+  .attr-badges { display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; margin-top: 0.4rem; }
   
-  .best-badge {
-    background: var(--primary);
-    color: white;
+  .format-badge-mini {
+    background: var(--surface-container-highest);
+    color: var(--text-muted);
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 950;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    border: 1px solid rgba(255,255,255,0.05);
+    min-width: 70px;
+    justify-content: center;
+  }
+
+  .time-badge {
+    background: rgba(255,255,255,0.03);
+    color: var(--text-muted);
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 65px;
+    justify-content: center;
+  }
+
+  .hash-badge {
+    background: #10b98115;
+    color: #10b981;
     font-size: 0.65rem;
     font-weight: 900;
     padding: 0.3rem 0.6rem;
     border-radius: 6px;
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.3rem;
   }
 
-  .attr-badges { display: flex; align-items: center; gap: 0.5rem; }
-  .hash-badge {
-    background: #10b98120;
-    color: #10b981;
-    font-size: 0.7rem;
-    font-weight: 900;
-    padding: 0.4rem 0.8rem;
-    border-radius: 10px;
-  }
-
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2.5rem;
-    gap: 2rem;
-  }
-
-  h1 { 
-    font-size: 2.5rem; 
+  .quality-badge { 
+    background: var(--surface-container-highest);
+    color: var(--primary); 
+    padding: 0.3rem 0.6rem; 
+    border-radius: 6px; 
+    font-size: 0.7rem; 
     font-weight: 950; 
-    margin: 0; 
-    letter-spacing: -1.5px;
-    line-height: 1;
-    color: var(--text-main);
+    min-width: 65px; 
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    border: 1px solid rgba(255,255,255,0.08);
   }
 
-  .title-row { display: flex; align-items: center; gap: 1rem; }
+  .attr-badges :global(.lucide-icon) { flex-shrink: 0; }
 
-  .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2.5rem; }
-  .detail-header h2 { font-size: 2.2rem; font-weight: 900; margin: 0; letter-spacing: -0.02em; }
+  /* Zebra Stripes refined */
+  .m-table tr.row-even td { background: rgba(255,255,255,0.02); }
+  .m-table tr.row-odd td { background: transparent; }
+  
+  .m-table tr.best-row td { background: var(--primary-05) !important; }
+  .m-table tr.best-row td:first-child { border-left: none; }
 
-  .scroll-wrapper { overflow-x: auto; margin: 0 -1rem; padding: 0 1rem; }
+  .path-outer { display: flex; align-items: center; gap: 0.2rem; width: 100%; }
 
-  .m-table { width: 100%; border-collapse: separate; border-spacing: 0 0.8rem; }
-  .m-table th { text-align: left; padding: 1rem 1.5rem; color: var(--text-muted); font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
-  .m-table td { background: var(--surface-container-high); padding: 1.5rem; border-top: 1px solid var(--white-05); border-bottom: 1px solid var(--white-05); }
-  .m-table td:first-child { border-radius: 20px 0 0 20px; border-left: 1px solid var(--white-05); }
-  .m-table td:last-child { border-radius: 0 20px 20px 0; border-right: 1px solid var(--white-05); }
+  .path-scroller {
+    flex: 1;
+    overflow-x: auto;
+    background: rgba(0,0,0,0.25);
+    padding: 0.7rem 0.9rem;
+    border-radius: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary-20) transparent;
+    border: 1px solid rgba(255,255,255,0.03);
+    cursor: grab;
+    user-select: none;
+  }
+  .path-scroller:active { cursor: grabbing; }
+  
+  .path-scroller::-webkit-scrollbar { height: 4px; }
+  .path-scroller::-webkit-scrollbar-thumb { background: var(--primary-20); border-radius: 4px; }
 
-  .title-cell { display: flex; flex-direction: column; gap: 0.3rem; }
-  .track-title { font-weight: 800; font-size: 1.1rem; color: var(--text-main); }
-  .track-sub { font-size: 0.9rem; color: var(--text-muted); font-weight: 600; opacity: 0.7; }
+  .path-scroller code {
+    white-space: nowrap;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--text-main);
+    opacity: 0.6;
+  }
 
-  .quality-badge { background: var(--primary-15); color: var(--primary); padding: 0.4rem 0.8rem; border-radius: 10px; font-size: 0.8rem; font-weight: 900; margin-right: 0.5rem; }
-  .format-badge { background: var(--surface-container-highest); color: var(--text-muted); padding: 0.4rem 0.8rem; border-radius: 10px; font-size: 0.8rem; font-weight: 800; }
-
-  .path-snippet { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-muted); opacity: 0.6; max-width: 400px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sep { opacity: 0.3; margin: 0 0.1rem; }
+  .main-info-col { width: 320px; }
+  .duplicate-group .tech-col { display: none; }
+  .tech-col { width: 220px; }
+  .path-col { width: auto; }
+  .actions-col { width: 80px; text-align: right; }
 
   .icon-btn { border: none; background: var(--surface-container-highest); color: var(--text-muted); width: 44px; height: 44px; border-radius: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
   .icon-btn:hover { background: var(--surface-container-highest-hover); color: var(--text-main); transform: scale(1.05); }
   .icon-btn.danger-hover:hover { background: #ff444415; color: #ff4444; }
 
-  .actions-col { width: 60px; text-align: center; }
+  .title-cell { display: flex; flex-direction: column; gap: 0.3rem; }
+  .track-sub { font-size: 0.9rem; color: var(--text-muted); font-weight: 600; opacity: 0.7; display: flex; align-items: center; gap: 0.5rem; }
 
   @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 

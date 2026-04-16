@@ -6,15 +6,27 @@
   let { onselect, onplay, onsearch } = $props();
 
   let query = $state("");
-  let results = $state({ tracks: [], artists: [], albums: [], genres: [], playlists: [] });
+  let results = $state({
+    tracks: [],
+    artists: [],
+    albums: [],
+    genres: [],
+    playlists: [],
+  });
   let isOpen = $state(false);
   let isSearching = $state(false);
   let debounceTimer;
 
   async function performSearch() {
-    console.log("🔍 performSearch query:", query);
+    console.log("performSearch query:", query);
     if (!query || query.length < 2) {
-      results = { tracks: [], artists: [], albums: [], genres: [], playlists: [] };
+      results = {
+        tracks: [],
+        artists: [],
+        albums: [],
+        genres: [],
+        playlists: [],
+      };
       isSearching = false;
       return;
     }
@@ -29,7 +41,7 @@
           artists: data.artists || [],
           albums: data.albums || [],
           genres: data.genres || [],
-          playlists: data.playlists || []
+          playlists: data.playlists || [],
         };
       }
     } catch (e) {
@@ -79,18 +91,21 @@
   });
 
   let hasResults = $derived(
-    (results?.tracks?.length || 0) > 0 || 
-    (results?.artists?.length || 0) > 0 || 
-    (results?.albums?.length || 0) > 0 ||
-    (results?.genres?.length || 0) > 0 ||
-    (results?.playlists?.length || 0) > 0
+    (results?.tracks?.length || 0) > 0 ||
+      (results?.artists?.length || 0) > 0 ||
+      (results?.albums?.length || 0) > 0 ||
+      (results?.genres?.length || 0) > 0 ||
+      (results?.playlists?.length || 0) > 0,
   );
-
 </script>
 
 <div class="search-container" bind:this={container}>
   <div class="input-wrapper">
-    <button class="search-icon-btn" onclick={() => onsearch(query)} title="Buscar">
+    <button
+      class="search-icon-btn"
+      onclick={() => onsearch(query)}
+      title="Buscar"
+    >
       <Icon name="search" size={18} />
     </button>
     <input
@@ -99,15 +114,30 @@
       bind:value={query}
       oninput={handleInput}
       onkeydown={handleKeyDown}
-      onfocus={() => { if(query) isOpen = true; }}
+      onfocus={() => {
+        if (query) isOpen = true;
+      }}
     />
     {#if query}
-      <button class="clear-btn" onclick={() => { query = ""; results = {tracks:[], artists:[], albums:[], genres:[], playlists:[]}; isOpen = false; }}>
+      <button
+        class="clear-btn"
+        onclick={() => {
+          query = "";
+          results = {
+            tracks: [],
+            artists: [],
+            albums: [],
+            genres: [],
+            playlists: [],
+          };
+          isOpen = false;
+        }}
+      >
         <Icon name="x" size={16} />
       </button>
     {/if}
     {#if isSearching}
-       <div class="loader"></div>
+      <div class="loader"></div>
     {/if}
   </div>
 
@@ -123,7 +153,18 @@
             <div class="section">
               <div class="section-header">Canciones</div>
               {#each results.tracks as track}
-                <div class="result-item" role="button" tabindex="0" onclick={() => handleSelect('track', track)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect('track', track); }}}>
+                <div
+                  class="result-item"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => handleSelect("track", track)}
+                  onkeydown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleSelect("track", track);
+                    }
+                  }}
+                >
                   <div class="icon-box">
                     <Icon name="music" size={16} />
                   </div>
@@ -131,7 +172,13 @@
                     <div class="title">{track.title}</div>
                     <div class="subtitle">{track.artist}</div>
                   </div>
-                  <button class="play-action" onclick={(e) => { e.stopPropagation(); handlePlay(track); }}>
+                  <button
+                    class="play-action"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handlePlay(track);
+                    }}
+                  >
                     <Icon name="play" size={14} />
                   </button>
                 </div>
@@ -143,7 +190,18 @@
             <div class="section">
               <div class="section-header">Álbumes</div>
               {#each results.albums as album}
-                <div class="result-item" role="button" tabindex="0" onclick={() => handleSelect('album', album)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect('album', album); }}}>
+                <div
+                  class="result-item"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => handleSelect("album", album)}
+                  onkeydown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleSelect("album", album);
+                    }
+                  }}
+                >
                   <div class="icon-box disc">
                     <Icon name="disc" size={16} />
                   </div>
@@ -160,7 +218,18 @@
             <div class="section">
               <div class="section-header">Artistas</div>
               {#each results.artists as artist}
-                <div class="result-item" role="button" tabindex="0" onclick={() => handleSelect('artist', artist)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect('artist', artist); }}}>
+                <div
+                  class="result-item"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => handleSelect("artist", artist)}
+                  onkeydown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleSelect("artist", artist);
+                    }
+                  }}
+                >
                   <div class="icon-box artist">
                     <Icon name="user" size={16} />
                   </div>
@@ -176,7 +245,18 @@
             <div class="section">
               <div class="section-header">Géneros</div>
               {#each results.genres as genre}
-                <div class="result-item" role="button" tabindex="0" onclick={() => handleSelect('genre', genre)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect('genre', genre); }}}>
+                <div
+                  class="result-item"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => handleSelect("genre", genre)}
+                  onkeydown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleSelect("genre", genre);
+                    }
+                  }}
+                >
                   <div class="icon-box genre">
                     <Icon name="layers" size={16} />
                   </div>
@@ -192,7 +272,18 @@
             <div class="section">
               <div class="section-header">Playlists</div>
               {#each results.playlists as pl}
-                <div class="result-item" role="button" tabindex="0" onclick={() => handleSelect('playlist', pl)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect('playlist', pl); }}}>
+                <div
+                  class="result-item"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => handleSelect("playlist", pl)}
+                  onkeydown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleSelect("playlist", pl);
+                    }
+                  }}
+                >
                   <div class="icon-box playlist">
                     <Icon name="list" size={16} />
                   </div>
@@ -225,7 +316,7 @@
     border-radius: 100px;
     border: 1px solid var(--border-color, transparent);
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   }
 
   .input-wrapper:focus-within {
@@ -262,7 +353,7 @@
     cursor: pointer;
     padding: 0;
   }
-  
+
   .search-icon-btn:hover {
     opacity: 1;
     color: var(--primary);
@@ -300,7 +391,9 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .dropdown {
@@ -313,7 +406,7 @@
     background: var(--surface);
     border-radius: 16px;
     border: 1px solid var(--border-color);
-    box-shadow: 0 12px 32px rgba(0,0,0,0.15);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -321,8 +414,14 @@
   }
 
   @keyframes dropIn {
-    from { opacity: 0; transform: translateY(-10px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .results-scroll {
@@ -368,10 +467,22 @@
     justify-content: center;
   }
 
-  .icon-box.disc { color: #8b5cf6; background: rgba(139, 92, 246, 0.1); }
-  .icon-box.artist { color: #f59e0b; background: rgba(245, 158, 11, 0.1); }
-  .icon-box.genre { color: #10b981; background: rgba(16, 185, 129, 0.1); }
-  .icon-box.playlist { color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
+  .icon-box.disc {
+    color: #8b5cf6;
+    background: rgba(139, 92, 246, 0.1);
+  }
+  .icon-box.artist {
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+  }
+  .icon-box.genre {
+    color: #10b981;
+    background: rgba(16, 185, 129, 0.1);
+  }
+  .icon-box.playlist {
+    color: #3b82f6;
+    background: rgba(59, 130, 246, 0.1);
+  }
 
   .info {
     flex: 1;
