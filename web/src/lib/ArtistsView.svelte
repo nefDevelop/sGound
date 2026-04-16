@@ -67,8 +67,10 @@
         <button class="artist-card" onclick={() => onselectArtist?.(artist)}>
           <div class="avatar-container">
             <img 
+              class="smooth-image"
               src={getAvatarUrl(artist)} 
               alt={artist.name} 
+              onload={(e) => e.target.classList.add('loaded')}
               onerror={(e) => handleImageError(e, artist)} 
             />
             <div class="avatar-fallback" style="display: none;">

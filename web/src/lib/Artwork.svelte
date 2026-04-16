@@ -1,5 +1,5 @@
 <script>
-  let { src, alt = "Cover", size = "100%", borderRadius = "24px" } = $props();
+  let { src, alt = "Cover", size = "100%", borderRadius = "24px", onclick } = $props();
   
   let loaded = $state(false);
   let error = $state(false);
@@ -19,6 +19,8 @@
   style:width={size} 
   style:height={size} 
   style:border-radius={borderRadius}
+  onclick={onclick}
+  role="presentation"
 >
   {#if !loaded}
     <div class="skeleton" style:border-radius={borderRadius}></div>

@@ -5,7 +5,7 @@
   import { generatePalette, applyTheme } from './theme.js';
   import Modal from './Modal.svelte';
   
-  let config = $state({ musicPath: '', autoRename: false, renamePattern: '', themeColor: '#ff3366', replayGainEnabled: false });
+  let config = $state({ musicPath: '', autoRename: false, renamePattern: '', themeColor: '#ff3366', replayGainEnabled: false, language: 'es' });
   let loading = $state(false);
   let saveSuccess = $state(false);
 
@@ -21,7 +21,7 @@
     config.autoRename = data.autoRename;
     config.renamePattern = data.renamePattern || '{artist}/{album}/{track} - {title}';
     config.themeColor = data.themeColor || '#ff3366';
-    config.replayGainEnabled = data.replayGainEnabled;
+    config.language = data.language || 'es';
     applyTheme(palette);
     fetchAPIKeys();
   });
@@ -291,6 +291,21 @@
     </div>
 
     <div class="settings-column">
+      <div class="settings-card">
+        <h2>Metadata & Language</h2>
+        
+        <section class="setting-item">
+          <div class="info">
+            <h3>Idioma de Metadatos</h3>
+            <p>Idioma preferido para biografías y descripciones (Wikipedia / Last.fm).</p>
+          </div>
+          <select bind:value={config.language} class="select-input">
+            <option value="es">Español</option>
+            <option value="en">English</option>
+          </select>
+        </section>
+      </div>
+
       <div class="settings-card">
         <h2>Maintenance</h2>
         <section class="setting-item">

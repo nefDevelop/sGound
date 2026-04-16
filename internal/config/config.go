@@ -14,7 +14,8 @@ type Config struct {
 	RenamePattern     string
 	ThemeColor        string
 	ReplayGainEnabled bool
-	AllowedUsers      map[string]string // username -> permissions (r/rw)
+	Language          string `json:"language"`
+	AllowedUsers      map[string]string `json:"-"` // username -> permissions (r/rw)
 }
 
 func LoadConfig() *Config {
@@ -26,6 +27,11 @@ func LoadConfig() *Config {
 	themeColor := os.Getenv("SGOUND_THEME_COLOR")
 	if themeColor == "" {
 		themeColor = "#ff3366"
+	}
+
+	language := os.Getenv("SGOUND_LANGUAGE")
+	if language == "" {
+		language = "es"
 	}
 
 	musicPath := os.Getenv("SGOUND_MUSIC_PATH")
@@ -69,6 +75,7 @@ func LoadConfig() *Config {
 		AutoRename:        autoRename,
 		RenamePattern:     renamePattern,
 		ThemeColor:        themeColor,
+		Language:          language,
 		ReplayGainEnabled: replayGain,
 		AllowedUsers:      allowedUsers,
 	}

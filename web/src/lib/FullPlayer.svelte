@@ -196,7 +196,12 @@
         <header class="player-header">
           <div class="cover-wrapper-container">
             <div class="cover-wrapper">
-               <Artwork src="/api/cover/{currentPlaying.id}" alt="Cover" />
+               <Artwork 
+                 src="/api/cover/{currentPlaying.id}" 
+                 alt="Cover" 
+                 borderRadius={subView === 'cover' ? '24px' : '12px'}
+                 onclick={() => { if(subView !== 'cover') subView = 'cover'; }}
+               />
             </div>
           </div>
           
@@ -290,9 +295,9 @@
               </div>
             </div>
           {:else if subView === 'lyrics'}
-            <div class="view-panel lyrics-panel" bind:this={lyricContainer} in:fade>
+            <div class="view-panel lyrics-panel" in:fade>
               {#if parsedLyrics.length > 0}
-                <div class="lyrics-list">
+                <div class="lyrics-list" bind:this={lyricContainer}>
                   {#each parsedLyrics as line, i}
                     <button 
                       class="lyric-line" 
@@ -461,6 +466,7 @@
   .compact-mode .cover-wrapper {
     box-shadow: 0 10px 20px rgba(0,0,0,0.4);
     border-radius: 12px;
+    cursor: pointer;
   }
 
   .compact-meta {
@@ -575,7 +581,15 @@
   .q-title { font-weight: 700; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .q-artist { font-size: 0.8rem; opacity: 0.5; }
 
-  .lyrics-list { display: flex; flex-direction: column; gap: 1rem; max-height: 500px; overflow-y: auto; scrollbar-width: none; }
+  .lyrics-list { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 1rem; 
+    max-height: 500px; 
+    overflow-y: auto; 
+    scrollbar-width: none; 
+    position: relative; 
+  }
   .lyric-line { font-size: 1.5rem; font-weight: 800; color: rgba(255,255,255,0.2); background: none; border: none; cursor: pointer; text-align: center; }
   .lyric-line.active { color: white; transform: scale(1.05); }
 

@@ -48,21 +48,23 @@
   {:else if artist}
     <header class="artist-header">
        <!-- Dynamic Background Banner -->
-       {#if artist.imageUrl}
-         <div class="header-bg" style="background-image: url({artist.imageUrl})"></div>
-       {/if}
-       <div class="header-overlay"></div>
-
-       <div class="hero">
-         <div class="avatar">
-           <img 
-             src={getAvatarUrl(artist.id)} 
-             alt={artist.name} 
-             onerror={(e) => {
-               if (artist.imageUrl) e.target.src = artist.imageUrl;
-             }}
-           />
-         </div>
+        {#if artist.imageUrl}
+          <div class="header-bg" style="background-image: url({getAvatarUrl(artist.id)})"></div>
+        {/if}
+        <div class="header-overlay"></div>
+ 
+        <div class="hero">
+          <div class="avatar">
+            <img 
+              class="smooth-image"
+              src={getAvatarUrl(artist.id)} 
+              alt={artist.name} 
+              onload={(e) => e.target.classList.add('loaded')}
+              onerror={(e) => {
+                if (artist.imageUrl) e.target.src = artist.imageUrl;
+              }}
+            />
+          </div>
          <div class="info">
            <span class="type">Artista</span>
             <div class="title-row">

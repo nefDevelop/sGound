@@ -8,6 +8,7 @@ import (
 	"strings"
 	"log/slog"
 	"time"
+	"sgound/internal/config"
 )
 
 const LASTFM_API_KEY = "3884e889f074ca68516087d19e078028" // API Key pública para Sgound
@@ -19,10 +20,12 @@ type ArtistInfo struct {
 	Similar   []string `json:"similar"`
 }
 
-type ExternalMetadata struct{}
+type ExternalMetadata struct{
+	Config *config.Config
+}
 
-func NewExternalMetadata() *ExternalMetadata {
-	return &ExternalMetadata{}
+func NewExternalMetadata(cfg *config.Config) *ExternalMetadata {
+	return &ExternalMetadata{Config: cfg}
 }
 
 // GetArtistInfo consulta Wikipedia y Last.fm para obtener info completa
@@ -30,23 +33,30 @@ func (e *ExternalMetadata) GetArtistInfo(artistName string) (*ArtistInfo, error)
 	artistName = strings.TrimSpace(artistName)
 	artistName = strings.TrimSuffix(artistName, ".")
 
-	slog.Info("🔍 Buscando info enriquecida", "nombre", artistName)
+	slog.Info("🔍 Buscando info enriquecida", "nombre", artistName, "lang", e.Config.Language)
 
-	// 1. Wikipedia para Bio e Imagen
+	// 1. Wikipedia para Bio e Imagen (Prioridad absoluta)
 	wikiTitle := strings.ReplaceAll(artistName, " ", "_")
-	info, _ := e.fetchSummary(wikiTitle, "en")
-	if info == nil || info.Image == "" {
-		infoES, _ := e.fetchSummary(wikiTitle, "es")
-		if infoES != nil && (info == nil || infoES.Image != "") {
-			info = infoES
-		}
+	
+	// Idioma configurado
+	primaryLang := e.Config.Language
+	secondaryLang := "en"
+	if primaryLang == "en" {
+		secondaryLang = "es"
 	}
 
-	// 2. Si falla Wikipedia directo, buscar título canónico
-	if info == nil || info.Biography == "" {
-		bestTitle := e.searchBestTitle(artistName)
-		if bestTitle != "" {
-			info, _ = e.fetchSummary(bestTitle, "en")
+	info, _ := e.fetchSummary(wikiTitle, primaryLang)
+	if info == nil || info.Image == "" {
+		wInfo2, _ := e.fetchSummary(wikiTitle, secondaryLang)
+		if wInfo2 != nil {
+			if info == nil {
+				info = wInfo2
+			} else if info.Image == "" {
+				info.Image = wInfo2.Image
+				if info.Biography == "" {
+					info.Biography = wInfo2.Biography
+				}
+			}
 		}
 	}
 
@@ -54,15 +64,15 @@ func (e *ExternalMetadata) GetArtistInfo(artistName string) (*ArtistInfo, error)
 		info = &ArtistInfo{Biography: "No details found."}
 	}
 
-	// 3. Last.fm para Similares y Tags
+	// 2. Last.fm para Similares y Tags
 	e.enrichWithLastFM(artistName, info)
 
 	return info, nil
 }
 
 func (e *ExternalMetadata) enrichWithLastFM(name string, info *ArtistInfo) {
-	apiURL := fmt.Sprintf("http://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=%s&api_key=%s&format=json", 
-		url.QueryEscape(name), LASTFM_API_KEY)
+	apiURL := fmt.Sprintf("http://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=%s&api_key=%s&format=json&lang=%s", 
+		url.QueryEscape(name), LASTFM_API_KEY, e.Config.Language)
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(apiURL)
@@ -93,12 +103,24 @@ func (e *ExternalMetadata) enrichWithLastFM(name string, info *ArtistInfo) {
 
 	// Extraer Tags
 	for _, t := range result.Artist.Tags.Tag {
-		info.Tags = append(info.Tags, t.Name)
+		found := false
+		for _, existing := range info.Tags {
+			if existing == t.Name { found = true; break }
+		}
+		if !found {
+			info.Tags = append(info.Tags, t.Name)
+		}
 	}
 
 	// Extraer Similares
 	for _, s := range result.Artist.Similar.Artist {
-		info.Similar = append(info.Similar, s.Name)
+		found := false
+		for _, existing := range info.Similar {
+			if existing == s.Name { found = true; break }
+		}
+		if !found {
+			info.Similar = append(info.Similar, s.Name)
+		}
 	}
 }
 

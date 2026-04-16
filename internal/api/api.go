@@ -68,7 +68,7 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 	s := &Server{
 		MasterDB:         masterDB,
 		Config:           cfg,
-		externalMeta:     metadata.NewExternalMetadata(),
+		externalMeta:     metadata.NewExternalMetadata(cfg),
 		jwtSecret:        []byte(secret),
 		scanStatuses:     sync.Map{},
 		organizeStatuses: sync.Map{},
@@ -94,6 +94,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	// 1. REST Core API
 	mux.HandleFunc("/api/artists", auth(s.handleGetArtists))
 	mux.HandleFunc("/api/artists/", auth(s.handleArtistActions))
+	mux.HandleFunc("/api/artists/{id}/image", auth(s.handleGetArtistImage))
 	mux.HandleFunc("/api/albums", auth(s.handleGetAlbums))
 	mux.HandleFunc("/api/albums/", auth(s.handleAlbumActions))
 	mux.HandleFunc("/api/stream", auth(s.handleStream))
@@ -590,6 +591,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		var newCfg struct {
 			MusicPath         string `json:"musicPath"`
 			ThemeColor        string `json:"themeColor"`
+			Language          string `json:"language"`
 			AutoRename        bool   `json:"autoRename"`
 			RenamePattern     string `json:"renamePattern"`
 			ReplayGainEnabled bool   `json:"replayGainEnabled"`
@@ -600,6 +602,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		s.Config.MusicPath = newCfg.MusicPath
 		s.Config.ThemeColor = newCfg.ThemeColor
+		s.Config.Language = newCfg.Language
 		s.Config.AutoRename = newCfg.AutoRename
 		s.Config.RenamePattern = newCfg.RenamePattern
 		s.Config.ReplayGainEnabled = newCfg.ReplayGainEnabled
@@ -721,6 +724,73 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 	}
 
 	json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
+	artistID := s.extractID(r, "/api/artists/")
+	// s.extractID will return something like "artist_id/image". We just want the ID.
+	artistID = strings.TrimSuffix(artistID, "/image")
+
+	if artistID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	// 1. Verificar Caché
+	cacheDir := filepath.Join(os.TempDir(), "sgound_artists")
+	os.MkdirAll(cacheDir, 0755)
+	cachePath := filepath.Join(cacheDir, artistID+".jpg")
+
+	if _, err := os.Stat(cachePath); err == nil {
+		w.Header().Set("Cache-Control", "public, max-age=604800")
+		w.Header().Set("Content-Type", "image/jpeg")
+		http.ServeFile(w, r, cachePath)
+		return
+	}
+
+	// 2. Obtener URL externa de la DB
+	var imageURL string
+	err := s.getDB(r).Conn.QueryRow("SELECT image_url FROM artists WHERE id = ?", artistID).Scan(&imageURL)
+	if err != nil || imageURL == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	// 3. Descargar y Procesar
+	resp, err := http.Get(imageURL)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		http.NotFound(w, r)
+		return
+	}
+	defer resp.Body.Close()
+
+	imgData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		http.Error(w, "Failed to read image", http.StatusInternalServerError)
+		return
+	}
+
+	src, _, err := image.Decode(bytes.NewReader(imgData))
+	if err != nil {
+		// Fallback: guardar original si no podemos decodificar (quizás es formato extraño)
+		os.WriteFile(cachePath, imgData, 0644)
+		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+		w.Write(imgData)
+		return
+	}
+
+	// Redimensionar a 800px de ancho (proporcional)
+	resized := imaging.Resize(src, 800, 0, imaging.Lanczos)
+	
+	// Guardar en caché como JPEG optimizado
+	err = imaging.Save(resized, cachePath)
+	if err != nil {
+		slog.Error("Failed to save resized artist image", "error", err)
+	}
+
+	w.Header().Set("Cache-Control", "public, max-age=604800")
+	w.Header().Set("Content-Type", "image/jpeg")
+	imaging.Encode(w, resized, imaging.JPEG)
 }
 
 func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r *http.Request) {
