@@ -104,12 +104,13 @@
 
   // Sincronizar letras
   $effect(() => {
-    if (parsedLyrics.length > 0) {
+    if (isOpen && parsedLyrics.length > 0) {
       const index = parsedLyrics.findIndex((l, i) => {
         const next = parsedLyrics[i + 1];
         return currentTime >= l.time && (!next || currentTime < next.time);
       });
       if (index !== currentLyricIndex && index !== -1) {
+        console.log("🎵 Lyric sync update:", { index, time: currentTime, text: parsedLyrics[index].text });
         currentLyricIndex = index;
         tick().then(scrollToActive);
       }
@@ -136,34 +137,75 @@
   }
 
   function parseLRC(lrc) {
+    if (!lrc) {
+      parsedLyrics = [];
+      return;
+    }
+    
+    console.log("📝 Parsing LRC content...");
     const lines = lrc.split('\n');
     const result = [];
-    const timeReg = /\[(\d+):(\d+\.?\d*)\]/;
+    // Regex mejorada para detectar [mm:ss.xx], [mm:ss:xx] o [mm:ss]
+    const timeReg = /\[(\d+):(\d+(?:[.:]\d+)?)\]/g;
 
     lines.forEach(line => {
-      const match = timeReg.exec(line);
-      if (match) {
-        const minutes = parseInt(match[1]);
-        const seconds = parseFloat(match[2]);
-        const time = minutes * 60 + seconds;
-        const text = line.replace(timeReg, '').trim();
-        if (text) result.push({ time, text });
+      let match;
+      const timestamps = [];
+      let text = line;
+      
+      // Reiniciar lastIndex para el regex global
+      timeReg.lastIndex = 0;
+      
+      while ((match = timeReg.exec(line)) !== null) {
+        const mins = parseInt(match[1]);
+        const secsStr = match[2].replace(':', '.'); 
+        const secs = parseFloat(secsStr);
+        timestamps.push(mins * 60 + secs);
+        text = text.replace(match[0], '');
+      }
+      
+      text = text.trim();
+      if (text) {
+        if (timestamps.length > 0) {
+          timestamps.forEach(time => {
+            result.push({ time, text });
+          });
+        } else if (result.length === 0) {
+          // Si no hay timestamps pero es texto útil, lo guardamos con tiempo 0 (fallback)
+          // Pero solo si no hemos encontrado NINGÚN timestamp en el archivo aún
+        }
       }
     });
 
     if (result.length === 0 && lrc.trim()) {
-      parsedLyrics = lrc.split('\n').filter(l => l.trim()).map(text => ({ time: 0, text }));
+      console.log("⚠️ No markers found, treating as plain text");
+      parsedLyrics = lrc.split('\n')
+        .map(l => l.trim())
+        .filter(l => l && !l.startsWith('['))
+        .map(text => ({ time: 0, text }));
     } else {
       parsedLyrics = result.sort((a, b) => a.time - b.time);
+      console.log(`✅ Parsed ${parsedLyrics.length} synced lines`);
     }
+    
+    currentLyricIndex = -1; // Reset index when new lyrics load
   }
 
   function scrollToActive() {
-    if (!lyricContainer) return;
+    if (!lyricContainer || !isOpen) return;
     const activeLine = lyricContainer.querySelector('.active');
     if (activeLine) {
-      const top = activeLine.offsetTop - lyricContainer.clientHeight / 2 + activeLine.clientHeight / 2;
-      lyricContainer.scrollTo({ top, behavior: 'smooth' });
+      // Cálculo para centrar la línea activa en el contenedor
+      const containerHeight = lyricContainer.offsetHeight;
+      const lineTop = activeLine.offsetTop;
+      const lineHeight = activeLine.offsetHeight;
+      
+      const scrollPos = lineTop - (containerHeight / 2) + (lineHeight / 2);
+      
+      lyricContainer.scrollTo({
+        top: scrollPos,
+        behavior: 'smooth'
+      });
     }
   }
 
@@ -302,7 +344,7 @@
                     <button 
                       class="lyric-line" 
                       class:active={i === currentLyricIndex}
-                      onclick={() => line.time > 0 && audioRef && (audioRef.currentTime = line.time)}
+                      onclick={() => line.time >= 0 && audioRef && (audioRef.currentTime = line.time)}
                     >
                       {line.text}
                     </button>
@@ -584,14 +626,18 @@
   .lyrics-list { 
     display: flex; 
     flex-direction: column; 
-    gap: 1rem; 
-    max-height: 500px; 
+    gap: 1.2rem; 
+    height: 100%;
+    max-height: 60vh; 
     overflow-y: auto; 
     scrollbar-width: none; 
-    position: relative; 
+    position: relative;
+    padding: 10vh 0; /* Espacio para que la primera y última línea puedan centrarse */
+    mask-image: linear-gradient(to bottom, transparent, black 20%, black 80%, transparent);
   }
   .lyric-line { font-size: 1.5rem; font-weight: 800; color: rgba(255,255,255,0.2); background: none; border: none; cursor: pointer; text-align: center; }
   .lyric-line.active { color: white; transform: scale(1.05); }
+  .lyric-line:hover { color: rgba(255,255,255,0.6); transform: scale(1.02); }
 
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 

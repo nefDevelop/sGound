@@ -160,6 +160,20 @@
     isOpen = false;
     if (onclose) onclose();
   }
+
+  // Cargar letras al abrir el editor
+  $effect(() => {
+    if (isOpen && track.id) {
+      fetch(`/api/lyrics/${track.id}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.lyrics) {
+            track.lyrics = data.lyrics;
+          }
+        })
+        .catch(err => console.error("Error loading lyrics in editor:", err));
+    }
+  });
 </script>
 
 {#if isOpen}
@@ -230,7 +244,7 @@
 
               <label class="relative col-span-2">
                 <span>Artist</span>
-                <input type="text" bind:value={track.artist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} required />
+                <input type="text" bind:value={track.artist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} />
                 {#if suggestions.length > 0 && activeSuggestionField === 'artist'}
                   <div class="suggestions">
                     {#each suggestions as s}
@@ -242,7 +256,7 @@
 
               <label class="relative col-span-2">
                 <span>Album</span>
-                <input type="text" bind:value={track.album} oninput={(e) => fetchSuggestions('album', e.currentTarget.value)} required />
+                <input type="text" bind:value={track.album} oninput={(e) => fetchSuggestions('album', e.currentTarget.value)} />
                 {#if suggestions.length > 0 && activeSuggestionField === 'album'}
                   <div class="suggestions">
                     {#each suggestions as s}

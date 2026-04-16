@@ -1617,6 +1617,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("🔍 Realizando búsqueda", "q", query)
 	searchTerm := "%" + query + "%"
 
 	results := make(map[string]interface{})
@@ -2241,6 +2242,11 @@ func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 	trackID := s.extractID(r, "/api/lyrics/")
 	
+	if trackID == "search" {
+		s.handleLyricsSearch(w, r)
+		return
+	}
+
 	if r.Method == http.MethodGet {
 		s.handleGetLyrics(trackID, w, r)
 		return
@@ -2288,28 +2294,46 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 	// 1. Intentar leer de archivo local primero (verdad absoluta del usuario)
 	localLyrics, _ := editor.ReadLyrics(trackID)
 	if localLyrics != "" {
+		slog.Info("📜 Letras encontradas localmente", "trackID", trackID)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"lyrics": localLyrics})
 		return
 	}
 
 	// 2. Intentar obtener de LRCLib (mejor calidad, letras sincronizadas)
+	slog.Info("🌐 Buscando letras en LRCLib", "artist", artist, "title", title)
 	resp, err := http.Get(fmt.Sprintf("https://lrclib.net/api/get?artist_name=%s&track_name=%s", url.QueryEscape(artist), url.QueryEscape(title)))
 	if err == nil && resp.StatusCode == 200 {
 		defer resp.Body.Close()
-		w.Header().Set("Content-Type", "application/json")
-		io.Copy(w, resp.Body)
-		return
+		var lrcData struct {
+			SyncedLyrics string `json:"syncedLyrics"`
+			PlainLyrics  string `json:"plainLyrics"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&lrcData); err == nil {
+			lyricsText := lrcData.SyncedLyrics
+			if lyricsText == "" {
+				lyricsText = lrcData.PlainLyrics
+			}
+			if lyricsText != "" {
+				slog.Info("✅ Letras obtenidas de LRCLib")
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{"lyrics": lyricsText})
+				return
+			}
+		}
 	}
 
 	// Fallback: lyrics.ovh
+	slog.Info("🌐 Fallback a lyrics.ovh", "artist", artist, "title", title)
 	resp, err = http.Get(fmt.Sprintf("https://api.lyrics.ovh/v1/%s/%s", url.QueryEscape(artist), url.QueryEscape(title)))
 	if err != nil {
+		slog.Warn("❌ Fallo total al obtener letras", "err", err)
 		http.Error(w, "Failed to fetch lyrics", http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
 	
+	slog.Info("✅ Letras obtenidas de lyrics.ovh")
 	w.Header().Set("Content-Type", "application/json")
 	io.Copy(w, resp.Body)
 }
@@ -2323,13 +2347,16 @@ func (s *Server) handleLyricsSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("🔍 Buscando letras (manual)", "artista", artist, "titulo", title)
 	resp, err := http.Get(fmt.Sprintf("https://lrclib.net/api/search?artist_name=%s&track_name=%s", url.QueryEscape(artist), url.QueryEscape(title)))
 	if err != nil {
+		slog.Error("❌ Error en búsqueda LRCLib", "err", err)
 		http.Error(w, "Failed to search lyrics", http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
 
+	slog.Info("✅ Búsqueda manual completada", "status", resp.StatusCode)
 	w.Header().Set("Content-Type", "application/json")
 	io.Copy(w, resp.Body)
 }

@@ -12,6 +12,7 @@
   let debounceTimer;
 
   async function performSearch() {
+    console.log("🔍 performSearch query:", query);
     if (!query || query.length < 2) {
       results = { tracks: [], artists: [], albums: [], genres: [], playlists: [] };
       isSearching = false;
@@ -58,6 +59,7 @@
 
   function handleKeyDown(e) {
     if (e.key === "Enter") {
+      console.log("⌨️ Enter pressed, calling onsearch:", query);
       isOpen = false;
       onsearch(query);
     }
@@ -88,9 +90,9 @@
 
 <div class="search-container" bind:this={container}>
   <div class="input-wrapper">
-    <div class="search-icon">
+    <button class="search-icon-btn" onclick={() => onsearch(query)} title="Buscar">
       <Icon name="search" size={18} />
-    </div>
+    </button>
     <input
       type="text"
       placeholder="Buscar canciones, lanzamientos, géneros..."
@@ -249,15 +251,25 @@
     opacity: 0.45;
   }
 
-  .search-icon {
+  .search-icon-btn {
+    background: none;
+    border: none;
     color: var(--text-muted);
     opacity: 0.4;
     display: flex;
     align-items: center;
-    transition: opacity 0.2s;
+    transition: all 0.2s;
+    cursor: pointer;
+    padding: 0;
+  }
+  
+  .search-icon-btn:hover {
+    opacity: 1;
+    color: var(--primary);
+    transform: scale(1.1);
   }
 
-  .input-wrapper:focus-within .search-icon {
+  .input-wrapper:focus-within .search-icon-btn {
     opacity: 0.8;
     color: var(--primary);
   }
