@@ -1917,7 +1917,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	rows3, err := s.getDB(r).Conn.Query(fmt.Sprintf(`
 		SELECT a.id, a.title, art.name, MAX(t.created_at) as added_at, 
 		       COALESCE(MAX(t.genre), '') as genre, MAX(t.bit_rate) as bitrate,
-		       COALESCE((SELECT ut.play_count FROM user_tracks ut WHERE ut.track_id = t.id AND ut.username = ?), 0) as pc
+		       COALESCE((SELECT ut.play_count FROM user_tracks ut WHERE ut.track_id = t.id AND ut.username = ?), 0) as pc,
+		       MAX(a.year) as year
 		FROM albums a
 		JOIN artists art ON a.artist_id = art.id
 		JOIN tracks t ON a.id = t.album_id
@@ -1927,21 +1928,32 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	`, whereRecent), append([]interface{}{user.Username}, pathArgs...)...)
 	if err == nil {
 		defer rows3.Close()
+		currentYear := time.Now().Year()
 		for rows3.Next() {
 			var id, title, artist, addedAt, genre string
-			var br, pc int
-			rows3.Scan(&id, &title, &artist, &addedAt, &genre, &br, &pc)
+			var br, pc, year int
+			rows3.Scan(&id, &title, &artist, &addedAt, &genre, &br, &pc, &year)
 			
-			// Algoritmo de Mood/Tag Refinado
+			// Algoritmo de Mood/Tag Refinado con Prioridades (NUEVA JERARQUÍA PARA MÁS VARIEDAD)
 			tag := "Recuerdo"
 			color := "tertiary"
 			g := strings.ToLower(genre)
 			
-			if pc == 0 {
-				tag = "Descubrir"
-				color = "secondary"
+			// 1. Prioridad Máxima: Éxitos personales
+			if pc > 30 {
+				tag = "Top Hit"
+				color = "primary"
+			// 2. Alta Fidelidad
+			} else if br > 1000000 {
+				tag = "Premium"
+				color = "primary"
+			// 3. Sentimiento Temporal (Clásicos)
+			} else if year > 0 && year < currentYear-20 {
+				tag = "Nostalgia"
+				color = "tertiary"
+			// 4. Género / Mood
 			} else if strings.Contains(g, "rock") || strings.Contains(g, "pop") || strings.Contains(g, "electronic") || strings.Contains(g, "metal") {
-				tag = "Energy"
+				tag = "Energía"
 				color = "primary"
 			} else if strings.Contains(g, "jazz") || strings.Contains(g, "classical") {
 				tag = "Inspiración"
@@ -1949,17 +1961,18 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			} else if strings.Contains(g, "chill") || strings.Contains(g, "ambient") || strings.Contains(g, "lo-fi") || strings.Contains(g, "blues") {
 				tag = "Chill"
 				color = "tertiary"
-			} else if br > 1000000 {
-				tag = "Premium"
-				color = "primary"
+			// 5. Por defecto si es nuevo y no cumple lo anterior
+			} else if pc == 0 {
+				tag = "Descubrir"
+				color = "secondary"
 			}
 
 			recentAlbums = append(recentAlbums, map[string]interface{}{
-				"id": id, 
-				"title": title, 
-				"artist": artist, 
+				"id":      id,
+				"title":   title,
+				"artist":  artist,
 				"addedAt": addedAt,
-				"tag": tag,
+				"tag":      tag,
 				"tagColor": color,
 			})
 		}

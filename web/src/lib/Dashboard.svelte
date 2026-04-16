@@ -411,20 +411,21 @@
     position: absolute;
     top: 1rem;
     left: 1rem;
-    padding: 0.35rem 0.8rem;
+    padding: 0.4rem 0.9rem;
     border-radius: 100px;
     font-size: 0.65rem;
-    font-weight: 800;
+    font-weight: 950;
     z-index: 4;
-    backdrop-filter: blur(8px);
-    background: rgba(0,0,0,0.4);
-    border: 1px solid rgba(255,255,255,0.1);
-    color: white;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    background: var(--surface-container-highest);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
-  .tag-badge.primary { background: rgba(var(--primary-rgb), 0.6); border-color: var(--primary-30); }
-  .tag-badge.secondary { background: rgba(var(--secondary-rgb), 0.6); border-color: var(--secondary-30); }
-  .tag-badge.tertiary { background: rgba(var(--tertiary-rgb), 0.6); border-color: var(--tertiary-30); }
+  .tag-badge.primary { background: var(--primary); color: #fff; border-color: rgba(255,255,255,0.2); }
+  .tag-badge.secondary { background: var(--secondary); color: #fff; border-color: rgba(255,255,255,0.2); }
+  .tag-badge.tertiary { background: var(--tertiary); color: #fff; border-color: rgba(255,255,255,0.2); }
 
   .album-overlay {
     position: absolute;
