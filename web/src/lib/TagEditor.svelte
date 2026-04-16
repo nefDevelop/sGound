@@ -15,6 +15,7 @@
   let lyricSearchResults = $state([]); 
   let suggestions = $state([]);
   let activeSuggestionField = $state("");
+  let manualQuery = $state("");
 
   async function handleSave() {
     loading = true;
@@ -105,6 +106,7 @@
   }
 
   async function autoSearchTags() {
+    loading = true;
     try {
       const res = await fetch(`/api/metadata/search?artist=${encodeURIComponent(track.artist)}&title=${encodeURIComponent(track.title)}`);
       if (!res.ok) throw new Error("Metadata not found");
@@ -113,9 +115,31 @@
       if (searchResults.length === 1) {
         applyMetadata(searchResults[0]);
       }
-      // Si hay más de uno, la UI mostrará el selector automáticamente por el bloque {#if searchResults.length > 1}
     } catch (e) {
       showToast("Auto search failed: " + e.message, "error");
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function searchByField(fieldName, value) {
+    if (!value) return;
+    loading = true;
+    
+    let artist = fieldName === 'artist' ? value : "";
+    let title = fieldName === 'title' ? value : "";
+    let album = fieldName === 'album' ? value : "";
+
+    try {
+      const url = `/api/metadata/search?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(title)}&album=${encodeURIComponent(album)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Search failed");
+      searchResults = await res.json();
+      if (searchResults.length === 0) showToast("No results found for " + fieldName, "info");
+    } catch (e) {
+      showToast("Search failed: " + e.message, "error");
+    } finally {
+      loading = false;
     }
   }
 
@@ -188,7 +212,7 @@
 
     <div class="editor-content-wrap">
       <aside class="editor-sidebar">
-        <div class="editor-hero">
+        <div class="editor-hero" class:compact-hero={searchResults.length > 0 || lyricSearchResults.length > 0}>
           <div class="cover-canvas">
               <img src="/api/cover/{track.id}?t={Date.now()}" alt="Cover" />
               <div class="cover-overlay">
@@ -206,7 +230,7 @@
             <Icon name="music" size={16} color="white" /> 
             <span>MusicBrainz Auto-Tag</span>
           </button>
-          <button type="button" class="auto-btn" onclick={autoSearchTags}>
+          <button type="button" class="auto-btn" onclick={autoSearchTags} disabled={loading}>
             <Icon name="zap" size={16} color="var(--primary)" /> 
             <span>Search Metadata</span>
           </button>
@@ -239,13 +263,23 @@
             <div class="form-grid">
               <label class="col-span-2">
                 <span>Title</span>
-                <input type="text" bind:value={track.title} required />
+                <div class="field-input-wrapper">
+                  <input type="text" bind:value={track.title} required />
+                  <button type="button" class="field-search-btn" onclick={() => searchByField('title', track.title)} title="Search by title">
+                    <Icon name="search" size={14} />
+                  </button>
+                </div>
               </label>
 
               <label class="relative col-span-2">
                 <span>Artist</span>
-                <input type="text" bind:value={track.artist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} />
-                {#if suggestions.length > 0 && activeSuggestionField === 'artist'}
+                <div class="field-input-wrapper">
+                  <input type="text" bind:value={track.artist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} />
+                  <button type="button" class="field-search-btn" onclick={() => searchByField('artist', track.artist)} title="Search by artist">
+                    <Icon name="search" size={14} />
+                  </button>
+                </div>
+                {#if (suggestions?.length || 0) > 0 && activeSuggestionField === 'artist'}
                   <div class="suggestions">
                     {#each suggestions as s}
                       <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
@@ -256,8 +290,13 @@
 
               <label class="relative col-span-2">
                 <span>Album</span>
-                <input type="text" bind:value={track.album} oninput={(e) => fetchSuggestions('album', e.currentTarget.value)} />
-                {#if suggestions.length > 0 && activeSuggestionField === 'album'}
+                <div class="field-input-wrapper">
+                  <input type="text" bind:value={track.album} oninput={(e) => fetchSuggestions('album', e.currentTarget.value)} />
+                  <button type="button" class="field-search-btn" onclick={() => searchByField('album', track.album)} title="Search by album">
+                    <Icon name="search" size={14} />
+                  </button>
+                </div>
+                {#if (suggestions?.length || 0) > 0 && activeSuggestionField === 'album'}
                   <div class="suggestions">
                     {#each suggestions as s}
                       <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
@@ -274,7 +313,7 @@
                 <span>Genre</span>
                 <input type="text" bind:value={track.genre} oninput={(e) => fetchSuggestions('genre', e.currentTarget.value)} />
                 <span class="field-hint">Separa múltiples géneros con punto y coma (ej: Rock; Pop)</span>
-                {#if suggestions.length > 0 && activeSuggestionField === 'genre'}
+                {#if (suggestions?.length || 0) > 0 && activeSuggestionField === 'genre'}
                   <div class="suggestions">
                     {#each suggestions as s}
                       <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
@@ -424,6 +463,42 @@
     display: flex;
     flex-direction: column;
     gap: 0.8rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .manual-search-wrap {
+    display: none;
+  }
+
+  .field-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .field-search-btn {
+    position: absolute;
+    right: 12px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    opacity: 0.4;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+
+  .field-search-btn:hover {
+    opacity: 1;
+    color: var(--primary);
+    transform: scale(1.1);
+  }
+
+  .field-input-wrapper input {
+    padding-right: 40px !important;
   }
 
   .auto-btn {
@@ -501,25 +576,27 @@
   }
 
   .result-item {
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
-    padding: 0.8rem;
-    border-radius: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.05);
+    padding: 0.6rem;
+    border-radius: 12px;
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.8rem;
     cursor: pointer;
     text-align: left;
     color: white;
+    width: 100%;
+    transition: all 0.2s;
   }
 
   .result-item:hover { border-color: #ff3366; background: rgba(255, 51, 102, 0.1); }
 
-  .result-item img { width: 50px; height: 50px; border-radius: 8px; }
+  .result-item img { width: 42px; height: 42px; border-radius: 6px; object-fit: cover; }
 
-  .res-info { display: flex; flex-direction: column; }
-  .res-title { font-weight: 700; font-size: 0.95rem; }
-  .res-sub { font-size: 0.8rem; color: #94a3b8; }
+  .res-info { display: flex; flex-direction: column; overflow: hidden; }
+  .res-title { font-weight: 700; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .res-sub { font-size: 0.75rem; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.7; }
 
   .tag-form {
     display: flex;
@@ -633,6 +710,28 @@
   }
   .save-btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
   .save-btn:disabled { opacity: 0.5; filter: grayscale(1); }
+
+  .editor-hero {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Compact Mode for Hero when results appear */
+  .compact-hero {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .compact-hero .cover-canvas {
+    width: 64px !important;
+    height: 64px !important;
+    margin-bottom: 0 !important;
+    border-radius: 12px !important;
+  }
+
+  .compact-hero .hero-info h3 { font-size: 1rem; }
+  .compact-hero .hero-info p { font-size: 0.8rem; }
 
   .cancel-btn {
     background: transparent;

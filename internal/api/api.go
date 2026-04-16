@@ -127,6 +127,8 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/api/playlists/", auth(s.handlePlaylistActions))
 	mux.HandleFunc("/api/smart-playlists/", auth(s.handleSmartPlaylists))
 	mux.HandleFunc("/api/library/metadata", auth(s.handleLibraryMetadata))
+	mux.HandleFunc("/api/metadata/suggest", auth(s.handleMetadataSuggest))
+	mux.HandleFunc("/api/metadata/search", auth(s.handleMetadataSearch))
 	mux.HandleFunc("/api/autocomplete", auth(s.handleAutocomplete))
 	mux.HandleFunc("/api/openapi.yaml", s.handleServeOpenAPI)
 	mux.HandleFunc("/api/docs", s.handleServeSwaggerUI)
@@ -1759,7 +1761,7 @@ func (s *Server) handleAutocomplete(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var results []string
+	results := []string{}
 	for rows.Next() {
 		var val string
 		rows.Scan(&val)
@@ -2187,14 +2189,20 @@ func (s *Server) handleMetadataSuggest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
 	artist := r.URL.Query().Get("artist")
 	title := r.URL.Query().Get("title")
+	album := r.URL.Query().Get("album")
 	
-	if artist == "" || title == "" {
-		http.Error(w, "Artist and title are required", http.StatusBadRequest)
+	if artist == "" && title == "" && album == "" {
+		http.Error(w, "At least one search parameter is required", http.StatusBadRequest)
 		return
 	}
 
-	searchQuery := fmt.Sprintf("%s %s", artist, title)
-	url := fmt.Sprintf("https://itunes.apple.com/search?term=%s&media=music&limit=5", strings.ReplaceAll(searchQuery, " ", "+"))
+	parts := []string{}
+	if artist != "" { parts = append(parts, artist) }
+	if title != "" { parts = append(parts, title) }
+	if album != "" { parts = append(parts, album) }
+
+	searchQuery := strings.Join(parts, " ")
+	url := fmt.Sprintf("https://itunes.apple.com/search?term=%s&media=music&limit=15", url.QueryEscape(searchQuery))
 	
 	resp, err := http.Get(url)
 	if err != nil {
