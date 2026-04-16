@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -17,6 +18,9 @@ type Watcher struct {
 	root       string
 	eventQueue chan string
 	OnEvent    func(path string)
+	
+	muMuted    sync.Mutex
+	mutedPaths map[string]time.Time
 }
 
 func NewWatcher(root string, onEvent func(path string)) (*Watcher, error) {
@@ -30,7 +34,27 @@ func NewWatcher(root string, onEvent func(path string)) (*Watcher, error) {
 		root:       root,
 		eventQueue: make(chan string, 1000), // Buffer para ráfagas de archivos
 		OnEvent:    onEvent,
+		mutedPaths: make(map[string]time.Time),
 	}, nil
+}
+
+// MutePath ignora eventos de un archivo durante un tiempo determinado
+func (w *Watcher) MutePath(path string, d time.Duration) {
+	w.muMuted.Lock()
+	defer w.muMuted.Unlock()
+	w.mutedPaths[path] = time.Now().Add(d)
+}
+
+func (w *Watcher) isMuted(path string) bool {
+	w.muMuted.Lock()
+	defer w.muMuted.Unlock()
+	until, exists := w.mutedPaths[path]
+	if !exists { return false }
+	if time.Now().After(until) {
+		delete(w.mutedPaths, path)
+		return false
+	}
+	return true
 }
 
 func (w *Watcher) Start() error {
@@ -92,6 +116,9 @@ func (w *Watcher) run() {
 
 			if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) || event.Has(fsnotify.Rename) {
 				if !isDir(event.Name) && isAudioFile(event.Name) {
+					if w.isMuted(event.Name) {
+						continue
+					}
 					// Enviar a la cola en lugar de procesar directo
 					select {
 					case w.eventQueue <- event.Name:

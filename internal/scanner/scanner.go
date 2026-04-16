@@ -22,53 +22,138 @@ import (
 type Scanner struct {
 	DB         *db.MasterDatabase
 	OnProgress func(path string, count int)
+
+	// Caché para optimización de agrupación de álbumes
+	muAlbums         sync.Mutex
+	resolvedAlbums   map[string]string   // albumId -> artista principal
+	conflictedAlbums map[string]struct{} // albumId -> requiere votación
+
+	// Caché para optimización de inserciones SQL
+	seenArtists map[string]struct{}
+	seenAlbums  map[string]struct{}
 }
 
 func NewScanner(database *db.MasterDatabase) *Scanner {
-	return &Scanner{DB: database}
+	return &Scanner{
+		DB:               database,
+		resolvedAlbums:   make(map[string]string),
+		conflictedAlbums: make(map[string]struct{}),
+		seenArtists:      make(map[string]struct{}),
+		seenAlbums:       make(map[string]struct{}),
+	}
 }
 
 func (s *Scanner) ScanDirectory(rootPath string) error {
-	slog.Debug("Starting concurrent library scan", "path", rootPath)
+	slog.Info("Starting Turbo library scan", "path", rootPath)
 
-	jobs := make(chan string, 100)
+	s.muAlbums.Lock()
+	s.resolvedAlbums = make(map[string]string)
+	s.conflictedAlbums = make(map[string]struct{})
+	s.seenArtists = make(map[string]struct{})
+	s.seenAlbums = make(map[string]struct{})
+	s.muAlbums.Unlock()
+
+	jobs := make(chan string, 200)
+	results := make(chan *trackResult, 200)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	count := 0
 
-	// Pool de 16 workers para procesar archivos en paralelo (el ritmo de "15 en 15")
+	// DB WRITER (Batch Transactions para máxima velocidad)
+	writerDone := make(chan bool)
+	go func() {
+		batchSize := 200
+		var batch []*trackResult
+		
+		flush := func() {
+			if len(batch) == 0 { return }
+			tx, err := s.DB.Conn.Begin()
+			if err != nil {
+				slog.Error("Failed to start transaction", "error", err)
+				return
+			}
+			
+			for _, r := range batch {
+				if _, seen := s.seenArtists[r.artistId]; !seen {
+					tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", r.artistId, r.dbAlbumArtist)
+					s.seenArtists[r.artistId] = struct{}{}
+				}
+				if _, seen := s.seenAlbums[r.albumId]; !seen {
+					tx.Exec(`
+						INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)
+						ON CONFLICT(id) DO UPDATE SET 
+							year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END
+					`, r.albumId, r.artistId, r.albumName, r.year)
+					s.seenAlbums[r.albumId] = struct{}{}
+				}
+				tx.Exec(
+					`INSERT OR REPLACE INTO tracks 
+					(id, album_id, artist, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, instrumental, replay_gain, file_mtime, file_hash) 
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					r.trackId, r.albumId, r.artistName, r.title, r.trackNum, r.discNum, r.path, r.duration, r.genre, r.size, r.format, r.composer, r.comment, r.bitRate, r.sampleRate, r.status, r.instrumental, r.replayGain, r.fileMtime, r.hash,
+				)
+
+				s.muAlbums.Lock()
+				resolved, exists := s.resolvedAlbums[r.albumId]
+				if !exists {
+					s.resolvedAlbums[r.albumId] = r.dbAlbumArtist
+				} else if resolved != r.dbAlbumArtist {
+					s.conflictedAlbums[r.albumId] = struct{}{}
+				}
+				s.muAlbums.Unlock()
+			}
+			tx.Commit()
+			batch = nil
+		}
+
+		for r := range results {
+			batch = append(batch, r)
+			if len(batch) >= batchSize { flush() }
+		}
+		flush()
+		writerDone <- true
+	}()
+
+	// 16 Workers (Como el código que pasaste)
 	for i := 0; i < 16; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for path := range jobs {
-				if err := s.ParseAndSaveFile(path); err != nil {
-					slog.Error("Failed to parse file", "path", path, "error", err)
+				res, err := s.ParseFile(path)
+				if err != nil {
+					slog.Error("Failed to process file", "path", path, "error", err)
+					continue
 				}
+				if res != nil { results <- res }
 				mu.Lock()
 				count++
 				currentCount := count
 				mu.Unlock()
-				if s.OnProgress != nil {
-					s.OnProgress(path, currentCount)
-				}
+				if s.OnProgress != nil { s.OnProgress(path, currentCount) }
 			}
 		}()
 	}
 
 	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil { return nil }
-		if !d.IsDir() && isAudioFile(d.Name()) == nil {
-			jobs <- path
-		}
+		if !d.IsDir() && isAudioFile(d.Name()) == nil { jobs <- path }
 		return nil
 	})
 
 	close(jobs)
 	wg.Wait()
+	close(results)
+	<-writerDone
 
-	// Pruning de archivos desaparecidos
-	slog.Debug("Pruning library: checking for missing files")
+	// Votación de artistas de álbum
+	s.muAlbums.Lock()
+	for id := range s.conflictedAlbums {
+		s.recalculateAlbumArtist(id)
+	}
+	s.muAlbums.Unlock()
+
+	// Pruning
 	orphans, err := s.DB.GetOrphanedTracks()
 	if err == nil && len(orphans) > 0 {
 		var ids []string
@@ -80,66 +165,71 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	return err
 }
 
-func isAudioFile(filename string) error {
-	ext := strings.ToLower(filepath.Ext(filename))
-	supported := map[string]bool{".mp3": true, ".flac": true, ".ogg": true, ".m4a": true, ".mp4": true, ".opus": true, ".wav": true}
-	if !supported[ext] { return fmt.Errorf("unsupported") }
-	return nil
+func (s *Scanner) ParseAndSaveFile(path string) error {
+	res, err := s.ParseFile(path)
+	if err != nil { return err }
+	if res == nil { return nil }
+
+	tx, err := s.DB.Conn.Begin()
+	if err != nil { return err }
+
+	tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", res.artistId, res.dbAlbumArtist)
+	tx.Exec(`
+		INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET 
+			year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END
+	`, res.albumId, res.artistId, res.albumName, res.year)
+
+	_, err = tx.Exec(
+		`INSERT OR REPLACE INTO tracks 
+		(id, album_id, artist, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, instrumental, replay_gain, file_mtime, file_hash) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		res.trackId, res.albumId, res.artistName, res.title, res.trackNum, res.discNum, res.path, res.duration, res.genre, res.size, res.format, res.composer, res.comment, res.bitRate, res.sampleRate, res.status, res.instrumental, res.replayGain, res.fileMtime, res.hash,
+	)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }
 
-func (s *Scanner) ParseAndSaveFile(path string) error {
+func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 	fileStat, err := os.Stat(path)
-	if err != nil { return err }
+	if err != nil { return nil, err }
 	fileSize := fileStat.Size()
 	fileMtime := fileStat.ModTime().Unix()
 	fileExt := strings.TrimPrefix(filepath.Ext(path), ".")
 
-	// ABRIR EL ARCHIVO SOLO UNA VEZ
-	f, err := os.Open(path)
-	if err != nil { return err }
-	defer f.Close()
-
-	// FAST HASH (1MB)
-	hash := ""
-	buf := make([]byte, 1024*1024)
-	n, _ := f.ReadAt(buf, 0)
-	if n > 0 {
-		h := sha1.New()
-		h.Write(buf[:n])
-		hash = hex.EncodeToString(h.Sum(nil))
+	// FAST PATH: Si ya está en la DB y no cambió, ni siquiera abrimos el archivo
+	var trackId, currentAlbumId, status string
+	var dbMtime, dbSize int64
+	err = s.DB.Conn.QueryRow("SELECT id, file_mtime, size, album_id, status FROM tracks WHERE path = ?", path).
+		Scan(&trackId, &dbMtime, &dbSize, &currentAlbumId, &status)
+	
+	if err == nil && dbMtime == fileMtime && dbSize == fileSize {
+		return nil, nil 
 	}
 
+	f, err := os.Open(path)
+	if err != nil { return nil, err }
+	defer f.Close()
+
+	// Metadatos
 	metadata, err := tag.ReadFrom(f)
-	
-	// DECLARACIÓN DE VARIABLES (Scope raíz de la función)
-	var artistName, albumArtist, albumName, title, albumId string
+	var artistName, albumName, title string
 	var trackNum, year, discNum, duration int
 	var genre, composer, comment string
 	var replayGain float64
 	var instrumental bool
 
 	if err != nil {
-		// FALLBACK: Si falla el parser, usamos la ruta
 		artistName = "Unknown Artist"
-		albumArtist = "Unknown Artist"
-		albumName = filepath.Base(filepath.Dir(path))
+		albumName = "Unknown Album"
 		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		genre = "Unknown"
-		albumId = GenerateID(filepath.Dir(path) + albumName)
 	} else {
 		artistName = metadata.Artist()
 		if artistName == "" { artistName = "Unknown Artist" }
-		
-		albumArtist = artistName 
-		raw := metadata.Raw()
-		if val, ok := raw["albumartist"].(string); ok && val != "" {
-			albumArtist = val
-		} else if val, ok := raw["TPE2"].(string); ok && val != "" { 
-			albumArtist = val
-		} else if val, ok := raw["ALBUMARTIST"].(string); ok && val != "" {
-			albumArtist = val
-		}
-
 		albumName = metadata.Album()
 		if albumName == "" { albumName = "Unknown Album" }
 		title = metadata.Title()
@@ -151,109 +241,89 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 		if genre == "" { genre = "Unknown" }
 		composer = metadata.Composer()
 		comment = metadata.Comment()
-
-		// EXTRACCIÓN DE REPLAYGAIN DESDE TAGS (Opcional, FFprobe es más fiable)
-		for k, v := range raw {
-			key := strings.ToUpper(k)
-			if strings.Contains(key, "REPLAYGAIN_TRACK_GAIN") {
-				if val, ok := v.(string); ok {
-					cleanVal := strings.TrimSuffix(strings.ToLower(val), " db")
-					fmt.Sscanf(cleanVal, "%f", &replayGain)
-					break
-				}
-			}
-		}
-
-		albumGroupingKey := NormalizeArtist(albumArtist)
-		albumId = GenerateID(albumGroupingKey + albumName)
 	}
 
+	// ffprobe solo si es necesario (sin duración)
 	var bitRate, sampleRate int
-	// EXTRACCIÓN DE DURACIÓN Y REPLAYGAIN CON FFPROBE (Prioridad sobre tags básicos)
-	if data, err := getAudioMetadataWithFFprobe(path); err == nil {
-		duration = data.duration
-		bitRate = data.bitRate
-		sampleRate = data.sampleRate
-		if data.replayGain != 0 {
-			replayGain = data.replayGain
+	if duration == 0 {
+		if data, err := getAudioMetadataWithFFprobe(path); err == nil {
+			duration = data.duration
+			bitRate = data.bitRate
+			sampleRate = data.sampleRate
+			if data.replayGain != 0 { replayGain = data.replayGain }
 		}
 	}
-
 	if sampleRate == 0 { sampleRate = 44100 }
 
-	trackId := tags.ReadPersistentID(path)
+	// ID Persistente
 	if trackId == "" {
-		trackId = GenerateID(path)
+		trackId = tags.ReadPersistentID(path)
+		if trackId == "" { trackId = GenerateID(path) }
+	}
+
+	albumArtistTag := ""
+	if metadata != nil {
+		raw := metadata.Raw()
+		for _, tagKey := range []string{"albumartist", "ALBUMARTIST", "TPE2"} {
+			if val, ok := raw[tagKey].(string); ok && val != "" {
+				albumArtistTag = val
+				break
+			}
+		}
+	}
+
+	var groupingKey string
+	if albumArtistTag != "" {
+		groupingKey = "AA:" + NormalizeArtist(albumArtistTag)
 	} else {
-		var dbMtime int64
-		var dbSize int64
-		var dbPath string
-		var dbBitrate int
-		err = s.DB.Conn.QueryRow("SELECT file_mtime, size, path, bit_rate FROM tracks WHERE id = ?", trackId).Scan(&dbMtime, &dbSize, &dbPath, &dbBitrate)
-		if err == nil && dbBitrate > 0 && dbMtime == fileMtime && dbSize == fileSize && dbPath == path {
-			return nil 
+		dir := filepath.Dir(path)
+		base := strings.ToLower(filepath.Base(dir))
+		if strings.HasPrefix(base, "cd") || strings.HasPrefix(base, "disc") || strings.HasPrefix(base, "disk") {
+			dir = filepath.Dir(dir)
 		}
+		groupingKey = "DIR:" + dir
 	}
 
-	artistId := GenerateID(albumArtist)
-	s.DB.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistId, albumArtist)
+	albumId := GenerateID(groupingKey + "|" + NormalizeString(albumName))
+	dbAlbumArtist := albumArtistTag
+	if dbAlbumArtist == "" { dbAlbumArtist = artistName }
+	artistId := GenerateID(dbAlbumArtist)
 
-	if albumId == "" {
-		albumGroupingKey := albumArtist
-		if strings.Contains(albumArtist, "Unknown") {
-			albumGroupingKey = filepath.Dir(path)
-		}
-		albumId = GenerateID(albumGroupingKey + albumName)
-	}
-	s.DB.Conn.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", albumId, artistId, albumName, year)
+	if status == "" { status = "pending" }
 
-	status := "pending"
-	var existingStatus string
-	err = s.DB.Conn.QueryRow("SELECT status FROM tracks WHERE id = ?", trackId).Scan(&existingStatus)
-	if err == nil { status = existingStatus }
-
-	// Evitar duplicados por ruta si ha cambiado el ID (ej: de basado en ruta a PersistentID)
-	var existingId string
-	var existingIdStatus string
-	err = s.DB.Conn.QueryRow("SELECT id, status FROM tracks WHERE path = ?", path).Scan(&existingId, &existingIdStatus)
-	if err == nil && existingId != trackId {
-		slog.Warn("Path collision detected: migrating track to new ID", "path", path, "old", existingId, "new", trackId)
-		// Preservar el estado (muy importante para evitar que vuelvan al Inbox)
-		status = existingIdStatus
-		// Migrar datos de usuario e historiales
-		s.DB.Conn.Exec("UPDATE OR IGNORE user_tracks SET track_id = ? WHERE track_id = ?", trackId, existingId)
-		s.DB.Conn.Exec("UPDATE OR IGNORE playlist_tracks SET track_id = ? WHERE track_id = ?", trackId, existingId)
-		s.DB.Conn.Exec("UPDATE OR IGNORE playback_history SET track_id = ? WHERE track_id = ?", trackId, existingId)
-		// Eliminar el antiguo para evitar duplicados en la vista de biblioteca
-		s.DB.Conn.Exec("DELETE FROM tracks WHERE id = ?", existingId)
-	}
-
-	_, err = s.DB.Conn.Exec(
-		`INSERT OR REPLACE INTO tracks 
-		(id, album_id, artist, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, instrumental, replay_gain, file_mtime, file_hash) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		trackId, albumId, artistName, title, trackNum, discNum, path, duration, genre, fileSize, fileExt, composer, comment, bitRate, sampleRate, status, instrumental, replayGain, fileMtime, hash,
-	)
-	return err
+	return &trackResult{
+		trackId: trackId, albumId: albumId, artistId: artistId, 
+		artistName: artistName, dbAlbumArtist: dbAlbumArtist, albumName: albumName, 
+		title: title, path: path, genre: genre, format: fileExt, 
+		composer: composer, comment: comment, hash: "", status: status,
+		trackNum: trackNum, discNum: discNum, year: year, duration: duration, 
+		bitRate: bitRate, sampleRate: sampleRate, size: fileSize, 
+		fileMtime: fileMtime, replayGain: replayGain, instrumental: instrumental,
+	}, nil
 }
 
-type audioMetadata struct {
-	duration   int
-	bitRate    int
-	sampleRate int
+type trackResult struct {
+	trackId, albumId, artistId, artistName, dbAlbumArtist, albumName, title, path, genre, format, composer, comment, hash, status string
+	trackNum, discNum, year, duration, bitRate, sampleRate int
+	size, fileMtime int64
 	replayGain float64
+	instrumental bool
+}
+
+func isAudioFile(filename string) error {
+	ext := strings.ToLower(filepath.Ext(filename))
+	supported := map[string]bool{".mp3": true, ".flac": true, ".ogg": true, ".m4a": true, ".mp4": true, ".opus": true, ".wav": true}
+	if !supported[ext] { return fmt.Errorf("unsupported") }
+	return nil
 }
 
 func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
-	// Usamos nokey=0 para identificar cada campo correctamente
 	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration,bit_rate:stream=sample_rate:format_tags=REPLAYGAIN_TRACK_GAIN,replaygain_track_gain", "-of", "default=noprint_wrappers=1:nokey=0", path)
 	out, err := cmd.Output()
-	if err != nil {
-		return audioMetadata{}, err
-	}
+	if err != nil { return audioMetadata{}, err }
 	
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	data := audioMetadata{sampleRate: 44100} // Default sensible
+	data := audioMetadata{sampleRate: 44100}
 	
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -277,16 +347,35 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 					data.replayGain = val
 				}
 			}
-		} else if strings.HasSuffix(line, " dB") {
-			// Fallback para el formato anterior si FFprobe lo saca sin key en los tags
-			cleanVal := strings.TrimSuffix(strings.ToLower(line), " db")
-			if val, err := strconv.ParseFloat(cleanVal, 64); err == nil {
-				data.replayGain = val
-			}
 		}
 	}
-	
 	return data, nil
+}
+
+type audioMetadata struct {
+	duration, bitRate, sampleRate int
+	replayGain float64
+}
+
+func (s *Scanner) recalculateAlbumArtist(albumId string) {
+	rows, err := s.DB.Conn.Query(`
+		SELECT artist, COUNT(*) as freq 
+		FROM tracks 
+		WHERE album_id = ? AND artist != 'Unknown Artist'
+		GROUP BY artist 
+		ORDER BY freq DESC, artist ASC
+	`, albumId)
+	if err != nil { return }
+	defer rows.Close()
+
+	var winnerName string
+	var maxFreq int
+	if rows.Next() { rows.Scan(&winnerName, &maxFreq) }
+	if winnerName == "" { return }
+
+	winnerArtistId := GenerateID(winnerName)
+	s.DB.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", winnerArtistId, winnerName)
+	s.DB.Conn.Exec("UPDATE albums SET artist_id = ? WHERE id = ?", winnerArtistId, albumId)
 }
 
 func GenerateID(input string) string {
@@ -298,12 +387,16 @@ func GenerateID(input string) string {
 func NormalizeArtist(name string) string {
 	name = strings.ToLower(name)
 	name = strings.TrimSpace(name)
-	// Eliminar ft., feat., with, etc para agrupar bajo el artista principal
-	separators := []string{" feat.", " ft.", " feat ", " with ", " & ", " / ", " vs. "}
+	separators := []string{" feat.", " ft.", " feat ", " ft ", " with "}
 	for _, sep := range separators {
-		if idx := strings.Index(name, sep); idx != -1 {
-			name = name[:idx]
-		}
+		if idx := strings.Index(name, sep); idx != -1 { name = name[:idx] }
 	}
 	return strings.TrimSpace(name)
+}
+
+func NormalizeString(s string) string {
+	s = strings.ToLower(s)
+	r := strings.NewReplacer(".", "", ",", "", "-", "", "(", "", ")", "", "[", "", "]", "", "'", "", "\"", "")
+	s = r.Replace(s)
+	return strings.TrimSpace(s)
 }

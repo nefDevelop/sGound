@@ -50,6 +50,7 @@ func main() {
 	if err != nil {
 		slog.Error("Failed to initialize file watcher", "error", err)
 	} else {
+		apiServer.Watcher = w
 		if err := w.Start(); err != nil {
 			slog.Error("Failed to start file watcher", "error", err)
 		} else {

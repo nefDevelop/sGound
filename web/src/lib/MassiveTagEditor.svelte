@@ -30,6 +30,7 @@
   // Datos globales que se aplicarán a todos
   let bulkData = $state({
     artist: '',
+    albumArtist: '',
     album: '',
     genre: '',
     year: '',
@@ -142,6 +143,7 @@
       
       bulkData = {
         artist: getCommon('artist'),
+        albumArtist: getCommon('albumArtist'),
         album: getCommon('album'),
         genre: getCommon('genre'),
         year: getCommon('year') || '',
@@ -206,6 +208,7 @@
       const promises = selectedTracks.map((track, index) => {
         const payload = { ...track };
         if (bulkData.artist) payload.artist = bulkData.artist;
+        if (bulkData.albumArtist) payload.albumArtist = bulkData.albumArtist;
         if (bulkData.album) payload.album = bulkData.album;
         if (bulkData.genre) payload.genre = bulkData.genre;
         if (bulkData.year) payload.year = parseInt(bulkData.year);
@@ -336,6 +339,18 @@
             <span>Artist</span>
             <input type="text" bind:value={bulkData.artist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} />
             {#if suggestions.length > 0 && activeSuggestionField === 'artist'}
+              <div class="suggestions">
+                {#each suggestions as s}
+                  <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
+                {/each}
+              </div>
+            {/if}
+          </label>
+
+          <label class="relative">
+            <span>Album Artist</span>
+            <input type="text" bind:value={bulkData.albumArtist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} />
+            {#if suggestions.length > 0 && activeSuggestionField === 'albumArtist'}
               <div class="suggestions">
                 {#each suggestions as s}
                   <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>

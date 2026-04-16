@@ -28,6 +28,7 @@
           title: track.title,
           artist: track.artist,
           album: track.album,
+          albumArtist: track.albumArtist,
           genre: track.genre,
           year: parseInt(track.year) || 0,
           trackNum: parseInt(track.trackNum) || 0,
@@ -198,6 +199,7 @@
 
   function applyMetadata(data) {
     track.artist = data.artist || track.artist;
+    track.albumArtist = data.albumArtist || data.artist || track.albumArtist;
     track.title = data.title || track.title;
     track.album = data.album || track.album;
     track.year = data.year || track.year;
@@ -307,6 +309,20 @@
                   </button>
                 </div>
                 {#if (suggestions?.length || 0) > 0 && activeSuggestionField === 'artist'}
+                  <div class="suggestions">
+                    {#each suggestions as s}
+                      <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
+                    {/each}
+                  </div>
+                {/if}
+              </label>
+
+              <label class="relative col-span-2">
+                <span>Album Artist</span>
+                <div class="field-input-wrapper">
+                  <input type="text" bind:value={track.albumArtist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} />
+                </div>
+                {#if (suggestions?.length || 0) > 0 && activeSuggestionField === 'albumArtist'}
                   <div class="suggestions">
                     {#each suggestions as s}
                       <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
@@ -491,10 +507,6 @@
     flex-direction: column;
     gap: 0.8rem;
     margin-bottom: 0.5rem;
-  }
-
-  .manual-search-wrap {
-    display: none;
   }
 
   .field-input-wrapper {

@@ -27,6 +27,7 @@ import (
 	"sgound/internal/metadata"
 	"sgound/internal/auth"
 	"sgound/internal/models"
+	"sgound/internal/watcher"
 	"sgound/web"
 	"sync"
 	"image"
@@ -43,6 +44,7 @@ type ScanStatus struct {
 type Server struct {
 	MasterDB *db.MasterDatabase
 	Config   *config.Config
+	Watcher  *watcher.Watcher
 	externalMeta *metadata.ExternalMetadata
 
 	jwtSecret        []byte
@@ -1066,6 +1068,14 @@ func (s *Server) handleEditTags(trackID string, w http.ResponseWriter, r *http.R
 	}
 
 	editor := tags.NewEditor(s.getDB(r))
+	
+	// Silenciar el watcher
+	var path string
+	s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+	if path != "" && s.Watcher != nil {
+		s.Watcher.MutePath(path, 10*time.Second)
+	}
+
 	changes, err := editor.UpdateTags(trackID, body)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -1285,6 +1295,11 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 		db.Conn.Exec("UPDATE tracks SET status = 'active' WHERE id = ?", oldID)
 		approvedCount++
 
+		// Silenciar el watcher para este archivo mientras escribimos tags
+		if s.Watcher != nil {
+			s.Watcher.MutePath(path, 10*time.Second)
+		}
+
 		// Lógica de Carátulas: Si no tiene interna, buscar local e incrustar
 		go func(p string, tid string) {
 			f, _ := os.Open(p)
@@ -1417,7 +1432,15 @@ func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
 
 	// Para cada grupo, buscamos el "Consenso"
 	for key, ids := range groups {
-		// Buscamos en TODA la biblioteca temas que coincidan en Título y Raíz de Artista
+		// REGLA DE SEGURIDAD: Si el título del álbum es demasiado corto o puramente numérico, no buscar consenso
+		// Esto evita falsos positivos con álbumes llamados "2023", "Untitled", "CD1", etc.
+		isGeneric := len(key.albumTitle) < 3
+		if !isGeneric {
+			if _, err := strconv.Atoi(key.albumTitle); err == nil { isGeneric = true }
+		}
+		
+		if isGeneric { continue }
+
 		consensusRows, err := db.Conn.Query(`
 			SELECT t.artist, COALESCE(al.year, 0)
 			FROM tracks t
@@ -1533,8 +1556,10 @@ func (s *Server) handleApplyInboxSuggestions(w http.ResponseWriter, r *http.Requ
 		_, err = tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistId, sug.Artist)
 		if err != nil { continue }
 
-		// 2. Obtener o crear álbum corregido
-		albumId := scanner.GenerateID(sug.Artist + sug.Album)
+		// 2. Obtener o crear álbum corregido (Lógica sincronizada con el scanner)
+		groupingKey := "AA:" + scanner.NormalizeArtist(sug.Artist)
+		albumId := scanner.GenerateID(groupingKey + "|" + scanner.NormalizeString(sug.Album))
+		
 		_, err = tx.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", albumId, artistId, sug.Album, sug.Year)
 		if err != nil { continue }
 
@@ -1868,13 +1893,13 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		whereGems += " AND " + pathFilter
 	}
 	rows, err := s.getDB(r).Conn.Query(fmt.Sprintf(`
-		SELECT MIN(t.id) as id, t.title, art.name as artist 
+		SELECT MIN(t.id) as id, a.title, art.name as artist 
 		FROM tracks t
-		JOIN albums al ON t.album_id = al.id
-		JOIN artists art ON al.artist_id = art.id
+		JOIN albums a ON t.album_id = a.id
+		JOIN artists art ON a.artist_id = art.id
 		LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
 		%s
-		GROUP BY TRIM(UPPER(al.title)), TRIM(UPPER(art.name))
+		GROUP BY a.id 
 		ORDER BY COALESCE(ut.play_count, 0) ASC, RANDOM() LIMIT 9
 	`, whereGems), append([]interface{}{user.Username}, pathArgs...)...)
 	if err == nil {
