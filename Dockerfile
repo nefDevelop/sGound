@@ -1,5 +1,5 @@
 # Stage 1: Build the frontend
-FROM node:22-alpine3.19 AS frontend-builder
+FROM node:26-alpine3.23 AS frontend-builder
 WORKDIR /web
 COPY web/package*.json ./
 RUN npm install
@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 # Stage 2: Build the backend
-FROM golang:1.22-alpine3.19 AS backend-builder
+FROM golang:1.26-alpine3.23 AS backend-builder
 WORKDIR /app
 
 # Step 1: Cache Go modules
@@ -25,7 +25,7 @@ COPY --from=frontend-builder /web/dist /app/web/dist
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o sgound-server ./cmd/sgound
 
 # Stage 3: Runtime
-FROM alpine:3.19
+FROM alpine:3.23
 WORKDIR /app
 RUN apk add --no-cache ca-certificates tini ffmpeg
 

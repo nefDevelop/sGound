@@ -1,4 +1,5 @@
 <script>
+  /** @type {{ src: string, alt?: string, size?: string, borderRadius?: string, onclick?: (e: MouseEvent) => void }} */
   let { src, alt = "Cover", size = "100%", borderRadius = "24px", onclick } = $props();
   
   let loaded = $state(false);

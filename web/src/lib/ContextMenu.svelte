@@ -3,6 +3,7 @@
   import { fade, scale } from 'svelte/transition';
   import Icon from './Icon.svelte';
 
+  /** @type {{ x?: number, y?: number, items?: any[], visible?: boolean, onclose?: () => void }} */
   let { x = 0, y = 0, items = [], visible = $bindable(false), onclose } = $props();
 
   let menuElement = $state();

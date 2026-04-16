@@ -59,9 +59,9 @@
               class="smooth-image"
               src={getAvatarUrl(artist.id)} 
               alt={artist.name} 
-              onload={(e) => e.target.classList.add('loaded')}
+              onload={(e) => { if (e.target instanceof HTMLImageElement) e.target.classList.add('loaded'); }}
               onerror={(e) => {
-                if (artist.imageUrl) e.target.src = artist.imageUrl;
+                if (artist.imageUrl && e.target instanceof HTMLImageElement) e.target.src = artist.imageUrl;
               }}
             />
           </div>
@@ -272,11 +272,12 @@
     color: var(--text-muted);
     display: -webkit-box;
     -webkit-line-clamp: 6;
+    line-clamp: 6;
     -webkit-box-orient: vertical;
     overflow: hidden;
     transition: all 0.5s ease;
   }
-  .bio-text.expanded { -webkit-line-clamp: unset; }
+  .bio-text.expanded { -webkit-line-clamp: unset; line-clamp: unset; }
 
   .bio-toggle {
     background: none;

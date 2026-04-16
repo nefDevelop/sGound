@@ -450,7 +450,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) getDB(r *http.Request) *db.MasterDatabase {
+func (s *Server) getDB(_ *http.Request) *db.MasterDatabase {
 	return s.MasterDB
 }
 
@@ -2593,9 +2593,10 @@ func (s *Server) handlePlaylistActions(w http.ResponseWriter, r *http.Request) {
 	id := s.extractID(r, "/api/playlists/")
 
 	if strings.HasSuffix(r.URL.Path, "/tracks") {
-		if r.Method == http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
 			s.handleGetPlaylistTracks(w, r)
-		} else if r.Method == http.MethodPost {
+		case http.MethodPost:
 			var body struct {
 				TrackID string `json:"trackId"`
 			}

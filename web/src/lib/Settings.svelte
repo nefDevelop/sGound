@@ -231,7 +231,7 @@
             <h3>Rename Pattern</h3>
             <p>Use placeholders: <b>&#123;artist&#125;, &#123;album&#125;, &#123;title&#125;, &#123;year&#125;, &#123;genre&#125;, &#123;track&#125;, &#123;bitrate&#125;</b></p>
           </div>
-          <input type="text" bind:value={config.renamePattern} placeholder="{artist}/{album}/{track} - {title}" />
+          <input type="text" bind:value={config.renamePattern} placeholder={"&#123;artist&#125;/&#123;album&#125;/&#123;track&#125; - &#123;title&#125;"} />
           
           {#if organizeStatus.isRunning}
             <div class="organize-progress-wrap">

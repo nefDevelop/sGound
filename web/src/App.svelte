@@ -88,7 +88,7 @@
   // Dynamic Favicon Effect
   $effect(() => {
     const favicon = document.querySelector('link[rel="icon"]');
-    if (!favicon) return;
+    if (!(favicon instanceof HTMLLinkElement)) return;
     
     if (currentPlaying) {
       favicon.href = `/api/cover/${currentPlaying.id}`;
@@ -356,7 +356,7 @@
       if (res.ok) {
         showToast("Library scan started!", "success");
         // Reiniciar status local para activar el polling
-        scanStatus = { scanning: true, processed: 0 };
+        scanStatus = { scanning: true, processed: 0, inboxCount: 0 };
         startPolling();
         checkScanStatus();
       }
@@ -786,7 +786,7 @@
               <p>Escaneando biblioteca... ({scanStatus.processed} procesados)</p>
             {:else if $inboxCount > 0}
               <div class="inbox-alert">
-                <Icon name="inbox" size="48" />
+                <Icon name="inbox" size={48} />
                 <p>Tu biblioteca está vacía, pero tienes <b>{$inboxCount}</b> canciones en el Inbox pendientes de aprobar.</p>
                 <button class="primary-btn" onclick={() => navigate('inbox')}>Ir al Inbox</button>
               </div>

@@ -404,6 +404,7 @@
     x={contextMenu.x} 
     y={contextMenu.y} 
     items={contextMenu.items} 
+    onclose={() => contextMenu.visible = false}
   />
 </div>
 
