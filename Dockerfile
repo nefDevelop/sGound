@@ -17,6 +17,7 @@ RUN go mod download
 # Step 2: Copy only necessary backend files
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+COPY web/embed.go ./web/embed.go
 
 # Step 3: Copy frontend dist from previous stage
 COPY --from=frontend-builder /web/dist /app/web/dist
