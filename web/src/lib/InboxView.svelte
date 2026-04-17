@@ -127,10 +127,15 @@
 
 <div class="inbox-view" in:fade>
   <header class="section-header">
-    <div class="texts">
+    <div class="title-row">
       <h1>Inbox</h1>
-      <p class="desc">Newly detected files. Approve them to include them in your main library.</p>
     </div>
+    {#if tracks.length > 0}
+      <div class="chip primary" title="Total de pistas en el Inbox">
+        <Icon name="inbox" size={14} />
+        {tracks.length}
+      </div>
+    {/if}
     
       <div class="actions">
         {#if suggestions.length > 0}
@@ -164,9 +169,9 @@
     {#if loading}
       <div class="status">Sourcing new files...</div>
     {:else if tracks.length === 0}
-      <div class="empty">
-        <Icon name="shield" size={64} />
-        <p>Your inbox is pristine. Everything is in choice order.</p>
+      <div class="empty-state">
+        <div class="empty-icon"><Icon name="shield" size={64} /></div>
+        <p>No se han encontrado canciones en el Inbox. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
       </div>
     {:else}
       <TracksView 

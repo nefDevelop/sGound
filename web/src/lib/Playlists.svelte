@@ -162,7 +162,7 @@
   {:else if playlists.length === 0}
     <div class="empty-state">
       <div class="empty-icon"><Icon name="list" size={64} /></div>
-      <p>Your collection is empty. Use the New Playlist button above to get started.</p>
+      <p>No se han encontrado playlists. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar o crea una nueva.</p>
     </div>
   {:else}
     <div class="playlists-grid">
@@ -381,7 +381,6 @@
   .playlist-info p { margin: 0.1rem 0 0; color: var(--text-muted); font-size: 0.8rem; font-weight: 600; }
 
   .status { text-align: center; padding: 4rem; color: var(--text-muted); }
-  .empty-state { text-align: center; padding: 5rem 0; color: var(--text-muted); }
 
   @media (max-width: 768px) {
     h1 { font-size: 2rem; }

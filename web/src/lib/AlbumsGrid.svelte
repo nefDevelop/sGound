@@ -38,6 +38,13 @@
     fetchAlbums(artistId);
   });
 
+  function playRandomAlbum() {
+    if (albums.length > 0 && onplayAlbum) {
+      const randomIndex = Math.floor(Math.random() * albums.length);
+      onplayAlbum(albums[randomIndex].id);
+    }
+  }
+
   async function fetchAlbums(id) {
     loading = true;
     try {
@@ -54,13 +61,29 @@
 
 <div class="albums-container">
   <header class="section-header">
-    <h1>Albums</h1>
+    <div class="title-row">
+      <h1>Albums</h1>
+      {#if albums.length > 0 && onplayAlbum}
+        <button class="subtle-shuffle-btn" onclick={playRandomAlbum} title="Reproducir álbum aleatorio">
+          <Icon name="shuffle" size={24} />
+        </button>
+      {/if}
+    </div>
+    {#if albums.length > 0}
+      <div class="chip tertiary" title="Total de álbumes">
+        <Icon name="disc" size={14} />
+        {albums.length}
+      </div>
+    {/if}
   </header>
 
   {#if loading}
     <div class="status">Curating your library...</div>
   {:else if albums.length === 0}
-    <div class="status">Nothing here yet. Try scanning your music.</div>
+    <div class="empty-state">
+      <div class="empty-icon"><Icon name="disc" size={64} /></div>
+      <p>No se han encontrado álbumes. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
+    </div>
   {:else}
     <div class="albums-grid">
       {#each albums as album}
@@ -113,15 +136,7 @@
 
 <style>
   .albums-container { width: 100%; padding: 0 0 3rem 0; animation: fadeIn 0.4s ease-out; }
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2.5rem;
-  }
 
-  h1 { font-size: 2.5rem; font-weight: 950; letter-spacing: -1.5px; margin: 0; color: var(--text-main); }
-  
   .status { color: var(--text-muted); text-align: center; margin-top: 5rem; font-weight: 700; font-size: 1.2rem; }
 
   .albums-grid {

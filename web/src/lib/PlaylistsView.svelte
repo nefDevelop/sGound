@@ -57,9 +57,9 @@
       {:else if error}
         <p class="error">{error}</p>
       {:else if tracks.length === 0}
-        <div class="empty">
-            <Icon name="music" size={48} />
-            <p>This playlist is empty.</p>
+        <div class="empty-state">
+            <div class="empty-icon"><Icon name="music" size={64} /></div>
+            <p>No se han encontrado canciones en esta lista. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
         </div>
       {:else}
         <TracksView 

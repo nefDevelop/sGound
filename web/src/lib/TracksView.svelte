@@ -250,6 +250,12 @@
           </button>
         {/if}
       </div>
+      {#if tracks.length > 0}
+        <div class="chip primary" title="Total de pistas">
+          <Icon name="music" size={14} />
+          {tracks.length}
+        </div>
+      {/if}
     </header>
   {/if}
   <div class="table-container">
@@ -507,29 +513,7 @@
 
 <style>
   .tracks-view { width: 100%; padding: 0 0 2rem 0; }
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2.5rem;
-  }
-  .title-row { display: flex; align-items: center; gap: 1rem; }
-  h1 { font-size: 2.5rem; font-weight: 950; letter-spacing: -1.5px; margin: 0; color: var(--text-main); }
   
-  .subtle-shuffle-btn {
-    background: transparent;
-    color: var(--text-muted);
-    opacity: 0.5;
-    padding: 8px;
-    border-radius: 12px;
-    transition: all 0.2s;
-    cursor: pointer;
-  }
-  .subtle-shuffle-btn:hover {
-    opacity: 1;
-    color: var(--primary);
-    background: var(--surface-container-highest);
-  }
   .table-container { width: 100%; overflow-x: hidden; }
   .tracks-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 0.95rem; table-layout: fixed; }
   .tracks-table th { text-align: left; padding: 1rem; color: var(--text-muted); text-transform: uppercase; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; }

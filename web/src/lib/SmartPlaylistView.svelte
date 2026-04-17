@@ -108,6 +108,11 @@
   <div class="content">
     {#if loading}
       <div class="status">Compiling your list...</div>
+    {:else if tracks.length === 0}
+      <div class="empty-state">
+        <div class="empty-icon"><Icon name="list" size={64} /></div>
+        <p>No se han encontrado canciones para esta lista inteligente. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
+      </div>
     {:else}
       <TracksView 
         {tracks} 

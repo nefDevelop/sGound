@@ -780,19 +780,31 @@
         />
       {:else if currentView === "library"}
         {#if tracks.length === 0}
-          <div class="empty-state">
-            {#if scanStatus.scanning}
-              <div class="spinner"></div>
-              <p>Escaneando biblioteca... ({scanStatus.processed} procesados)</p>
-            {:else if $inboxCount > 0}
-              <div class="inbox-alert">
-                <Icon name="inbox" size={48} />
-                <p>Tu biblioteca está vacía, pero tienes <b>{$inboxCount}</b> canciones en el Inbox pendientes de aprobar.</p>
-                <button class="primary-btn" onclick={() => navigate('inbox')}>Ir al Inbox</button>
+          <div class="tracks-view">
+            <header class="section-header">
+              <div class="title-row">
+                <h1>Tracks</h1>
               </div>
-            {:else}
-              <p>No se han encontrado canciones. Haz clic en "Escanear Biblioteca" en Ajustes.</p>
-            {/if}
+              <div class="chip primary" title="Total de pistas">
+                <Icon name="music" size={14} />
+                0
+              </div>
+            </header>
+            <div class="empty-state">
+              {#if scanStatus.scanning}
+                <div class="spinner"></div>
+                <p>Escaneando biblioteca... ({scanStatus.processed} procesados)</p>
+              {:else if $inboxCount > 0}
+                <div class="inbox-alert">
+                  <Icon name="inbox" size={48} />
+                  <p>Tu biblioteca está vacía, pero tienes <b>{$inboxCount}</b> canciones en el Inbox pendientes de aprobar.</p>
+                  <button class="primary-btn" onclick={() => navigate('inbox')}>Ir al Inbox</button>
+                </div>
+              {:else}
+                <div class="empty-icon"><Icon name="music" size={64} /></div>
+                <p>No se han encontrado canciones. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
+              {/if}
+            </div>
           </div>
         {:else}
           <TracksView
@@ -1283,7 +1295,6 @@
   .retry-btn:active {
     transform: translateY(0);
   }
-  .empty-state { text-align: center; margin-top: 6rem; color: var(--text-muted); }
 
   .scan-status-item {
     margin: 0.5rem 0 1.5rem 0;

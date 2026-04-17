@@ -42,24 +42,41 @@
       if (fallback) fallback.style.display = 'flex';
     }
   }
+
+  function playRandomArtist() {
+    if (filteredArtists.length > 0 && onselectArtist) {
+      const randomIndex = Math.floor(Math.random() * filteredArtists.length);
+      onselectArtist(filteredArtists[randomIndex]);
+    }
+  }
 </script>
 
 <div class="artists-view" in:fade>
   <header class="section-header">
-    <div class="texts">
+    <div class="title-row">
       <h1>Artistas</h1>
-      <p class="subtitle">{artists.length} creadores en tu colección.</p>
+      {#if filteredArtists.length > 0}
+        <button class="subtle-shuffle-btn" onclick={playRandomArtist} title="Ir a un artista aleatorio">
+          <Icon name="shuffle" size={24} />
+        </button>
+      {/if}
     </div>
+    {#if artists.length > 0}
+      <div class="chip secondary" title="Total de artistas">
+        <Icon name="users" size={14} />
+        {artists.length}
+      </div>
+    {/if}
   </header>
 
   {#if loading}
     <div class="status-box">Sourcing artist profiles...</div>
   {:else if filteredArtists.length === 0}
     <div class="empty-state">
-      <div class="faded-icon">
+      <div class="empty-icon">
         <Icon name="users" size={64} />
       </div>
-      <p>No se han encontrado artistas.</p>
+      <p>No se han encontrado artistas. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
     </div>
   {:else}
     <div class="artist-grid">
@@ -87,16 +104,6 @@
 
 <style>
   .artists-view { width: 100%; max-width: 1400px; margin: 0 auto; }
-
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2.5rem;
-  }
-
-  h1 { font-size: 2.5rem; font-weight: 950; letter-spacing: -1.5px; margin: 0; color: var(--text-main); }
-  .subtitle { color: var(--text-muted); font-size: 1.1rem; font-weight: 500; margin-top: 0.5rem; }
 
   .artist-grid {
     display: grid;
@@ -153,7 +160,6 @@
   .album-count { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
 
   .status-box { padding: 4rem; text-align: center; color: var(--text-muted); font-weight: 700; }
-  .empty-state { padding: 8rem 2rem; text-align: center; color: var(--text-muted); display: flex; flex-direction: column; align-items: center; gap: 1.5rem; }
 
   @media (max-width: 900px) {
     .artist-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1rem; }
