@@ -34,6 +34,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"bytes"
+	"math/rand/v2"
 )
 
 type ScanStatus struct {
@@ -635,6 +636,18 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 		args = append(args, pathArgs...)
 	}
 
+	// Pagination
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	limit := 0
+	offset := 0
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 { limit = l }
+	}
+	if offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 { offset = o }
+	}
+
 	query := fmt.Sprintf(`
 		SELECT ar.id, ar.name, COUNT(DISTINCT al.id) as album_count, COALESCE(ar.image_url, '')
 		FROM artists ar
@@ -643,6 +656,10 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 		%s
 		GROUP BY ar.id, ar.name, ar.image_url
 		ORDER BY ar.name`, whereClause)
+
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	}
 
 	rows, err := s.getDB(r).Conn.Query(query, args...)
 	if err != nil {
@@ -768,7 +785,9 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	imgData, err := io.ReadAll(resp.Body)
+	// Limit reading to 10MB to avoid memory exhaustion
+	limit := int64(10 * 1024 * 1024)
+	imgData, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
 		http.Error(w, "Failed to read image", http.StatusInternalServerError)
 		return
@@ -851,6 +870,18 @@ func (s *Server) handleGetAlbums(w http.ResponseWriter, r *http.Request) {
 		args = append(args, pathArgs...)
 	}
 
+	// Pagination
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	limit := 0
+	offset := 0
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 { limit = l }
+	}
+	if offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 { offset = o }
+	}
+
 	query := fmt.Sprintf(`
 		SELECT DISTINCT al.id, al.title, COALESCE(al.year, 0), ar.name as artist, 
 		       (SELECT t2.id FROM tracks t2 WHERE t2.album_id = al.id AND t2.status = 'active' LIMIT 1) as sample_track_id
@@ -859,6 +890,10 @@ func (s *Server) handleGetAlbums(w http.ResponseWriter, r *http.Request) {
 		JOIN tracks t ON al.id = t.album_id
 		%s
 		ORDER BY al.title`, whereClause)
+
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	}
 
 	rows, err := s.getDB(r).Conn.Query(query, args...)
 	if err != nil {
@@ -1047,13 +1082,15 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		// Force MP3 for compatibility when processing with ffmpeg
 		ffmpegArgs = append(ffmpegArgs, "-f", "mp3", "-map_metadata", "-1", "pipe:1")
 		
-		cmd := exec.Command("ffmpeg", ffmpegArgs...)
+		// Use request context to kill ffmpeg if client disconnects
+		cmd := exec.CommandContext(r.Context(), "ffmpeg", ffmpegArgs...)
 		cmd.Stdout = w
 		if err := cmd.Start(); err != nil {
 			slog.Error("FFmpeg streaming failed", "error", err, "args", ffmpegArgs)
 			http.Error(w, "Streaming failed", http.StatusInternalServerError)
 			return
 		}
+		// Wait will return error if context is cancelled, which is expected
 		cmd.Wait()
 		return
 	}
@@ -1213,6 +1250,22 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		args = append(args, artistId)
 	}
 
+	// Pagination
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	limit := 0
+	offset := 0
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	if offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
 	query := fmt.Sprintf(`
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
 		       COALESCE(t.artist, a.name) as artist, al.title as album, al.year as year,
@@ -1227,6 +1280,10 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
 		%s
 		ORDER BY a.name, al.year, t.track_num`, whereClause)
+	
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	}
 
 	// Prepend username to args for the LEFT JOIN
 	finalArgs := append([]interface{}{user.Username}, args...)
@@ -1237,7 +1294,13 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	tracks := make([]map[string]interface{}, 0)
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Streaming JSON Encder
+	enc := json.NewEncoder(w)
+	w.Write([]byte("["))
+	first := true
+
 	for rows.Next() {
 		var id, title, genre, artist, album, format, composer, comment, tStatus string
 		var trackNum, discNum, duration, year, bitRate, sampleRate, rating, instrumental, trackTotal, discTotal, playCount int
@@ -1246,7 +1309,13 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 			slog.Error("Scan error", "err", err)
 			continue
 		}
-		tracks = append(tracks, map[string]interface{}{
+		
+		if !first {
+			w.Write([]byte(","))
+		}
+		first = false
+
+		enc.Encode(map[string]interface{}{
 			"id": id, "title": title, "trackNum": trackNum, "discNum": discNum, 
 			"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
 			"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
@@ -1255,9 +1324,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 			"playCount": playCount,
 		})
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tracks)
+	w.Write([]byte("]"))
 }
 
 func (s *Server) handleGetInbox(w http.ResponseWriter, r *http.Request) {
@@ -1430,39 +1497,64 @@ func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
 		trackMeta[t.ID] = t
 	}
 
-	// Para cada grupo, buscamos el "Consenso"
-	for key, ids := range groups {
-		// REGLA DE SEGURIDAD: Si el título del álbum es demasiado corto o puramente numérico, no buscar consenso
-		// Esto evita falsos positivos con álbumes llamados "2023", "Untitled", "CD1", etc.
+	// Para cada grupo, buscamos el "Consenso" de forma optimizada
+	albumTitles := make([]string, 0)
+	for key := range groups {
 		isGeneric := len(key.albumTitle) < 3
 		if !isGeneric {
 			if _, err := strconv.Atoi(key.albumTitle); err == nil { isGeneric = true }
 		}
-		
-		if isGeneric { continue }
+		if !isGeneric {
+			albumTitles = append(albumTitles, key.albumTitle)
+		}
+	}
 
-		consensusRows, err := db.Conn.Query(`
-			SELECT t.artist, COALESCE(al.year, 0)
+	consensusData := make(map[string][]struct{Artist string; Year int})
+	if len(albumTitles) > 0 {
+		placeholders := make([]string, len(albumTitles))
+		args := make([]interface{}, len(albumTitles))
+		for i, t := range albumTitles {
+			placeholders[i] = "?"
+			args[i] = t
+		}
+		
+		query := fmt.Sprintf(`
+			SELECT t.artist, al.title, COALESCE(al.year, 0)
 			FROM tracks t
 			JOIN albums al ON t.album_id = al.id
-			WHERE al.title = ? 
-			  AND (t.artist LIKE ? OR t.artist LIKE ? OR ? LIKE '%' || t.artist || '%')
-		`, key.albumTitle, key.normArtist+"%", "%"+key.normArtist+"%", key.normArtist)
+			WHERE t.status = 'active' AND al.title IN (%s)
+		`, strings.Join(placeholders, ","))
 		
-		if err != nil { continue }
+		cRows, err := db.Conn.Query(query, args...)
+		if err == nil {
+			defer cRows.Close()
+			for cRows.Next() {
+				var a, t string
+				var y int
+				if err := cRows.Scan(&a, &t, &y); err == nil {
+					consensusData[t] = append(consensusData[t], struct{Artist string; Year int}{a, y})
+				}
+			}
+		}
+	}
+
+	for key, ids := range groups {
+		data, exists := consensusData[key.albumTitle]
+		if !exists { continue }
 		
 		counts := make(map[string]int)
 		years := make(map[int]int)
 		
-		for consensusRows.Next() {
-			var a string
-			var y int
-			if err := consensusRows.Scan(&a, &y); err == nil {
-				counts[a]++
-				if y > 0 { years[y]++ }
+		for _, d := range data {
+			// Filtrar por artista similar al grupo actual (en Go, para evitar LIKE complejo en el IN)
+			dNorm := scanner.NormalizeArtist(d.Artist)
+			if strings.Contains(dNorm, key.normArtist) || strings.Contains(key.normArtist, dNorm) {
+				counts[d.Artist]++
+				if d.Year > 0 { years[d.Year]++ }
 			}
 		}
-		consensusRows.Close()
+
+		if len(counts) == 0 { continue }
 
 		// El ganador es el que tiene más frecuencia
 		winnerArtist := ""
@@ -1886,7 +1978,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks t " + wherePending, pathArgs...).Scan(&pendingCount)
 	stats["inboxCount"] = pendingCount
 
-	// Joyas olvidadas (Deduplicadas por álbum + artista para evitar repetir carátulas)
+	// Joyas olvidadas (Deduplicadas por álbum + artista para evitar repetir carátulas) - Optimizado sin RANDOM()
 	gems := make([]map[string]interface{}, 0)
 	whereGems := "WHERE t.status = 'active'"
 	if pathFilter != "" {
@@ -1900,14 +1992,26 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
 		%s
 		GROUP BY a.id 
-		ORDER BY COALESCE(ut.play_count, 0) ASC, RANDOM() LIMIT 9
+		ORDER BY COALESCE(ut.play_count, 0) ASC LIMIT 100
 	`, whereGems), append([]interface{}{user.Username}, pathArgs...)...)
 	if err == nil {
 		defer rows.Close()
+		var candidates []map[string]interface{}
 		for rows.Next() {
 			var id, title, artist string
 			rows.Scan(&id, &title, &artist)
-			gems = append(gems, map[string]interface{}{"id": id, "title": title, "artist": artist})
+			candidates = append(candidates, map[string]interface{}{"id": id, "title": title, "artist": artist})
+		}
+		
+		if len(candidates) > 0 {
+			rand.Shuffle(len(candidates), func(i, j int) {
+				candidates[i], candidates[j] = candidates[j], candidates[i]
+			})
+			if len(candidates) > 9 {
+				gems = candidates[:9]
+			} else {
+				gems = candidates
+			}
 		}
 	}
 	stats["forgottenGems"] = gems
@@ -2762,7 +2866,17 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" { continue }
 		base := strings.TrimSuffix(name, ext)
 		if commonNames[base] {
-			imgData, _ := os.ReadFile(filepath.Join(dir, entry.Name()))
+			fImg, err := os.Open(filepath.Join(dir, entry.Name()))
+			if err != nil { continue }
+			
+			// Limit reading to 10MB
+			limit := int64(10 * 1024 * 1024)
+			imgData, err := io.ReadAll(io.LimitReader(fImg, limit))
+			fImg.Close()
+
+			if err != nil {
+				continue
+			}
 			// Redimensionar antes de cachear
 			src, _, err := image.Decode(bytes.NewReader(imgData))
 			if err == nil {

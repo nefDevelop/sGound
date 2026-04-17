@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"sgound/internal/models"
 
@@ -171,6 +172,15 @@ func (db *MasterDatabase) initSchema() error {
 	db.Conn.Exec("ALTER TABLE artists ADD COLUMN bio TEXT")
 	db.Conn.Exec("ALTER TABLE artists ADD COLUMN tags TEXT")
 	db.Conn.Exec("ALTER TABLE artists ADD COLUMN similar TEXT")
+	
+	// Índices para optimización de rendimiento
+	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(path)")
+	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks(album_id)")
+	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_status ON tracks(status)")
+	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre)")
+	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums(artist_id)")
+	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_albums_title ON albums(title)")
+	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name)")
 
 	return nil
 }
@@ -316,17 +326,48 @@ func (db *MasterDatabase) GetOrphanedTracks() ([]models.Track, error) {
 	}
 	defer rows.Close()
 
-	var orphans []models.Track
+	type item struct {
+		ID    string
+		Path  string
+		Title string
+	}
+	var items []item
 	for rows.Next() {
-		var t models.Track
-		if err := rows.Scan(&t.ID, &t.Path, &t.Title); err != nil {
-			return nil, err
-		}
-		
-		if _, err := os.Stat(t.Path); os.IsNotExist(err) {
-			orphans = append(orphans, t)
+		var i item
+		if err := rows.Scan(&i.ID, &i.Path, &i.Title); err == nil {
+			items = append(items, i)
 		}
 	}
+
+	// Use workers to parallelize disk I/O
+	jobs := make(chan item, len(items))
+	results := make(chan *models.Track, len(items))
+	var wg sync.WaitGroup
+	numWorkers := 32 // Higher number for I/O bound tasks
+	if len(items) < numWorkers { numWorkers = len(items) }
+
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for it := range jobs {
+				if _, err := os.Stat(it.Path); os.IsNotExist(err) {
+					results <- &models.Track{ID: it.ID, Path: it.Path, Title: it.Title}
+				}
+			}
+		}()
+	}
+
+	for _, it := range items { jobs <- it }
+	close(jobs)
+	wg.Wait()
+	close(results)
+
+	var orphans []models.Track
+	for o := range results {
+		orphans = append(orphans, *o)
+	}
+
 	return orphans, nil
 }
 
