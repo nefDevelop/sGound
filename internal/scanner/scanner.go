@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -79,8 +78,8 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 	}
 
-	numWorkers := runtime.NumCPU()
-	if numWorkers < 4 { numWorkers = 4 } // Mínimo para concurrencia básica
+	// Optimizar para discos con latencia (HDD). 2 workers suele ser el sweet spot.
+	numWorkers := 2 
 	if numWorkers > 16 { numWorkers = 16 } // Cap para no saturar I/O de disco
 	
 	jobs := make(chan string, 500)
@@ -273,7 +272,8 @@ func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 	// Metadatos
 	metadata, err := tag.ReadFrom(f)
 	var artistName, albumName, title string
-	var trackNum, year, discNum, duration int
+	var trackNum, year, discNum, bitRate, sampleRate int
+	var duration float64
 	var genre, composer, comment string
 	var replayGain float64
 	var instrumental bool
@@ -299,8 +299,16 @@ func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 		comment = metadata.Comment()
 	}
 
+	// Optimización: Intentar sacar duración de FLAC nativamente (SIN ffprobe)
+	if strings.ToLower(filepath.Ext(path)) == ".flac" {
+		if d, br, sr, err := getFLACDurationNative(path); err == nil && d > 0 {
+			duration = d
+			bitRate = br
+			sampleRate = sr
+		}
+	}
+
 	// ffprobe solo si es necesario (sin duración)
-	var bitRate, sampleRate int
 	if duration == 0 {
 		slog.Info("File has no duration tag, spawning ffprobe", "path", path)
 		if data, err := getAudioMetadataWithFFprobe(path); err == nil {
@@ -357,9 +365,9 @@ func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 
 type trackResult struct {
 	trackId, albumId, artistId, artistName, dbAlbumArtist, albumName, title, path, genre, format, composer, comment, hash, status string
-	trackNum, discNum, year, duration, bitRate, sampleRate int
+	trackNum, discNum, year, bitRate, sampleRate int
+	duration, replayGain float64
 	size, fileMtime int64
-	replayGain float64
 	instrumental bool
 }
 
@@ -382,7 +390,7 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "duration=") {
 			if val, err := strconv.ParseFloat(strings.TrimPrefix(line, "duration="), 64); err == nil {
-				data.duration = int(val)
+				data.duration = val
 			}
 		} else if strings.HasPrefix(line, "bit_rate=") {
 			if val, err := strconv.Atoi(strings.TrimPrefix(line, "bit_rate=")); err == nil {
@@ -406,7 +414,9 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 }
 
 type audioMetadata struct {
-	duration, bitRate, sampleRate int
+	duration   float64
+	bitRate    int
+	sampleRate int
 	replayGain float64
 }
 
@@ -452,4 +462,59 @@ func NormalizeString(s string) string {
 	r := strings.NewReplacer(".", "", ",", "", "-", "", "(", "", ")", "", "[", "", "]", "", "'", "", "\"", "")
 	s = r.Replace(s)
 	return strings.TrimSpace(s)
+}
+
+// Extraer info de FLAC usando STREAMINFO (muy rápido)
+func getFLACDurationNative(path string) (float64, int, int, error) {
+	f, err := os.Open(path)
+	if err != nil { return 0, 0, 0, err }
+	defer f.Close()
+
+	// Leer encabezado "fLaC"
+	head := make([]byte, 4)
+	if _, err := f.Read(head); err != nil || string(head) != "fLaC" {
+		return 0, 0, 0, fmt.Errorf("not a flac file")
+	}
+
+	// El bloque STREAMINFO es el primero y tiene un tamaño fijo de 34 bytes (más 4 de cabecera de bloque)
+	// Cabecera de bloque: 1 bit (isLast), 7 bits (type), 24 bits (length)
+	blockHeader := make([]byte, 4)
+	if _, err := f.Read(blockHeader); err != nil { return 0, 0, 0, err }
+	
+	blockType := blockHeader[0] & 0x7F
+	if blockType != 0 { // 0 es STREAMINFO
+		return 0, 0, 0, fmt.Errorf("STREAMINFO not first block")
+	}
+
+	data := make([]byte, 34)
+	if _, err := f.Read(data); err != nil { return 0, 0, 0, err }
+
+	// STREAMINFO structure:
+	// min_block_size: 16 bits
+	// max_block_size: 16 bits
+	// min_frame_size: 24 bits
+	// max_frame_size: 24 bits
+	// sample_rate: 20 bits
+	// num_channels: 3 bits
+	// bits_per_sample: 5 bits
+	// total_samples: 36 bits
+	
+	sampleRate := int(data[10])<<12 | int(data[11])<<4 | int(data[12])>>4
+	
+	totalSamples := int64(data[13]&0x0F)<<32 | int64(data[14])<<24 | int64(data[15])<<16 | int64(data[16])<<8 | int64(data[17])
+	
+	if sampleRate > 0 {
+		duration := float64(totalSamples) / float64(sampleRate)
+		
+		// Bitrate aproximado: (tamaño archivo * 8) / duración
+		info, _ := os.Stat(path)
+		br := 0
+		if duration > 0 {
+			br = int((float64(info.Size()) * 8) / duration)
+		}
+		
+		return duration, br, sampleRate, nil
+	}
+
+	return 0, 0, 0, fmt.Errorf("could not parse STREAMINFO")
 }
