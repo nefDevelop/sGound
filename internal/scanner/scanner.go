@@ -97,6 +97,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		
 		flush := func() {
 			if len(batch) == 0 { return }
+			slog.Info("Flushing scan batch to database", "count", len(batch))
 			tx, err := s.DB.Conn.Begin()
 			if err != nil {
 				slog.Error("Failed to start transaction", "error", err)
@@ -163,6 +164,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					continue // Skip file, no changes
 				}
 
+				slog.Info("Scanning file", "path", path)
 				res, err := s.ParseFile(path)
 				if err != nil {
 					slog.Error("Failed to process file", "path", path, "error", err)
@@ -290,6 +292,7 @@ func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 	// ffprobe solo si es necesario (sin duración)
 	var bitRate, sampleRate int
 	if duration == 0 {
+		slog.Info("File has no duration tag, spawning ffprobe", "path", path)
 		if data, err := getAudioMetadataWithFFprobe(path); err == nil {
 			duration = data.duration
 			bitRate = data.bitRate
