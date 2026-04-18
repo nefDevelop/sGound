@@ -14,7 +14,7 @@ services:
       # - SGOUND_THEME_COLOR=#ff3366
     volumes:
       - sgound_data:/app/data
-      - ./music:/music:ro
+      - /media/clare/music:/music:ro
     deploy:
       resources:
         limits:
