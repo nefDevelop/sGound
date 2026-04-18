@@ -157,8 +157,8 @@
 
       // REGLA: Si algo ha cambiado (procesados o inbox), refrescar la vista actual
       if (data.processed !== prevProcessed || data.inboxCount !== prevInbox) {
-         if (currentView === 'library' || currentView === 'tracks') fetchTracks();
-         if (currentView === 'inbox') inboxRef?.fetchInbox();
+         if (currentView === 'library' || currentView === 'tracks') fetchTracks(false, true);
+         if (currentView === 'inbox') inboxRef?.fetchInbox(true);
          if (currentView === 'dashboard') dashRef?.refresh();
       }
 
@@ -311,16 +311,16 @@
     }
   }
 
-  export async function fetchTracks(append = false) {
+  export async function fetchTracks(append = false, silent = false) {
     if (loadingTracks || (!hasMoreTracks && append)) return;
     
     try {
-      loadingTracks = true;
+      if (!silent) loadingTracks = true;
       if (!append) {
         tracksOffset = 0;
         hasMoreTracks = true;
-        // Solo limpiamos los tracks si NO estamos añadiendo, para evitar parpadeos
-        if (tracks.length > 0) tracks = [];
+        // Solo limpiamos los tracks si NO estamos añadiendo y no es silencioso
+        if (!silent && tracks.length > 0) tracks = [];
       }
 
       const res = await fetch(`/api/tracks?limit=${tracksLimit}&offset=${tracksOffset}&minimal=true`);
@@ -338,7 +338,7 @@
       tracksOffset += newTracks.length;
       error = null;
     } catch (e) {
-      error = e.message;
+      if (!silent) error = e.message;
     } finally {
       loadingTracks = false;
     }

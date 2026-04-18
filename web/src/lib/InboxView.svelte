@@ -15,12 +15,13 @@
 
   onMount(fetchInbox);
 
-  export async function fetchInbox() {
-    loading = true;
+  export async function fetchInbox(silent = false) {
+    if (!silent) loading = true;
     try {
       const res = await fetch('/api/library/inbox');
       if (res.ok) {
-        tracks = (await res.json()) || [];
+        const data = (await res.json()) || [];
+        tracks = data;
         inboxCount.set(tracks.length);
         if (tracks.length > 0) analyzeInbox();
       }
@@ -165,8 +166,8 @@
       </div>
   </header>
 
-  <div class="content">
-    {#if loading}
+  <div class="inbox-content">
+    {#if loading && tracks.length === 0}
       <div class="status">Sourcing new files...</div>
     {:else if tracks.length === 0}
       <div class="empty-state">
@@ -193,9 +194,7 @@
 
 <style>
   .inbox-view {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
+    /* Eliminamos height 100% y display flex para que fluya en el scroll-view de App */
   }
 
   .section-header {
@@ -235,9 +234,9 @@
     100% { transform: scale(1); }
   }
 
-  .content { flex: 1; overflow-y: auto; }
+  .inbox-content { flex: 1; }
 
-  .empty {
+  .empty-state {
     display: flex;
     flex-direction: column;
     align-items: center;
