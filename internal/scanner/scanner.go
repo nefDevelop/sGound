@@ -182,7 +182,17 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 	err = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil { return nil }
-		if !d.IsDir() && isAudioFile(d.Name()) == nil { jobs <- path }
+
+		// Skip hidden folders and files (like .Trash-1000, .git, etc)
+		name := d.Name()
+		if name != "." && strings.HasPrefix(name, ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if !d.IsDir() && isAudioFile(name) == nil { jobs <- path }
 		return nil
 	})
 
