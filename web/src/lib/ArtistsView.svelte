@@ -1,9 +1,10 @@
 <script>
+  import { inboxCount } from './stores.js';
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade } from 'svelte/transition';
 
-  let { onselectArtist } = $props();
+  let { onselectArtist, onnavinbox } = $props();
 
   let artists = $state([]);
   let searchTerm = $state('');
@@ -73,10 +74,18 @@
     <div class="status-box">Sourcing artist profiles...</div>
   {:else if filteredArtists.length === 0}
     <div class="empty-state">
-      <div class="empty-icon">
-        <Icon name="users" size={64} />
-      </div>
-      <p>No se han encontrado artistas. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
+      {#if $inboxCount > 0 && !searchTerm}
+        <div class="inbox-alert">
+          <Icon name="inbox" size={48} />
+          <p>Aún no tienes artistas en tu biblioteca, pero tienes <b>{$inboxCount}</b> canciones en el Inbox esperando.</p>
+          <button class="primary-btn" onclick={onnavinbox}>Ir al Inbox</button>
+        </div>
+      {:else}
+        <div class="empty-icon">
+          <Icon name="users" size={64} />
+        </div>
+        <p>No se han encontrado artistas. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
+      {/if}
     </div>
   {:else}
     <div class="artist-grid">

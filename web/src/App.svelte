@@ -32,15 +32,19 @@
   const originalFetch = window.fetch;
   window.fetch = (url, options = {}) => {
     const apiKey = localStorage.getItem('apiKey');
-    if (typeof url === 'string' && url.startsWith('/api/') && apiKey) {
+    const urlString = typeof url === 'string' ? url : (url instanceof Request ? url.url : url.toString());
+
+    if (urlString.startsWith('/api/') && apiKey) {
       options.headers = { ...options.headers, 'X-API-Key': apiKey };
     }
     
     return originalFetch(url, options).then(response => {
       // Si recibimos un 401 (No autorizado) y "creemos" que estamos dentro, forzamos logout
-      if (response.status === 401 && isLoggedIn && typeof url === 'string' && url.startsWith('/api/') && !url.includes('/api/auth/login')) {
-         console.warn("Sesión caducada o inválida. Redirigiendo a login...");
-         handleLogout();
+      if (response.status === 401 && !urlString.includes('/api/auth/login')) {
+         if (isLoggedIn) {
+           console.warn("Sesión caducada o inválida. Redirigiendo a login...");
+           handleLogout();
+         }
       }
       return response;
     });
@@ -874,7 +878,7 @@
           bind:this={inboxRef}
           onplay={(track) => handlePlay(track)}
           onedit={(track) => openEditor(track)}
-          onapproved={() => { fetchTracks(); checkScanStatus(); }}
+          onapproved={() => { fetchTracks(false); checkScanStatus(); }}
           onrejected={checkScanStatus}
           onhide={(track) => handleReject(track, () => inboxRef?.fetchInbox())}
           onbulkReject={(ids) => handleBulkReject(ids, () => inboxRef?.fetchInbox())}
@@ -883,10 +887,11 @@
       {:else if currentView === "albums"}
         <AlbumsGrid 
           artistId={selectedArtistId}
-          onselectAlbum={(id) => selectAlbum(id)} 
-          onplayAlbum={(id) => handlePlayAlbum(id)}
-          onqueueAlbum={(id) => handleQueueAlbum(id)}
-          oneditAlbum={(album) => openEditor(album)}
+          onselectAlbum={(id) => navigate("tracks", { albumId: id })}
+          onplayAlbum={handlePlayAlbum}
+          onqueueAlbum={handleQueueAlbum}
+          oneditAlbum={openEditor}
+          onnavinbox={() => navigate('inbox')}
         />
       {:else if currentView === "artist-detail"}
         <ArtistDetail
@@ -907,7 +912,8 @@
         />
       {:else if currentView === "artists"}
         <ArtistsView
-          onselectArtist={handleSelectArtist}
+          onselectArtist={(artist) => navigate("artists", { artistId: artist.id, artistName: artist.name })}
+          onnavinbox={() => navigate('inbox')}
         />
       {:else if currentView === "playlists"}
         <Playlists 
@@ -1002,13 +1008,13 @@
 
   bind:isOpen={isTagEditorOpen}
   bind:track={trackToEdit}
-  onclose={() => { fetchTracks(); maintenanceRefresh?.(); }}
+  onclose={() => { fetchTracks(false); maintenanceRefresh?.(); }}
 />
 
 <MassiveTagEditor
   bind:isOpen={isMassiveEditorOpen}
   {selectedTracks}
-  onclose={() => { fetchTracks(); maintenanceRefresh?.(); }}
+  onclose={() => { fetchTracks(false); maintenanceRefresh?.(); }}
 />
 
 <Toast />

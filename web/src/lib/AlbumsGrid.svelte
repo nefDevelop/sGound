@@ -1,12 +1,12 @@
 <script>
+  import { inboxCount } from './stores.js';
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
   import Artwork from './Artwork.svelte';
-  
   import Skeleton from './Skeleton.svelte';
   
-  let { artistId = null, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum } = $props();
+  let { artistId = null, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum, onnavinbox } = $props();
   
   let albums = $state([]);
   let loading = $state(true);
@@ -93,8 +93,16 @@
     </div>
   {:else if albums.length === 0}
     <div class="empty-state">
-      <div class="empty-icon"><Icon name="disc" size={64} /></div>
-      <p>No se han encontrado álbumes. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
+      {#if $inboxCount > 0 && !artistId}
+        <div class="inbox-alert">
+          <Icon name="inbox" size={48} />
+          <p>Tu biblioteca de álbumes está vacía, pero tienes <b>{$inboxCount}</b> canciones en el Inbox pendientes de aprobar.</p>
+          <button class="primary-btn" onclick={onnavinbox}>Ir al Inbox</button>
+        </div>
+      {:else}
+        <div class="empty-icon"><Icon name="disc" size={64} /></div>
+        <p>No se han encontrado álbumes. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
+      {/if}
     </div>
   {:else}
     <div class="albums-grid">

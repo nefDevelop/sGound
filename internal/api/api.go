@@ -1352,7 +1352,9 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	w.Write([]byte("]"))
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tracks)
 }
 
 func (s *Server) handleGetInbox(w http.ResponseWriter, r *http.Request) {
@@ -2602,6 +2604,9 @@ func (s *Server) handlePlaylists(w http.ResponseWriter, r *http.Request) {
 		list = append(list, map[string]interface{}{
 			"id": id, "name": name, "isSmart": isSmart == 1, "trackCount": count,
 		})
+	}
+	if list == nil {
+		list = []map[string]interface{}{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(list)
