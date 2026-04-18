@@ -288,6 +288,7 @@
   async function loadTheme() {
     try {
       const res = await fetch("/api/config");
+      if (!res.ok) return applyTheme(generatePalette('#ff3366'));
       const config = await res.json();
       const seed = config.themeColor || '#ff3366';
       applyTheme(generatePalette(seed));
@@ -357,6 +358,7 @@
       const res = await fetch(
         `/api/search?q=${encodeURIComponent(query)}`,
       );
+      if (!res.ok) throw new Error("Search failed");
       const data = await res.json();
       tracks = data.tracks || [];
       navigate("library");
@@ -797,7 +799,7 @@
         <div class="error-state">
           <Icon name="alertCircle" size={48} color="var(--primary)" />
           <p class="error-msg">{error}</p>
-          <button class="retry-btn" onclick={fetchTracks}>
+          <button class="retry-btn" onclick={() => fetchTracks()}>
             <Icon name="refreshCw" size={16} /> Reintentar carga
           </button>
         </div>

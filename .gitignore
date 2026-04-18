@@ -4,6 +4,7 @@ sgound-server.exe
 *.test
 *.out
 cover.out
+.cache/
 
 # Node.js y Svelte (Vite SPA)
 web/node_modules/
