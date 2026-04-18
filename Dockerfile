@@ -1,5 +1,5 @@
 # Stage 1: Build the frontend
-FROM node:26-alpine3.23 AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 WORKDIR /web
 COPY web/package*.json ./
 RUN npm install
@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 # Stage 2: Build the backend
-FROM golang:1.26-alpine3.23 AS backend-builder
+FROM golang:alpine AS backend-builder
 WORKDIR /app
 
 # Step 1: Cache Go modules
@@ -17,6 +17,7 @@ RUN go mod download
 # Step 2: Copy only necessary backend files
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+COPY web/embed.go ./web/embed.go
 
 # Step 3: Copy frontend dist from previous stage
 COPY --from=frontend-builder /web/dist /app/web/dist
