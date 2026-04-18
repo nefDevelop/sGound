@@ -740,10 +740,9 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Verificar Caché
-	cacheDir := filepath.Join(os.TempDir(), "sgound_artists")
-	os.MkdirAll(cacheDir, 0755)
-	cachePath := filepath.Join(cacheDir, artistID+".jpg")
+	// 1. Verificar Caché (VELOCIDAD MÁXIMA)
+	cachePath := filepath.Join(s.Config.CachePath, "artists", artistID+".jpg")
+	os.MkdirAll(filepath.Dir(cachePath), 0755)
 
 	if _, err := os.Stat(cachePath); err == nil {
 		w.Header().Set("Cache-Control", "public, max-age=604800")
@@ -1047,14 +1046,20 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		// Force MP3 for compatibility when processing with ffmpeg
 		ffmpegArgs = append(ffmpegArgs, "-f", "mp3", "-map_metadata", "-1", "pipe:1")
 		
-		cmd := exec.Command("ffmpeg", ffmpegArgs...)
+		// Usamos CommandContext para que el proceso muera si la petición se cancela
+		cmd := exec.CommandContext(r.Context(), "ffmpeg", ffmpegArgs...)
 		cmd.Stdout = w
 		if err := cmd.Start(); err != nil {
 			slog.Error("FFmpeg streaming failed", "error", err, "args", ffmpegArgs)
 			http.Error(w, "Streaming failed", http.StatusInternalServerError)
 			return
 		}
-		cmd.Wait()
+		
+		// Esperar a que termine o sea cancelado por el contexto
+		err := cmd.Wait()
+		if err != nil && r.Context().Err() == nil {
+			slog.Error("FFmpeg process finished with error", "error", err)
+		}
 		return
 	}
 
@@ -1187,6 +1192,17 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		status = "active"
 	}
 	
+	// Pagination parameters
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	limit := 1000 // Default limit to protect memory
+	offset := 0
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 { limit = l }
+	if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 { offset = o }
+
+	// Lighter JSON flag
+	minimal := r.URL.Query().Get("minimal") == "true"
+	
 	whereClause := "WHERE 1=1"
 	args := []interface{}{}
 	
@@ -1213,23 +1229,35 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		args = append(args, artistId)
 	}
 
-	query := fmt.Sprintf(`
-		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
+	// Dynamic selection for memory optimization
+	selectFields := `t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
 		       COALESCE(t.artist, a.name) as artist, al.title as album, al.year as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
 		       t.composer, t.comment, t.status, 
 		       COALESCE(ut.rating, 0) as rating, 
 		       t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0),
-		       COALESCE(ut.play_count, 0) as play_count
+		       COALESCE(ut.play_count, 0) as play_count`
+	
+	if minimal {
+		selectFields = `t.id, t.title, t.track_num, t.duration, COALESCE(t.genre, ''), 
+		       COALESCE(t.artist, a.name) as artist, al.title as album, al.year as year,
+		       t.format, COALESCE(ut.rating, 0) as rating, t.instrumental`
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
 		LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
 		%s
-		ORDER BY a.name, al.year, t.track_num`, whereClause)
+		ORDER BY a.name, al.year, t.track_num
+		LIMIT ? OFFSET ?`, selectFields, whereClause)
 
-	// Prepend username to args for the LEFT JOIN
+	// Prepend username to args for the LEFT JOIN and append limit/offset
 	finalArgs := append([]interface{}{user.Username}, args...)
+	finalArgs = append(finalArgs, limit, offset)
+	
 	rows, err := s.getDB(r).Conn.Query(query, finalArgs...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1237,23 +1265,34 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	tracks := make([]map[string]interface{}, 0)
+	tracks := make([]interface{}, 0)
 	for rows.Next() {
-		var id, title, genre, artist, album, format, composer, comment, tStatus string
-		var trackNum, discNum, duration, year, bitRate, sampleRate, rating, instrumental, trackTotal, discTotal, playCount int
-		var size int64
-		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating, &instrumental, &trackTotal, &discTotal, &playCount); err != nil {
-			slog.Error("Scan error", "err", err)
-			continue
+		if minimal {
+			var id, title, genre, artist, album, format string
+			var trackNum, duration, year, rating, instrumental int
+			if err := rows.Scan(&id, &title, &trackNum, &duration, &genre, &artist, &album, &year, &format, &rating, &instrumental); err != nil {
+				continue
+			}
+			tracks = append(tracks, map[string]interface{}{
+				"id": id, "title": title, "trackNum": trackNum, "duration": duration, "genre": genre, 
+				"artist": artist, "album": album, "year": year, "format": format, "rating": rating, "instrumental": instrumental == 1,
+			})
+		} else {
+			var id, title, genre, artist, album, format, composer, comment, tStatus string
+			var trackNum, discNum, duration, year, bitRate, sampleRate, rating, instrumental, trackTotal, discTotal, playCount int
+			var size int64
+			if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating, &instrumental, &trackTotal, &discTotal, &playCount); err != nil {
+				continue
+			}
+			tracks = append(tracks, map[string]interface{}{
+				"id": id, "title": title, "trackNum": trackNum, "discNum": discNum, 
+				"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
+				"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
+				"composer": composer, "comment": comment, "status": tStatus, "rating": rating,
+				"instrumental": instrumental == 1, "trackTotal": trackTotal, "discTotal": discTotal,
+				"playCount": playCount,
+			})
 		}
-		tracks = append(tracks, map[string]interface{}{
-			"id": id, "title": title, "trackNum": trackNum, "discNum": discNum, 
-			"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
-			"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
-			"composer": composer, "comment": comment, "status": tStatus, "rating": rating,
-			"instrumental": instrumental == 1, "trackTotal": trackTotal, "discTotal": discTotal,
-			"playCount": playCount,
-		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1653,73 +1692,31 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("🔍 Realizando búsqueda", "q", query)
-	searchTerm := "%" + query + "%"
-
+	searchTerm := query + "*" // Prefix search for FTS5
 	results := make(map[string]interface{})
 
-	// 1. Search Tracks (por título o género) - Solo activas
-	tracksRows, err := s.getDB(r).Conn.Query(`
-		SELECT t.id, t.title, a.name as artist 
-		FROM tracks t
-		JOIN albums al ON t.album_id = al.id
-		JOIN artists a ON al.artist_id = a.id
-		WHERE (t.title LIKE ? OR t.genre LIKE ?) AND t.status = 'active'
-		LIMIT 20
-	`, searchTerm, searchTerm)
+	// 1. Search with FTS5 (Instant search for title, artist, album, genre)
+	rows, err := s.getDB(r).Conn.Query(`
+		SELECT id, title, artist, album 
+		FROM search_idx 
+		WHERE search_idx MATCH ? 
+		ORDER BY rank 
+		LIMIT 50`, searchTerm)
 	
 	var tracks []map[string]interface{}
 	if err == nil {
-		defer tracksRows.Close()
-		for tracksRows.Next() {
-			var id, title, artist string
-			tracksRows.Scan(&id, &title, &artist)
-			tracks = append(tracks, map[string]interface{}{"id": id, "title": title, "artist": artist})
+		defer rows.Close()
+		for rows.Next() {
+			var id, title, artist, album string
+			rows.Scan(&id, &title, &artist, &album)
+			tracks = append(tracks, map[string]interface{}{"id": id, "title": title, "artist": artist, "album": album})
 		}
 	}
 	results["tracks"] = tracks
 
-	// 2. Search Artists - Solo si tienen pistas activas
-	artistRows, err := s.getDB(r).Conn.Query(`
-		SELECT DISTINCT ar.id, ar.name 
-		FROM artists ar
-		JOIN albums al ON ar.id = al.artist_id
-		JOIN tracks t ON al.id = t.album_id
-		WHERE ar.name LIKE ? AND t.status = 'active'
-		LIMIT 20
-	`, searchTerm)
-	
-	var artists []map[string]interface{}
-	if err == nil {
-		defer artistRows.Close()
-		for artistRows.Next() {
-			var id, name string
-			artistRows.Scan(&id, &name)
-			artists = append(artists, map[string]interface{}{"id": id, "name": name})
-		}
-	}
-	results["artists"] = artists
-
-	// 3. Search Albums - Solo si tienen pistas activas
-	albumRows, err := s.getDB(r).Conn.Query(`
-		SELECT DISTINCT al.id, al.title, ar.name as artist 
-		FROM albums al
-		JOIN artists ar ON al.artist_id = ar.id
-		JOIN tracks t ON al.id = t.album_id
-		WHERE al.title LIKE ? AND t.status = 'active'
-		LIMIT 20
-	`, searchTerm)
-	
-	var albums []map[string]interface{}
-	if err == nil {
-		defer albumRows.Close()
-		for albumRows.Next() {
-			var id, title, artist string
-			albumRows.Scan(&id, &title, &artist)
-			albums = append(albums, map[string]interface{}{"id": id, "title": title, "artist": artist})
-		}
-	}
-	results["albums"] = albums
+	// Separate results for UI compatibility if needed, though FTS5 returns mixed relevance
+	results["artists"] = []string{} // We could also use separate FTS5 queries if required
+	results["albums"] = []string{}
 	// 4. Search Genres
 	genreRows, err := s.getDB(r).Conn.Query(`
 		SELECT DISTINCT genre 
@@ -2694,10 +2691,9 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 0. VERIFICAR CACHÉ (VELOCIDAD MÁXIMA)
-	cacheDir := filepath.Join(os.TempDir(), "sgound_covers")
-	os.MkdirAll(cacheDir, 0755)
-	cachePath := filepath.Join(cacheDir, trackID+".jpg")
+	// 0. VERIFICAR CACHÉ (VELOCIDAD MÁXIMA PERSISTENTE)
+	cachePath := filepath.Join(s.Config.CachePath, "covers", trackID+".jpg")
+	os.MkdirAll(filepath.Dir(cachePath), 0755)
 
 	if _, err := os.Stat(cachePath); err == nil {
 		w.Header().Set("Cache-Control", "public, max-age=604800")
@@ -2840,6 +2836,14 @@ func (s *Server) HandleFileEvent(path string) {
 	}
 }
 
+func (s *Server) HandleFileDelete(path string) {
+	slog.Info("Watcher: File deletion detected", "path", path)
+	_, err := s.MasterDB.Conn.Exec("DELETE FROM tracks WHERE path = ?", path)
+	if err != nil {
+		slog.Error("Watcher: Failed to remove deleted track from DB", "path", path, "error", err)
+	}
+}
+
 func (s *Server) TriggerGlobalScan() {
 	status := &ScanStatus{Scanning: true, Processed: 0}
 	s.scanStatuses.Store("global", status)
@@ -2851,13 +2855,14 @@ func (s *Server) TriggerGlobalScan() {
 		s.scanStatuses.Store("global", status)
 	}
 
-	defer func() {
-		status.Scanning = false
-		s.scanStatuses.Store("global", status)
-		slog.Info("Global scan completed", "total", status.Processed)
+	go func() {
+		defer func() {
+			status.Scanning = false
+			s.scanStatuses.Store("global", status)
+			slog.Info("Global scan completed", "total", status.Processed)
+		}()
+		if err := sc.ScanDirectory(s.Config.MusicPath); err != nil {
+			slog.Error("Global scan failed", "error", err)
+		}
 	}()
-
-	if err := sc.ScanDirectory(s.Config.MusicPath); err != nil {
-		slog.Error("Global scan failed", "error", err)
-	}
 }

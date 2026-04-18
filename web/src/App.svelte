@@ -26,6 +26,7 @@
   import Setup from "./lib/Setup.svelte";
   import Search from "./lib/Search.svelte";
   import ConfirmModal from "./lib/ConfirmModal.svelte";
+  import QueuePanel from "./lib/QueuePanel.svelte";
 
   // Global fetch interceptor
   const originalFetch = window.fetch;
@@ -52,6 +53,10 @@
   let viewParams = $state({});
   let isNavigatingHistory = false;
   let tracks = $state([]);
+  let loadingTracks = $state(false);
+  let tracksOffset = $state(0);
+  let hasMoreTracks = $state(true);
+  const tracksLimit = 500;
   let playlists = $state([]);
   let selectedPlaylist = $state(null);
   let selectedSmart = $state(null);
@@ -69,7 +74,16 @@
   let currentPlaying = $state(null);
   let audioRef = $state(null);
   let isFullPlayerOpen = $state(false);
+  let isQueueOpen = $state(false);
   let maintenanceRefresh = $state();
+
+  // Reset scroll on navigation
+  $effect(() => {
+    if (currentView) {
+      const scrollView = document.querySelector('.scroll-view');
+      if (scrollView) scrollView.scrollTop = 0;
+    }
+  });
 
   // Sync currentPlaying with queue
   $effect(() => {
@@ -292,14 +306,45 @@
     }
   }
 
-  export async function fetchTracks() {
+  export async function fetchTracks(append = false) {
+    if (loadingTracks || (!hasMoreTracks && append)) return;
+    
     try {
-      const res = await fetch("/api/tracks");
+      loadingTracks = true;
+      if (!append) {
+        tracksOffset = 0;
+        hasMoreTracks = true;
+        // Solo limpiamos los tracks si NO estamos añadiendo, para evitar parpadeos
+        if (tracks.length > 0) tracks = [];
+      }
+
+      const res = await fetch(`/api/tracks?limit=${tracksLimit}&offset=${tracksOffset}&minimal=true`);
       if (!res.ok) throw new Error("Failed to fetch tracks");
-      tracks = (await res.json()) || [];
+      
+      const newTracks = (await res.json()) || [];
+      
+      if (append) {
+        tracks = [...tracks, ...newTracks];
+      } else {
+        tracks = newTracks;
+      }
+
+      hasMoreTracks = newTracks.length === tracksLimit;
+      tracksOffset += newTracks.length;
       error = null;
     } catch (e) {
       error = e.message;
+    } finally {
+      loadingTracks = false;
+    }
+  }
+
+  // Detectar cuando el usuario llega al final de la lista para cargar más
+  function handleTracksScroll(e) {
+    const target = e.target;
+    // Si quedan menos de 500px para el final, cargar más
+    if (target.scrollHeight - target.scrollTop - target.clientHeight < 500) {
+      if (currentView === 'library') fetchTracks(true);
     }
   }
 
@@ -747,7 +792,7 @@
       </div>
     </header>
 
-    <div class="scroll-view">
+    <div class="scroll-view" onscroll={handleTracksScroll}>
       {#if error}
         <div class="error-state">
           <Icon name="alertCircle" size={48} color="var(--primary)" />
@@ -798,6 +843,7 @@
           <TracksView
             {tracks}
             {currentPlaying}
+            loading={loadingTracks}
             onplay={(track) => handlePlay(track)}
             onedit={(track) => openEditor(track)}
             onselectionChange={(selection) => handleSelectionChange(selection)}
@@ -929,13 +975,17 @@
         onedit={(track) => openEditor(track)}
         onhide={handleReject}
         ondeletePhysical={handleDeletePhysical}
-      />
-    </div>
-  </div>
-</main>
-{/if}
+        ontoggleQueue={() => isQueueOpen = !isQueueOpen}
+        />
+        </div>
+        </div>
+        </main>
+        {/if}
 
-<TagEditor
+        <QueuePanel bind:isOpen={isQueueOpen} />
+
+        <TagEditor
+
   bind:isOpen={isTagEditorOpen}
   bind:track={trackToEdit}
   onclose={() => { fetchTracks(); maintenanceRefresh?.(); }}

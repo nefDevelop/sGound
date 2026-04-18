@@ -17,6 +17,7 @@
     onedit,
     onhide,
     ondeletePhysical,
+    ontoggleQueue,
     skipNext: skipNextBound = $bindable(),
     skipBack: skipBackBound = $bindable()
   } = $props();
@@ -300,6 +301,9 @@
     </div>
 
     <div class="extra-controls">
+      <button class="icon-btn" class:active={false} onclick={ontoggleQueue} title="Mostrar cola">
+        <Icon name="list" size={20} />
+      </button>
       <div class="volume-container">
         <button class="icon-btn" onclick={() => showVolume = !showVolume} title="Volume">
           <Icon name={isMuted ? 'volumeX' : 'volume2'} size={20} />

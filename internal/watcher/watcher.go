@@ -21,9 +21,11 @@ type Watcher struct {
 	
 	muMuted    sync.Mutex
 	mutedPaths map[string]time.Time
+
+	OnDelete func(path string)
 }
 
-func NewWatcher(root string, onEvent func(path string)) (*Watcher, error) {
+func NewWatcher(root string, onEvent func(path string), onDelete func(path string)) (*Watcher, error) {
 	nw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -32,8 +34,9 @@ func NewWatcher(root string, onEvent func(path string)) (*Watcher, error) {
 	return &Watcher{
 		watcher:    nw,
 		root:       root,
-		eventQueue: make(chan string, 1000), // Buffer para ráfagas de archivos
+		eventQueue: make(chan string, 1000), 
 		OnEvent:    onEvent,
+		OnDelete:   onDelete,
 		mutedPaths: make(map[string]time.Time),
 	}, nil
 }
@@ -125,6 +128,12 @@ func (w *Watcher) run() {
 					default:
 						slog.Warn("Watcher: Event queue full, skipping file", "path", event.Name)
 					}
+				}
+			}
+
+			if event.Has(fsnotify.Remove) {
+				if w.OnDelete != nil {
+					w.OnDelete(event.Name)
 				}
 			}
 
