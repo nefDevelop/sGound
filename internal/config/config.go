@@ -15,6 +15,7 @@ type Config struct {
 	ThemeColor        string
 	ReplayGainEnabled bool
 	Language          string `json:"language"`
+	CachePath         string
 	AllowedUsers      map[string]string `json:"-"` // username -> permissions (r/rw)
 }
 
@@ -66,7 +67,13 @@ func LoadConfig() *Config {
 		}
 	}
 
-	slog.Info("Configuration loaded", "dbPath", dbPath, "musicPath", musicPath, "port", port, "users", len(allowedUsers))
+	cachePath := os.Getenv("SGOUND_CACHE_PATH")
+	if cachePath == "" {
+		cachePath = "./.cache"
+	}
+	os.MkdirAll(cachePath, 0755)
+
+	slog.Info("Configuration loaded", "dbPath", dbPath, "musicPath", musicPath, "cachePath", cachePath, "users", len(allowedUsers))
 
 	return &Config{
 		DBPath:        dbPath,
@@ -77,6 +84,7 @@ func LoadConfig() *Config {
 		ThemeColor:        themeColor,
 		Language:          language,
 		ReplayGainEnabled: replayGain,
+		CachePath:         cachePath,
 		AllowedUsers:      allowedUsers,
 	}
 }

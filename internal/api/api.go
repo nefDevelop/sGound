@@ -1,9 +1,13 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -11,30 +15,26 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"io/fs"
-	"log/slog"
-	"context"
-	"database/sql"
 	"time"
 
 	"github.com/dhowden/tag"
 	"github.com/disintegration/imaging"
-	
-	"sgound/internal/db"
-	"sgound/internal/tags"
-	"sgound/internal/config"
-	"sgound/internal/scanner"
-	"sgound/internal/metadata"
-	"sgound/internal/auth"
-	"sgound/internal/models"
-	"sgound/internal/watcher"
-	"sgound/web"
-	"sync"
+
+	"bytes"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
-	"bytes"
 	"math/rand/v2"
+	"sgound/internal/auth"
+	"sgound/internal/config"
+	"sgound/internal/db"
+	"sgound/internal/metadata"
+	"sgound/internal/models"
+	"sgound/internal/scanner"
+	"sgound/internal/tags"
+	"sgound/internal/watcher"
+	"sgound/web"
+	"sync"
 )
 
 type ScanStatus struct {
@@ -43,9 +43,9 @@ type ScanStatus struct {
 }
 
 type Server struct {
-	MasterDB *db.MasterDatabase
-	Config   *config.Config
-	Watcher  *watcher.Watcher
+	MasterDB     *db.MasterDatabase
+	Config       *config.Config
+	Watcher      *watcher.Watcher
 	externalMeta *metadata.ExternalMetadata
 
 	jwtSecret        []byte
@@ -84,6 +84,7 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 }
 
 type contextKey string
+
 const userKey contextKey = "user"
 
 func (s *Server) SetupRoutes() http.Handler {
@@ -157,7 +158,7 @@ func (s *Server) SetupRoutes() http.Handler {
 				http.NotFound(w, r)
 				return
 			}
-			
+
 			path := strings.TrimPrefix(r.URL.Path, "/")
 			if path == "" {
 				path = "."
@@ -173,6 +174,7 @@ func (s *Server) SetupRoutes() http.Handler {
 }
 
 type dbKey string
+
 const databaseKey dbKey = "database"
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -230,7 +232,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	username := r.URL.Query().Get("username")
-	
+
 	if username == "" || username == "check" {
 		count, _ := s.MasterDB.GetUserCount()
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -285,14 +287,13 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hash, _ := auth.HashPassword(body.Password)
-	
+
 	// Create user with perms from config
 	err := s.MasterDB.CreateUser(body.Username, hash, perms, "", "*")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 
 	// Automatic Session: Set JWT cookie so user lands directly in dashboard
 	token, err := auth.GenerateJWT(body.Username, s.jwtSecret)
@@ -318,7 +319,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 	user, _ := r.Context().Value(userKey).(*db.User)
-	if user == nil { return }
+	if user == nil {
+		return
+	}
 
 	if r.Method == http.MethodGet {
 		keys, _ := s.MasterDB.GetAPIKeys(user.Username)
@@ -442,7 +445,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' unpkg.com; style-src 'self' 'unsafe-inline' unpkg.com; img-src 'self' data: itunes.apple.com; connect-src 'self' lrclib.net api.lyrics.ovh itunes.apple.com")
-		
+
 		if r.TLS != nil {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
@@ -459,14 +462,16 @@ func (s *Server) getPathFilter(user *db.User) (string, []interface{}) {
 	if user == nil || user.AllowedPaths == "*" || user.AllowedPaths == "" {
 		return "", nil
 	}
-	
+
 	paths := strings.Split(user.AllowedPaths, ",")
 	var conditions []string
 	var args []interface{}
-	
+
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
-		if p == "" { continue }
+		if p == "" {
+			continue
+		}
 		// Asegurar que termina en barra para el LIKE
 		if !strings.HasSuffix(p, "/") && !strings.HasSuffix(p, "\\") {
 			p = p + "/"
@@ -474,11 +479,11 @@ func (s *Server) getPathFilter(user *db.User) (string, []interface{}) {
 		conditions = append(conditions, "t.path LIKE ?")
 		args = append(args, p+"%")
 	}
-	
+
 	if len(conditions) == 0 {
 		return "", nil
 	}
-	
+
 	return "(" + strings.Join(conditions, " OR ") + ")", args
 }
 
@@ -492,7 +497,7 @@ func (s *Server) extractID(r *http.Request, prefix string) string {
 	path := r.URL.Path
 	// Normalizar prefijo para la comparación
 	cleanPrefix := strings.TrimSuffix(prefix, "/")
-	
+
 	var id string
 	if strings.HasPrefix(path, cleanPrefix) {
 		id = path[len(cleanPrefix):]
@@ -508,7 +513,7 @@ func (s *Server) extractID(r *http.Request, prefix string) string {
 	if decoded, err := url.PathUnescape(id); err == nil {
 		id = decoded
 	}
-	
+
 	return id
 }
 
@@ -542,7 +547,7 @@ func (s *Server) EnrichArtists() {
 			if err == nil && ext != nil {
 				tagsStr := strings.Join(ext.Tags, ",")
 				similarStr := strings.Join(ext.Similar, ",")
-				_, _ = s.MasterDB.Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?", 
+				_, _ = s.MasterDB.Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?",
 					ext.Image, ext.Biography, tagsStr, similarStr, a.ID)
 				slog.Debug("Artist enriched", "name", a.Name)
 			}
@@ -642,10 +647,14 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 	limit := 0
 	offset := 0
 	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 { limit = l }
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
 	}
 	if offsetStr != "" {
-		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 { offset = o }
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
 	}
 
 	query := fmt.Sprintf(`
@@ -718,8 +727,12 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 	similar := strings.Split(cachedSimilar.String, ",")
 
 	// Clean empty slices from Split
-	if cachedTags.String == "" { tags = []string{} }
-	if cachedSimilar.String == "" { similar = []string{} }
+	if cachedTags.String == "" {
+		tags = []string{}
+	}
+	if cachedSimilar.String == "" {
+		similar = []string{}
+	}
 
 	// If no cached info or tags, fetch it
 	if biography == "" || externalImage == "" || len(tags) == 0 {
@@ -732,7 +745,7 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 			// Update cache in DB
 			tagsStr := strings.Join(tags, ",")
 			similarStr := strings.Join(similar, ",")
-			_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET bio = ?, image_url = ?, tags = ?, similar = ? WHERE id = ?", 
+			_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET bio = ?, image_url = ?, tags = ?, similar = ? WHERE id = ?",
 				biography, externalImage, tagsStr, similarStr, artistID)
 		}
 	}
@@ -757,10 +770,9 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Verificar Caché
-	cacheDir := filepath.Join(os.TempDir(), "sgound_artists")
-	os.MkdirAll(cacheDir, 0755)
-	cachePath := filepath.Join(cacheDir, artistID+".jpg")
+	// 1. Verificar Caché (VELOCIDAD MÁXIMA)
+	cachePath := filepath.Join(s.Config.CachePath, "artists", artistID+".jpg")
+	os.MkdirAll(filepath.Dir(cachePath), 0755)
 
 	if _, err := os.Stat(cachePath); err == nil {
 		w.Header().Set("Cache-Control", "public, max-age=604800")
@@ -804,7 +816,7 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 
 	// Redimensionar a 800px de ancho (proporcional)
 	resized := imaging.Resize(src, 800, 0, imaging.Lanczos)
-	
+
 	// Guardar en caché como JPEG optimizado
 	err = imaging.Save(resized, cachePath)
 	if err != nil {
@@ -876,10 +888,14 @@ func (s *Server) handleGetAlbums(w http.ResponseWriter, r *http.Request) {
 	limit := 0
 	offset := 0
 	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 { limit = l }
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
 	}
 	if offsetStr != "" {
-		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 { offset = o }
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
 	}
 
 	query := fmt.Sprintf(`
@@ -1031,7 +1047,7 @@ func (s *Server) handleTrackActions(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	trackID := s.extractID(r, "/api/stream/")
 	user, _ := r.Context().Value(userKey).(*db.User)
-	
+
 	var fpath string
 	var rg float64
 	err := s.getDB(r).Conn.QueryRow("SELECT path, COALESCE(replay_gain, 0.0) FROM tracks WHERE id = ?", trackID).Scan(&fpath, &rg)
@@ -1081,8 +1097,8 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "audio/mpeg")
 		// Force MP3 for compatibility when processing with ffmpeg
 		ffmpegArgs = append(ffmpegArgs, "-f", "mp3", "-map_metadata", "-1", "pipe:1")
-		
-		// Use request context to kill ffmpeg if client disconnects
+
+		// Usamos CommandContext para que el proceso muera si la petición se cancela
 		cmd := exec.CommandContext(r.Context(), "ffmpeg", ffmpegArgs...)
 		cmd.Stdout = w
 		if err := cmd.Start(); err != nil {
@@ -1090,8 +1106,12 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Streaming failed", http.StatusInternalServerError)
 			return
 		}
-		// Wait will return error if context is cancelled, which is expected
-		cmd.Wait()
+
+		// Esperar a que termine o sea cancelado por el contexto
+		err := cmd.Wait()
+		if err != nil && r.Context().Err() == nil {
+			slog.Error("FFmpeg process finished with error", "error", err)
+		}
 		return
 	}
 
@@ -1105,7 +1125,7 @@ func (s *Server) handleEditTags(trackID string, w http.ResponseWriter, r *http.R
 	}
 
 	editor := tags.NewEditor(s.getDB(r))
-	
+
 	// Silenciar el watcher
 	var path string
 	s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
@@ -1223,10 +1243,25 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	if status == "" {
 		status = "active"
 	}
-	
+
+	// Pagination parameters
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	limit := 1000 // Default limit to protect memory
+	offset := 0
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		limit = l
+	}
+	if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+		offset = o
+	}
+
+	// Lighter JSON flag
+	minimal := r.URL.Query().Get("minimal") == "true"
+
 	whereClause := "WHERE 1=1"
 	args := []interface{}{}
-	
+
 	pathFilter, pathArgs := s.getPathFilter(user)
 	if pathFilter != "" {
 		whereClause += " AND " + pathFilter
@@ -1250,43 +1285,35 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		args = append(args, artistId)
 	}
 
-	// Pagination
-	limitStr := r.URL.Query().Get("limit")
-	offsetStr := r.URL.Query().Get("offset")
-	limit := 0
-	offset := 0
-	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-			limit = l
-		}
-	}
-	if offsetStr != "" {
-		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
-			offset = o
-		}
-	}
-
-	query := fmt.Sprintf(`
-		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
+	// Dynamic selection for memory optimization
+	selectFields := `t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
 		       COALESCE(t.artist, a.name) as artist, al.title as album, al.year as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
 		       t.composer, t.comment, t.status, 
 		       COALESCE(ut.rating, 0) as rating, 
 		       t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0),
-		       COALESCE(ut.play_count, 0) as play_count
+		       COALESCE(ut.play_count, 0) as play_count`
+
+	if minimal {
+		selectFields = `t.id, t.title, t.track_num, t.duration, COALESCE(t.genre, ''), 
+		       COALESCE(t.artist, a.name) as artist, al.title as album, al.year as year,
+		       t.format, COALESCE(ut.rating, 0) as rating, t.instrumental`
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
 		LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
 		%s
-		ORDER BY a.name, al.year, t.track_num`, whereClause)
-	
-	if limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
-	}
+		ORDER BY a.name, al.year, t.track_num
+		LIMIT ? OFFSET ?`, selectFields, whereClause)
 
-	// Prepend username to args for the LEFT JOIN
+	// Prepend username to args for the LEFT JOIN and append limit/offset
 	finalArgs := append([]interface{}{user.Username}, args...)
+	finalArgs = append(finalArgs, limit, offset)
+
 	rows, err := s.getDB(r).Conn.Query(query, finalArgs...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1294,35 +1321,34 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	w.Header().Set("Content-Type", "application/json")
-	
-	// Streaming JSON Encder
-	enc := json.NewEncoder(w)
-	w.Write([]byte("["))
-	first := true
-
+	tracks := make([]interface{}, 0)
 	for rows.Next() {
-		var id, title, genre, artist, album, format, composer, comment, tStatus string
-		var trackNum, discNum, duration, year, bitRate, sampleRate, rating, instrumental, trackTotal, discTotal, playCount int
-		var size int64
-		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating, &instrumental, &trackTotal, &discTotal, &playCount); err != nil {
-			slog.Error("Scan error", "err", err)
-			continue
+		if minimal {
+			var id, title, genre, artist, album, format string
+			var trackNum, duration, year, rating, instrumental int
+			if err := rows.Scan(&id, &title, &trackNum, &duration, &genre, &artist, &album, &year, &format, &rating, &instrumental); err != nil {
+				continue
+			}
+			tracks = append(tracks, map[string]interface{}{
+				"id": id, "title": title, "trackNum": trackNum, "duration": duration, "genre": genre,
+				"artist": artist, "album": album, "year": year, "format": format, "rating": rating, "instrumental": instrumental == 1,
+			})
+		} else {
+			var id, title, genre, artist, album, format, composer, comment, tStatus string
+			var trackNum, discNum, duration, year, bitRate, sampleRate, rating, instrumental, trackTotal, discTotal, playCount int
+			var size int64
+			if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating, &instrumental, &trackTotal, &discTotal, &playCount); err != nil {
+				continue
+			}
+			tracks = append(tracks, map[string]interface{}{
+				"id": id, "title": title, "trackNum": trackNum, "discNum": discNum,
+				"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
+				"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
+				"composer": composer, "comment": comment, "status": tStatus, "rating": rating,
+				"instrumental": instrumental == 1, "trackTotal": trackTotal, "discTotal": discTotal,
+				"playCount": playCount,
+			})
 		}
-		
-		if !first {
-			w.Write([]byte(","))
-		}
-		first = false
-
-		enc.Encode(map[string]interface{}{
-			"id": id, "title": title, "trackNum": trackNum, "discNum": discNum, 
-			"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
-			"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
-			"composer": composer, "comment": comment, "status": tStatus, "rating": rating,
-			"instrumental": instrumental == 1, "trackTotal": trackTotal, "discTotal": discTotal,
-			"playCount": playCount,
-		})
 	}
 	w.Write([]byte("]"))
 }
@@ -1354,10 +1380,12 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 		db := s.getDB(r)
 		var path string
 		err := db.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", oldID).Scan(&path)
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 
 		newID := tags.GenerateUUID()
-		
+
 		// 1. Lo activamos PRIMERO en la DB
 		db.Conn.Exec("UPDATE tracks SET status = 'active' WHERE id = ?", oldID)
 		approvedCount++
@@ -1380,13 +1408,17 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 					for _, ent := range entries {
 						name := strings.ToLower(ent.Name())
 						ext := filepath.Ext(name)
-						if ext != ".jpg" && ext != ".jpeg" && ext != ".png" { continue }
+						if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+							continue
+						}
 						base := strings.TrimSuffix(name, ext)
 						for _, c := range common {
 							if base == c {
 								imgData, _ := os.ReadFile(filepath.Join(dir, ent.Name()))
 								mime := "image/jpeg"
-								if ext == ".png" { mime = "image/png" }
+								if ext == ".png" {
+									mime = "image/png"
+								}
 								tags.NewEditor(s.MasterDB).EmbedCover(tid, imgData, mime)
 								return
 							}
@@ -1502,14 +1534,19 @@ func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
 	for key := range groups {
 		isGeneric := len(key.albumTitle) < 3
 		if !isGeneric {
-			if _, err := strconv.Atoi(key.albumTitle); err == nil { isGeneric = true }
+			if _, err := strconv.Atoi(key.albumTitle); err == nil {
+				isGeneric = true
+			}
 		}
 		if !isGeneric {
 			albumTitles = append(albumTitles, key.albumTitle)
 		}
 	}
 
-	consensusData := make(map[string][]struct{Artist string; Year int})
+	consensusData := make(map[string][]struct {
+		Artist string
+		Year   int
+	})
 	if len(albumTitles) > 0 {
 		placeholders := make([]string, len(albumTitles))
 		args := make([]interface{}, len(albumTitles))
@@ -1517,14 +1554,14 @@ func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
 			placeholders[i] = "?"
 			args[i] = t
 		}
-		
+
 		query := fmt.Sprintf(`
 			SELECT t.artist, al.title, COALESCE(al.year, 0)
 			FROM tracks t
 			JOIN albums al ON t.album_id = al.id
 			WHERE t.status = 'active' AND al.title IN (%s)
 		`, strings.Join(placeholders, ","))
-		
+
 		cRows, err := db.Conn.Query(query, args...)
 		if err == nil {
 			defer cRows.Close()
@@ -1532,7 +1569,10 @@ func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
 				var a, t string
 				var y int
 				if err := cRows.Scan(&a, &t, &y); err == nil {
-					consensusData[t] = append(consensusData[t], struct{Artist string; Year int}{a, y})
+					consensusData[t] = append(consensusData[t], struct {
+						Artist string
+						Year   int
+					}{a, y})
 				}
 			}
 		}
@@ -1540,21 +1580,27 @@ func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
 
 	for key, ids := range groups {
 		data, exists := consensusData[key.albumTitle]
-		if !exists { continue }
-		
+		if !exists {
+			continue
+		}
+
 		counts := make(map[string]int)
 		years := make(map[int]int)
-		
+
 		for _, d := range data {
 			// Filtrar por artista similar al grupo actual (en Go, para evitar LIKE complejo en el IN)
 			dNorm := scanner.NormalizeArtist(d.Artist)
 			if strings.Contains(dNorm, key.normArtist) || strings.Contains(key.normArtist, dNorm) {
 				counts[d.Artist]++
-				if d.Year > 0 { years[d.Year]++ }
+				if d.Year > 0 {
+					years[d.Year]++
+				}
 			}
 		}
 
-		if len(counts) == 0 { continue }
+		if len(counts) == 0 {
+			continue
+		}
 
 		// El ganador es el que tiene más frecuencia
 		winnerArtist := ""
@@ -1646,18 +1692,24 @@ func (s *Server) handleApplyInboxSuggestions(w http.ResponseWriter, r *http.Requ
 		// 1. Obtener o crear artista del álbum corregido
 		artistId := scanner.GenerateID(sug.Artist)
 		_, err = tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistId, sug.Artist)
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 
 		// 2. Obtener o crear álbum corregido (Lógica sincronizada con el scanner)
 		groupingKey := "AA:" + scanner.NormalizeArtist(sug.Artist)
 		albumId := scanner.GenerateID(groupingKey + "|" + scanner.NormalizeString(sug.Album))
-		
+
 		_, err = tx.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", albumId, artistId, sug.Album, sug.Year)
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 
 		// 3. Actualizar el track en el Inbox (manteniendo status 'pending')
 		_, err = tx.Exec("UPDATE tracks SET album_id = ?, artist = ? WHERE id = ?", albumId, sug.Artist, sug.TrackID)
-		if err != nil { slog.Error("Failed to apply suggestion to track", "id", sug.TrackID, "err", err) }
+		if err != nil {
+			slog.Error("Failed to apply suggestion to track", "id", sug.TrackID, "err", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -1697,10 +1749,10 @@ func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
 	tagData := map[string]interface{}{
 		"rating": float64(data.Rating),
 	}
-			// data.ID es el track ID
-			if _, err := editor.UpdateTags(data.ID, tagData); err != nil {
-				slog.Error("Failed to update tags in massive editor", "track", data.ID, "err", err)
-			}
+	// data.ID es el track ID
+	if _, err := editor.UpdateTags(data.ID, tagData); err != nil {
+		slog.Error("Failed to update tags in massive editor", "track", data.ID, "err", err)
+	}
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
@@ -1708,7 +1760,7 @@ func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteTrack(trackID string, w http.ResponseWriter, r *http.Request) {
 	db := s.getDB(r)
-	
+
 	// 1. Obtener la ruta del archivo antes de borrar el registro
 	var path string
 	err := db.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
@@ -1733,7 +1785,7 @@ func (s *Server) handleDeleteTrack(trackID string, w http.ResponseWriter, r *htt
 		http.Error(w, "Failed to delete track from DB", http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
 }
@@ -1745,73 +1797,31 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("🔍 Realizando búsqueda", "q", query)
-	searchTerm := "%" + query + "%"
-
+	searchTerm := query + "*" // Prefix search for FTS5
 	results := make(map[string]interface{})
 
-	// 1. Search Tracks (por título o género) - Solo activas
-	tracksRows, err := s.getDB(r).Conn.Query(`
-		SELECT t.id, t.title, a.name as artist 
-		FROM tracks t
-		JOIN albums al ON t.album_id = al.id
-		JOIN artists a ON al.artist_id = a.id
-		WHERE (t.title LIKE ? OR t.genre LIKE ?) AND t.status = 'active'
-		LIMIT 20
-	`, searchTerm, searchTerm)
-	
+	// 1. Search with FTS5 (Instant search for title, artist, album, genre)
+	rows, err := s.getDB(r).Conn.Query(`
+		SELECT id, title, artist, album 
+		FROM search_idx 
+		WHERE search_idx MATCH ? 
+		ORDER BY rank 
+		LIMIT 50`, searchTerm)
+
 	var tracks []map[string]interface{}
 	if err == nil {
-		defer tracksRows.Close()
-		for tracksRows.Next() {
-			var id, title, artist string
-			tracksRows.Scan(&id, &title, &artist)
-			tracks = append(tracks, map[string]interface{}{"id": id, "title": title, "artist": artist})
+		defer rows.Close()
+		for rows.Next() {
+			var id, title, artist, album string
+			rows.Scan(&id, &title, &artist, &album)
+			tracks = append(tracks, map[string]interface{}{"id": id, "title": title, "artist": artist, "album": album})
 		}
 	}
 	results["tracks"] = tracks
 
-	// 2. Search Artists - Solo si tienen pistas activas
-	artistRows, err := s.getDB(r).Conn.Query(`
-		SELECT DISTINCT ar.id, ar.name 
-		FROM artists ar
-		JOIN albums al ON ar.id = al.artist_id
-		JOIN tracks t ON al.id = t.album_id
-		WHERE ar.name LIKE ? AND t.status = 'active'
-		LIMIT 20
-	`, searchTerm)
-	
-	var artists []map[string]interface{}
-	if err == nil {
-		defer artistRows.Close()
-		for artistRows.Next() {
-			var id, name string
-			artistRows.Scan(&id, &name)
-			artists = append(artists, map[string]interface{}{"id": id, "name": name})
-		}
-	}
-	results["artists"] = artists
-
-	// 3. Search Albums - Solo si tienen pistas activas
-	albumRows, err := s.getDB(r).Conn.Query(`
-		SELECT DISTINCT al.id, al.title, ar.name as artist 
-		FROM albums al
-		JOIN artists ar ON al.artist_id = ar.id
-		JOIN tracks t ON al.id = t.album_id
-		WHERE al.title LIKE ? AND t.status = 'active'
-		LIMIT 20
-	`, searchTerm)
-	
-	var albums []map[string]interface{}
-	if err == nil {
-		defer albumRows.Close()
-		for albumRows.Next() {
-			var id, title, artist string
-			albumRows.Scan(&id, &title, &artist)
-			albums = append(albums, map[string]interface{}{"id": id, "title": title, "artist": artist})
-		}
-	}
-	results["albums"] = albums
+	// Separate results for UI compatibility if needed, though FTS5 returns mixed relevance
+	results["artists"] = []string{} // We could also use separate FTS5 queries if required
+	results["albums"] = []string{}
 	// 4. Search Genres
 	genreRows, err := s.getDB(r).Conn.Query(`
 		SELECT DISTINCT genre 
@@ -1819,7 +1829,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		WHERE genre LIKE ? AND status = 'active'
 		LIMIT 10
 	`, searchTerm)
-	
+
 	var genres []string
 	if err == nil {
 		defer genreRows.Close()
@@ -1840,7 +1850,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		WHERE name LIKE ?
 		LIMIT 10
 	`, searchTerm)
-	
+
 	var playlists []map[string]interface{}
 	if err == nil {
 		defer playlistRows.Close()
@@ -1859,7 +1869,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAutocomplete(w http.ResponseWriter, r *http.Request) {
 	field := r.URL.Query().Get("field")
 	q := r.URL.Query().Get("q")
-	
+
 	if field == "" || q == "" {
 		json.NewEncoder(w).Encode([]string{})
 		return
@@ -1943,7 +1953,7 @@ func (s *Server) handleLibraryMetadata(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	user, _ := r.Context().Value(userKey).(*db.User)
 	stats := make(map[string]interface{})
-	
+
 	// Contadores básicos - Mezcla de Global y Personal
 	var tTracks, tAlbums, tArtists, tPlaylists, tGenres int
 	pathFilter, pathArgs := s.getPathFilter(user)
@@ -1953,16 +1963,16 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks t "+whereActive, pathArgs...).Scan(&tTracks)
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT album_id) FROM tracks t " + whereActive, pathArgs...).Scan(&tAlbums)
-	
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT album_id) FROM tracks t "+whereActive, pathArgs...).Scan(&tAlbums)
+
 	artistQuery := fmt.Sprintf(`SELECT COUNT(DISTINCT ar.id) FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id %s AND t.status = 'active'`, "WHERE 1=1")
 	if pathFilter != "" {
 		artistQuery = fmt.Sprintf(`SELECT COUNT(DISTINCT ar.id) FROM artists ar JOIN albums al ON ar.id = al.artist_id JOIN tracks t ON al.id = t.album_id WHERE %s AND t.status = 'active'`, pathFilter)
 	}
 	s.getDB(r).Conn.QueryRow(artistQuery, pathArgs...).Scan(&tArtists)
-	
+
 	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM playlists WHERE username = ?", user.Username).Scan(&tPlaylists)
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT genre) FROM tracks t " + whereActive + " AND genre != ''", pathArgs...).Scan(&tGenres)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT genre) FROM tracks t "+whereActive+" AND genre != ''", pathArgs...).Scan(&tGenres)
 	stats["totalTracks"] = tTracks
 	stats["totalAlbums"] = tAlbums
 	stats["totalArtists"] = tArtists
@@ -1975,7 +1985,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if pathFilter != "" {
 		wherePending += " AND " + pathFilter
 	}
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks t " + wherePending, pathArgs...).Scan(&pendingCount)
+	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks t "+wherePending, pathArgs...).Scan(&pendingCount)
 	stats["inboxCount"] = pendingCount
 
 	// Joyas olvidadas (Deduplicadas por álbum + artista para evitar repetir carátulas) - Optimizado sin RANDOM()
@@ -2002,7 +2012,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			rows.Scan(&id, &title, &artist)
 			candidates = append(candidates, map[string]interface{}{"id": id, "title": title, "artist": artist})
 		}
-		
+
 		if len(candidates) > 0 {
 			rand.Shuffle(len(candidates), func(i, j int) {
 				candidates[i], candidates[j] = candidates[j], candidates[i]
@@ -2063,25 +2073,25 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			var id, title, artist, addedAt, genre string
 			var br, pc, year int
 			rows3.Scan(&id, &title, &artist, &addedAt, &genre, &br, &pc, &year)
-			
+
 			// Algoritmo de Mood/Tag Refinado con Prioridades (NUEVA JERARQUÍA PARA MÁS VARIEDAD)
 			tag := "Recuerdo"
 			color := "tertiary"
 			g := strings.ToLower(genre)
-			
+
 			// 1. Prioridad Máxima: Éxitos personales
 			if pc > 30 {
 				tag = "Top Hit"
 				color = "primary"
-			// 2. Alta Fidelidad
+				// 2. Alta Fidelidad
 			} else if br > 1000000 {
 				tag = "Premium"
 				color = "primary"
-			// 3. Sentimiento Temporal (Clásicos)
+				// 3. Sentimiento Temporal (Clásicos)
 			} else if year > 0 && year < currentYear-20 {
 				tag = "Nostalgia"
 				color = "tertiary"
-			// 4. Género / Mood
+				// 4. Género / Mood
 			} else if strings.Contains(g, "rock") || strings.Contains(g, "pop") || strings.Contains(g, "electronic") || strings.Contains(g, "metal") {
 				tag = "Energía"
 				color = "primary"
@@ -2091,24 +2101,24 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			} else if strings.Contains(g, "chill") || strings.Contains(g, "ambient") || strings.Contains(g, "lo-fi") || strings.Contains(g, "blues") {
 				tag = "Chill"
 				color = "tertiary"
-			// 5. Por defecto si es nuevo y no cumple lo anterior
+				// 5. Por defecto si es nuevo y no cumple lo anterior
 			} else if pc == 0 {
 				tag = "Descubrir"
 				color = "secondary"
 			}
 
 			recentAlbums = append(recentAlbums, map[string]interface{}{
-				"id":      id,
-				"title":   title,
-				"artist":  artist,
-				"addedAt": addedAt,
+				"id":       id,
+				"title":    title,
+				"artist":   artist,
+				"addedAt":  addedAt,
 				"tag":      tag,
 				"tagColor": color,
 			})
 		}
 	}
 	stats["discovery"] = recentAlbums
-	
+
 	// Trends: Top 3 genres by track count (Globales)
 	trends := make([]map[string]interface{}, 0)
 	var totalActiveWithGenre int
@@ -2160,7 +2170,7 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 		whereInbox += " AND " + pathFilter
 	}
 	var inboxCount int
-	s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks t " + whereInbox, pathArgs...).Scan(&inboxCount)
+	s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks t "+whereInbox, pathArgs...).Scan(&inboxCount)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -2203,18 +2213,18 @@ func (s *Server) handleLibraryDuplicates(w http.ResponseWriter, r *http.Request)
 	// Agrupar duplicados de forma inclusiva
 	groups := make(map[string][]models.Track)
 	for _, t := range dups {
-		// Usamos una clave de metadatos para que canciones con distinto hash 
+		// Usamos una clave de metadatos para que canciones con distinto hash
 		// pero mismo contenido teórico (artista, álbum, título) se agrupen y se vea el duplicado.
-		key := fmt.Sprintf("%s|%s|%s", 
-			strings.ToLower(t.Artist), 
-			strings.ToLower(t.Album), 
+		key := fmt.Sprintf("%s|%s|%s",
+			strings.ToLower(t.Artist),
+			strings.ToLower(t.Album),
 			strings.ToLower(t.Title))
-		
+
 		// Si no tiene metadatos pero tiene hash (raro pero posible), usamos el hash.
 		if t.Artist == "" && t.Album == "" && t.Title == "" && t.FileHash != "" {
 			key = "hash:" + t.FileHash
 		}
-		
+
 		groups[key] = append(groups[key], t)
 	}
 
@@ -2284,7 +2294,6 @@ func (s *Server) handleLibraryLowQuality(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(tracks)
 }
 
-
 func (s *Server) handleMetadataSuggest(w http.ResponseWriter, r *http.Request) {
 	trackID := r.URL.Query().Get("id")
 	if trackID == "" {
@@ -2342,20 +2351,26 @@ func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
 	artist := r.URL.Query().Get("artist")
 	title := r.URL.Query().Get("title")
 	album := r.URL.Query().Get("album")
-	
+
 	if artist == "" && title == "" && album == "" {
 		http.Error(w, "At least one search parameter is required", http.StatusBadRequest)
 		return
 	}
 
 	parts := []string{}
-	if artist != "" { parts = append(parts, artist) }
-	if title != "" { parts = append(parts, title) }
-	if album != "" { parts = append(parts, album) }
+	if artist != "" {
+		parts = append(parts, artist)
+	}
+	if title != "" {
+		parts = append(parts, title)
+	}
+	if album != "" {
+		parts = append(parts, album)
+	}
 
 	searchQuery := strings.Join(parts, " ")
 	url := fmt.Sprintf("https://itunes.apple.com/search?term=%s&media=music&limit=15", url.QueryEscape(searchQuery))
-	
+
 	resp, err := http.Get(url)
 	if err != nil {
 		http.Error(w, "External search failed", http.StatusInternalServerError)
@@ -2381,8 +2396,10 @@ func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
 	list := make([]map[string]interface{}, 0)
 	for _, item := range itunesResult.Results {
 		year := 0
-		if len(item.ReleaseDate) >= 4 { fmt.Sscanf(item.ReleaseDate[:4], "%d", &year) }
-		
+		if len(item.ReleaseDate) >= 4 {
+			fmt.Sscanf(item.ReleaseDate[:4], "%d", &year)
+		}
+
 		list = append(list, map[string]interface{}{
 			"artist":   item.ArtistName,
 			"title":    item.TrackName,
@@ -2401,7 +2418,7 @@ func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 	trackID := s.extractID(r, "/api/lyrics/")
-	
+
 	if trackID == "search" {
 		s.handleLyricsSearch(w, r)
 		return
@@ -2443,12 +2460,12 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 		JOIN albums al ON t.album_id = al.id 
 		JOIN artists a ON al.artist_id = a.id 
 		WHERE t.id = ?`, trackID).Scan(&title, &artist)
-	
+
 	if err != nil {
 		http.Error(w, "Track not found", http.StatusNotFound)
 		return
 	}
-	
+
 	editor := tags.NewEditor(s.getDB(r))
 
 	// 1. Intentar leer de archivo local primero (verdad absoluta del usuario)
@@ -2492,7 +2509,7 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 		return
 	}
 	defer resp.Body.Close()
-	
+
 	slog.Info("✅ Letras obtenidas de lyrics.ovh")
 	w.Header().Set("Content-Type", "application/json")
 	io.Copy(w, resp.Body)
@@ -2501,7 +2518,7 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 func (s *Server) handleLyricsSearch(w http.ResponseWriter, r *http.Request) {
 	artist := r.URL.Query().Get("artist")
 	title := r.URL.Query().Get("title")
-	
+
 	if artist == "" || title == "" {
 		http.Error(w, "Artist and title are required", http.StatusBadRequest)
 		return
@@ -2571,7 +2588,7 @@ func (s *Server) handlePlaylists(w http.ResponseWriter, r *http.Request) {
 		var id, name, ruleSQL string
 		var isSmart int
 		rows.Scan(&id, &name, &isSmart, &ruleSQL)
-		
+
 		count := 0
 		if isSmart == 1 && ruleSQL != "" {
 			// Ejecutar conteo rápido para smart playlist
@@ -2622,7 +2639,7 @@ func (s *Server) generateRuleSQL(rules struct {
 
 func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 	typeStr := s.extractID(r, "/api/smart-playlists/")
-	
+
 	baseQuery := `
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''),
 		       a.name as artist, al.title as album, al.year as year,
@@ -2631,7 +2648,7 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id`
-	
+
 	whereClause := "WHERE t.status = 'active'"
 	var orderClause string
 	var args []interface{}
@@ -2682,7 +2699,7 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		tracks = append(tracks, map[string]interface{}{
-			"id": id, "title": title, "trackNum": trackNum, "discNum": discNum, 
+			"id": id, "title": title, "trackNum": trackNum, "discNum": discNum,
 			"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
 			"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
 			"composer": composer, "comment": comment, "instrumental": instrumental == 1,
@@ -2727,7 +2744,7 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 	id := strings.TrimPrefix(r.URL.Path, "/api/playlists/")
 	id = strings.TrimSuffix(id, "/tracks")
 	user, _ := r.Context().Value(userKey).(*db.User)
-	
+
 	// 1. Obtener info de la playlist
 	var isSmart int
 	var ruleSQL string
@@ -2739,22 +2756,22 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 
 	var rows *sql.Rows
 	fields := "t.id, t.title, t.track_num, t.disc_num, t.duration, t.genre, a.name, al.title, al.year, COALESCE(ut.rating, 0), t.composer, t.comment, t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0)"
-	
+
 	if isSmart == 1 && ruleSQL != "" {
 		// Ejecutar regla dinámica
 		rows, err = s.getDB(r).Conn.Query(`
-			SELECT ` + fields + `
+			SELECT `+fields+`
 			FROM tracks t
 			JOIN albums al ON t.album_id = al.id
 			JOIN artists a ON al.artist_id = a.id
 			LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
-			WHERE t.id IN (` + ruleSQL + `)
+			WHERE t.id IN (`+ruleSQL+`)
 			ORDER BY a.name, al.title, t.track_num
 		`, user.Username)
 	} else {
 		// Lista estática tradicional
 		rows, err = s.getDB(r).Conn.Query(`
-			SELECT ` + fields + `
+			SELECT `+fields+`
 			FROM tracks t
 			JOIN playlist_tracks pt ON t.id = pt.track_id
 			JOIN albums al ON t.album_id = al.id
@@ -2781,7 +2798,7 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 		}
 		list = append(list, map[string]interface{}{
 			"id": tid, "title": title, "trackNum": trackNum, "discNum": discNum,
-			"duration": duration, "genre": genre, "artist": artist, 
+			"duration": duration, "genre": genre, "artist": artist,
 			"album": album, "year": year, "rating": rating,
 			"composer": composer, "comment": comment, "instrumental": instrumental == 1,
 			"trackTotal": trackTotal, "discTotal": discTotal,
@@ -2798,10 +2815,9 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 0. VERIFICAR CACHÉ (VELOCIDAD MÁXIMA)
-	cacheDir := filepath.Join(os.TempDir(), "sgound_covers")
-	os.MkdirAll(cacheDir, 0755)
-	cachePath := filepath.Join(cacheDir, trackID+".jpg")
+	// 0. VERIFICAR CACHÉ (VELOCIDAD MÁXIMA PERSISTENTE)
+	cachePath := filepath.Join(s.Config.CachePath, "covers", trackID+".jpg")
+	os.MkdirAll(filepath.Dir(cachePath), 0755)
 
 	if _, err := os.Stat(cachePath); err == nil {
 		w.Header().Set("Cache-Control", "public, max-age=604800")
@@ -2863,12 +2879,16 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 	for _, entry := range entries {
 		name := strings.ToLower(entry.Name())
 		ext := filepath.Ext(name)
-		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" { continue }
+		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+			continue
+		}
 		base := strings.TrimSuffix(name, ext)
 		if commonNames[base] {
 			fImg, err := os.Open(filepath.Join(dir, entry.Name()))
-			if err != nil { continue }
-			
+			if err != nil {
+				continue
+			}
+
 			// Limit reading to 10MB
 			limit := int64(10 * 1024 * 1024)
 			imgData, err := io.ReadAll(io.LimitReader(fImg, limit))
@@ -2942,7 +2962,7 @@ func (s *Server) handleServeSwaggerUI(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) HandleFileEvent(path string) {
 	slog.Info("Watcher: Detected change", "path", path)
-	
+
 	// Pre-check if file exists
 	if _, err := os.Stat(path); err != nil {
 		return
@@ -2951,6 +2971,14 @@ func (s *Server) HandleFileEvent(path string) {
 	sc := scanner.NewScanner(s.MasterDB)
 	if err := sc.ParseAndSaveFile(path); err != nil {
 		slog.Error("Watcher: Failed to process file", "path", path, "error", err)
+	}
+}
+
+func (s *Server) HandleFileDelete(path string) {
+	slog.Info("Watcher: File deletion detected", "path", path)
+	_, err := s.MasterDB.Conn.Exec("DELETE FROM tracks WHERE path = ?", path)
+	if err != nil {
+		slog.Error("Watcher: Failed to remove deleted track from DB", "path", path, "error", err)
 	}
 }
 
@@ -2965,13 +2993,14 @@ func (s *Server) TriggerGlobalScan() {
 		s.scanStatuses.Store("global", status)
 	}
 
-	defer func() {
-		status.Scanning = false
-		s.scanStatuses.Store("global", status)
-		slog.Info("Global scan completed", "total", status.Processed)
+	go func() {
+		defer func() {
+			status.Scanning = false
+			s.scanStatuses.Store("global", status)
+			slog.Info("Global scan completed", "total", status.Processed)
+		}()
+		if err := sc.ScanDirectory(s.Config.MusicPath); err != nil {
+			slog.Error("Global scan failed", "error", err)
+		}
 	}()
-
-	if err := sc.ScanDirectory(s.Config.MusicPath); err != nil {
-		slog.Error("Global scan failed", "error", err)
-	}
 }

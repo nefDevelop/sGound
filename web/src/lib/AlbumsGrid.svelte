@@ -4,6 +4,8 @@
   import ContextMenu from './ContextMenu.svelte';
   import Artwork from './Artwork.svelte';
   
+  import Skeleton from './Skeleton.svelte';
+  
   let { artistId = null, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum } = $props();
   
   let albums = $state([]);
@@ -78,7 +80,17 @@
   </header>
 
   {#if loading}
-    <div class="status">Curating your library...</div>
+    <div class="albums-grid">
+      {#each Array(8) as _}
+        <div class="album-card skeleton-card">
+          <Skeleton width="100%" height="auto" borderRadius="24px" style="aspect-ratio: 1" />
+          <div class="album-info">
+            <Skeleton width="80%" height="1.1rem" borderRadius="4px" margin="0.5rem 0 0.3rem" />
+            <Skeleton width="50%" height="0.9rem" borderRadius="4px" />
+          </div>
+        </div>
+      {/each}
+    </div>
   {:else if albums.length === 0}
     <div class="empty-state">
       <div class="empty-icon"><Icon name="disc" size={64} /></div>

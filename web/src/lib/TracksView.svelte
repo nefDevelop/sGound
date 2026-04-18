@@ -9,6 +9,7 @@
   let { 
     tracks = $bindable([]), 
     currentPlaying = null, 
+    loading = false,
     onplay = undefined, 
     onedit = undefined, 
     onselectionChange = undefined, 
@@ -27,6 +28,49 @@
   
   let selectedIds = $state(new Set());
   let sortConfig = $state({ field: 'title', direction: 'asc' });
+
+  // Virtualization state
+  let scrollTop = $state(0);
+  let containerHeight = $state(0);
+  const rowHeight = 62; // Approximate height of a row
+  const buffer = 5; // Rows to render above/below viewport
+
+  let visibleRange = $derived.by(() => {
+    if (!tracks || tracks.length === 0) return { start: 0, end: 0, paddingTop: 0, paddingBottom: 0 };
+    
+    const startIdx = Math.max(0, Math.floor(scrollTop / rowHeight) - buffer);
+    const endIdx = Math.min(tracks.length, Math.ceil((scrollTop + containerHeight) / rowHeight) + buffer);
+    
+    return {
+      start: startIdx,
+      end: endIdx,
+      paddingTop: startIdx * rowHeight,
+      paddingBottom: (tracks.length - endIdx) * rowHeight
+    };
+  });
+
+  function handleScroll(e) {
+    scrollTop = e.target.scrollTop;
+    containerHeight = e.target.clientHeight;
+  }
+
+  import { onMount } from 'svelte';
+  let containerRef = $state();
+  onMount(() => {
+    // We need to listen to the closest scrollable parent (the .scroll-view in App.svelte)
+    const scrollView = containerRef?.closest('.scroll-view');
+    if (scrollView) {
+      const update = () => {
+        scrollTop = scrollView.scrollTop;
+        containerHeight = scrollView.clientHeight;
+      };
+      scrollView.addEventListener('scroll', update);
+      update();
+      return () => scrollView.removeEventListener('scroll', update);
+    }
+  });
+
+  import Skeleton from './Skeleton.svelte';
 
   // Inline editing state
   let editingCell = $state({ trackId: null, field: null });
@@ -239,7 +283,7 @@
   function hasCol(id) { return columns.includes(id); }
 </script>
 
-<div class="tracks-view">
+<div class="tracks-view" bind:this={containerRef}>
   {#if showHeader}
     <header class="section-header">
       <div class="title-row">
@@ -304,200 +348,224 @@
         </tr>
       </thead>
       <tbody>
-        {#each tracks as track, i}
-          <tr 
-            class="track-row" 
-            class:active={currentPlaying && currentPlaying.id === track.id}
-            class:selected={hasCol('checkbox') && selectedIds.has(track.id)}
-            onclick={(e) => handleRowClick(track, e)}
-            ondblclick={() => onplay?.(track)}
-            oncontextmenu={(e) => showContextMenu(track, e)}
-            onkeydown={(e) => {
-              if (e.key === 'Enter') onplay?.(track);
-              if (e.key === ' ' && hasCol('checkbox')) { e.preventDefault(); toggleSelect(track.id); }
-            }}
-            tabindex="0"
-          >
-            {#if hasCol('checkbox')}
-              <td class="checkbox-cell">
-                <input type="checkbox" checked={selectedIds.has(track.id)} onchange={(e) => toggleSelect(track.id)} />
-              </td>
-            {/if}
-
-            {#if hasCol('num')}
-              <td class="num-col">{track.trackNum || i + 1}</td>
-            {/if}
-
-            {#if hasCol('title')}
-              <td class="title-cell" ondblclick={(e) => startEdit(track, 'title', e)}>
+        {#if loading}
+          {#each Array(10) as _}
+            <tr class="track-row skeleton-row">
+              {#if hasCol('checkbox')}<td class="checkbox-cell"><Skeleton width="18px" height="18px" borderRadius="4px" /></td>{/if}
+              {#if hasCol('num')}<td class="num-col"><Skeleton width="20px" /></td>{/if}
+              <td class="title-cell">
                 <div class="flex-align">
-                  <Artwork 
-                    src={`/api/cover/${track.id}`} 
-                    size="40px" 
-                    borderRadius="10px" 
-                    alt="" 
-                  />
-                  <div class="info-stack">
-                    {#if editingCell.trackId === track.id && editingCell.field === 'title'}
-                      <div class="inline-edit-wrap">
-                    <input 
-                      type="text" 
-                      class="inline-input" 
-                      value={editingValue} 
-                      oninput={handleValueChange}
-                      onkeydown={handleKeyDown}
-                      onblur={saveEdit}
-                      use:focusOnMount 
-                    />
-                    {#if suggestions.length > 0}
-                      <div class="suggestions-popover">
-                        {#each suggestions as s, i}
-                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
-                        {/each}
-                      </div>
-                    {/if}
-                  </div>
-                    {:else}
-                      <span class="title-text">{track.title}</span>
-                      <span class="mobile-subtitle">{track.artist}</span>
-                    {/if}
+                  <Skeleton width="40px" height="40px" borderRadius="10px" />
+                  <div class="info-stack" style="width: 200px">
+                    <Skeleton width="100%" height="1.1em" />
+                    <Skeleton width="60%" height="0.8em" margin="4px 0 0" />
                   </div>
                 </div>
               </td>
-            {/if}
+              {#if hasCol('artist')}<td class="col-artist"><Skeleton width="120px" /></td>{/if}
+              {#if hasCol('album')}<td class="col-album"><Skeleton width="150px" /></td>{/if}
+              {#if hasCol('rating')}<td class="col-rating"><Skeleton width="80px" /></td>{/if}
+              {#if hasCol('duration')}<td class="dur-col"><Skeleton width="40px" /></td>{/if}
+            </tr>
+          {/each}
+        {:else}
+          <tr style="height: {visibleRange.paddingTop}px"></tr>
+          {#each tracks.slice(visibleRange.start, visibleRange.end) as track, i (track.id)}
+            <tr 
+              class="track-row" 
+              class:active={currentPlaying && currentPlaying.id === track.id}
+              class:selected={hasCol('checkbox') && selectedIds.has(track.id)}
+              onclick={(e) => handleRowClick(track, e)}
+              ondblclick={() => onplay?.(track)}
+              oncontextmenu={(e) => showContextMenu(track, e)}
+              onkeydown={(e) => {
+                if (e.key === 'Enter') onplay?.(track);
+                if (e.key === ' ' && hasCol('checkbox')) { e.preventDefault(); toggleSelect(track.id); }
+              }}
+              tabindex="0"
+            >
+              {#if hasCol('checkbox')}
+                <td class="checkbox-cell">
+                  <input type="checkbox" checked={selectedIds.has(track.id)} onchange={(e) => toggleSelect(track.id)} />
+                </td>
+              {/if}
 
-            {#if hasCol('artist')}
-              <td class="col-artist" ondblclick={(e) => startEdit(track, 'artist', e)}>
-                {#if editingCell.trackId === track.id && editingCell.field === 'artist'}
-                  <div class="inline-edit-wrap">
-                    <input 
-                      type="text" 
-                      class="inline-input" 
-                      value={editingValue} 
-                      oninput={handleValueChange}
-                      onkeydown={handleKeyDown}
-                      onblur={saveEdit}
-                      use:focusOnMount 
+              {#if hasCol('num')}
+                <td class="num-col">{track.trackNum || visibleRange.start + i + 1}</td>
+              {/if}
+
+              {#if hasCol('title')}
+                <td class="title-cell" ondblclick={(e) => startEdit(track, 'title', e)}>
+                  <div class="flex-align">
+                    <Artwork 
+                      src={`/api/cover/${track.id}`} 
+                      size="40px" 
+                      borderRadius="10px" 
+                      alt="" 
                     />
-                    {#if suggestions.length > 0}
-                      <div class="suggestions-popover">
-                        {#each suggestions as s, i}
-                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
-                        {/each}
-                      </div>
-                    {/if}
+                    <div class="info-stack">
+                      {#if editingCell.trackId === track.id && editingCell.field === 'title'}
+                        <div class="inline-edit-wrap">
+                      <input 
+                        type="text" 
+                        class="inline-input" 
+                        value={editingValue} 
+                        oninput={handleValueChange}
+                        onkeydown={handleKeyDown}
+                        onblur={saveEdit}
+                        use:focusOnMount 
+                      />
+                      {#if suggestions.length > 0}
+                        <div class="suggestions-popover">
+                          {#each suggestions as s, i}
+                            <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                      {:else}
+                        <span class="title-text">{track.title}</span>
+                        <span class="mobile-subtitle">{track.artist}</span>
+                      {/if}
+                    </div>
                   </div>
-                {:else}
-                  {#if isInbox && track.suggestedArtist && track.suggestedArtist !== track.artist}
-                    <div class="suggestion-stack">
-                      <span class="artist-text original">{track.artist}</span>
-                      <span class="artist-text suggested">
-                        <Icon name="zap" size={12} />
-                        {track.suggestedArtist}
-                      </span>
+                </td>
+              {/if}
+
+              {#if hasCol('artist')}
+                <td class="col-artist" ondblclick={(e) => startEdit(track, 'artist', e)}>
+                  {#if editingCell.trackId === track.id && editingCell.field === 'artist'}
+                    <div class="inline-edit-wrap">
+                      <input 
+                        type="text" 
+                        class="inline-input" 
+                        value={editingValue} 
+                        oninput={handleValueChange}
+                        onkeydown={handleKeyDown}
+                        onblur={saveEdit}
+                        use:focusOnMount 
+                      />
+                      {#if suggestions.length > 0}
+                        <div class="suggestions-popover">
+                          {#each suggestions as s, i}
+                            <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
+                          {/each}
+                        </div>
+                      {/if}
                     </div>
                   {:else}
-                    <span class="artist-text">{track.artist}</span>
-                  {/if}
-                {/if}
-              </td>
-            {/if}
-
-            {#if hasCol('album')}
-              <td class="col-album" ondblclick={(e) => startEdit(track, 'album', e)}>
-                {#if editingCell.trackId === track.id && editingCell.field === 'album'}
-                  <div class="inline-edit-wrap">
-                    <input 
-                      type="text" 
-                      class="inline-input" 
-                      value={editingValue} 
-                      oninput={handleValueChange}
-                      onkeydown={handleKeyDown}
-                      onblur={saveEdit}
-                      use:focusOnMount 
-                    />
-                    {#if suggestions.length > 0}
-                      <div class="suggestions-popover">
-                        {#each suggestions as s, i}
-                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
-                        {/each}
+                    {#if isInbox && track.suggestedArtist && track.suggestedArtist !== track.artist}
+                      <div class="suggestion-stack">
+                        <span class="artist-text original">{track.artist}</span>
+                        <span class="artist-text suggested">
+                          <Icon name="zap" size={12} />
+                          {track.suggestedArtist}
+                        </span>
                       </div>
-                    {/if}
-                  </div>
-                {:else}
-                  <div class="suggestion-stack">
-                    <span class="album-text">{track.album}</span>
-                    {#if isInbox && track.suggestedYear && track.suggestedYear !== track.year}
-                      <span class="suggested year-suggestion">
-                        <Icon name="zap" size={10} /> 
-                        Año: {track.suggestedYear}
-                      </span>
-                    {/if}
-                  </div>
-                {/if}
-              </td>
-            {/if}
-
-            {#if hasCol('rating')}
-              <td class="col-rating">
-                <StarRating rating={track.rating || 0} onchange={(rating) => handleRate(track, rating)} />
-              </td>
-            {/if}
-
-            {#if hasCol('genre')}
-              <td class="col-genre" ondblclick={(e) => startEdit(track, 'genre', e)}>
-                {#if editingCell.trackId === track.id && editingCell.field === 'genre'}
-                  <div class="inline-edit-wrap">
-                    <input 
-                      type="text" 
-                      class="inline-input" 
-                      value={editingValue} 
-                      oninput={handleValueChange}
-                      onkeydown={handleKeyDown}
-                      onblur={saveEdit}
-                      use:focusOnMount 
-                    />
-                    {#if suggestions.length > 0}
-                      <div class="suggestions-popover">
-                        {#each suggestions as s, i}
-                          <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
-                        {/each}
-                      </div>
-                    {/if}
-                  </div>
-                {:else}
-                  <div class="genre-list">
-                    {#if track.genre}
-                      {#each track.genre.split(/;|\//).map(g => g.trim()) as g}
-                        <button class="genre-tag" onclick={(e) => { e.stopPropagation(); onsearch?.(g); }}>{g}</button>
-                      {/each}
                     {:else}
-                      <span class="muted">-</span>
+                      <span class="artist-text">{track.artist}</span>
                     {/if}
-                  </div>
-                {/if}
-              </td>
-            {/if}
+                  {/if}
+                </td>
+              {/if}
 
-            {#if hasCol('duration')}
-              <td class="dur-col">{formatDuration(track.duration)}</td>
-            {/if}
+              {#if hasCol('album')}
+                <td class="col-album" ondblclick={(e) => startEdit(track, 'album', e)}>
+                  {#if editingCell.trackId === track.id && editingCell.field === 'album'}
+                    <div class="inline-edit-wrap">
+                      <input 
+                        type="text" 
+                        class="inline-input" 
+                        value={editingValue} 
+                        oninput={handleValueChange}
+                        onkeydown={handleKeyDown}
+                        onblur={saveEdit}
+                        use:focusOnMount 
+                      />
+                      {#if suggestions.length > 0}
+                        <div class="suggestions-popover">
+                          {#each suggestions as s, i}
+                            <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {:else}
+                    <div class="suggestion-stack">
+                      <span class="album-text">{track.album}</span>
+                      {#if isInbox && track.suggestedYear && track.suggestedYear !== track.year}
+                        <span class="suggested year-suggestion">
+                          <Icon name="zap" size={10} /> 
+                          Año: {track.suggestedYear}
+                        </span>
+                      {/if}
+                    </div>
+                  {/if}
+                </td>
+              {/if}
 
-            {#if isInbox}
-              <td class="actions-col">
-                {#if track.suggestedArtist || track.suggestedYear}
-                  <button 
-                    class="track-magic-btn" 
-                    title="Aplicar sugerencias a esta pista"
-                    onclick={(e) => { e.stopPropagation(); onapplySuggestions?.(track); }}
-                  >
-                    <Icon name="zap" size={16} />
-                  </button>
-                {/if}
-              </td>
-            {/if}
-          </tr>
-        {/each}
+              {#if hasCol('rating')}
+                <td class="col-rating">
+                  <StarRating rating={track.rating || 0} onchange={(rating) => handleRate(track, rating)} />
+                </td>
+              {/if}
+
+              {#if hasCol('genre')}
+                <td class="col-genre" ondblclick={(e) => startEdit(track, 'genre', e)}>
+                  {#if editingCell.trackId === track.id && editingCell.field === 'genre'}
+                    <div class="inline-edit-wrap">
+                      <input 
+                        type="text" 
+                        class="inline-input" 
+                        value={editingValue} 
+                        oninput={handleValueChange}
+                        onkeydown={handleKeyDown}
+                        onblur={saveEdit}
+                        use:focusOnMount 
+                      />
+                      {#if suggestions.length > 0}
+                        <div class="suggestions-popover">
+                          {#each suggestions as s, i}
+                            <button type="button" class="suggestion-item" class:active={i === suggestionIdx} onmousedown={(e) => { e.preventDefault(); applySuggestion(s); }}>{s}</button>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {:else}
+                    <div class="genre-list">
+                      {#if track.genre}
+                        {#each track.genre.split(/;|\//).map(g => g.trim()) as g}
+                          <button class="genre-tag" onclick={(e) => { e.stopPropagation(); onsearch?.(g); }}>{g}</button>
+                        {/each}
+                      {:else}
+                        <span class="muted">-</span>
+                      {/if}
+                    </div>
+                  {/if}
+                </td>
+              {/if}
+
+              {#if hasCol('duration')}
+                <td class="dur-col">{formatDuration(track.duration)}</td>
+              {/if}
+
+              {#if isInbox}
+                <td class="actions-col">
+                  {#if track.suggestedArtist || track.suggestedYear}
+                    <button 
+                      class="track-magic-btn" 
+                      title="Aplicar sugerencias a esta pista"
+                      onclick={(e) => { e.stopPropagation(); onapplySuggestions?.(track); }}
+                    >
+                      <Icon name="zap" size={16} />
+                    </button>
+                  {/if}
+                </td>
+              {/if}
+            </tr>
+          {/each}
+          <tr style="height: {visibleRange.paddingBottom}px"></tr>
+        {/if}
       </tbody>
     </table>
   </div>

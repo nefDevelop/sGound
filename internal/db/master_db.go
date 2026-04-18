@@ -156,7 +156,45 @@ func (db *MasterDatabase) initSchema() error {
 	CREATE TABLE IF NOT EXISTS settings (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
-	);`
+	);
+
+	-- Índices de Rendimiento
+	CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(path);
+	CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks(album_id);
+	CREATE INDEX IF NOT EXISTS idx_tracks_status ON tracks(status);
+	CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums(artist_id);
+	CREATE INDEX IF NOT EXISTS idx_user_tracks_username ON user_tracks(username);
+	CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id);
+
+	-- Tabla Virtual FTS5 para Búsquedas Instantáneas
+	CREATE VIRTUAL TABLE IF NOT EXISTS search_idx USING fts5(
+		id UNINDEXED, 
+		title, 
+		artist, 
+		album, 
+		genre,
+		content='tracks', 
+		content_rowid='id'
+	);
+
+	-- Trigger para mantener sincronizado el índice de búsqueda
+	CREATE TRIGGER IF NOT EXISTS trg_tracks_ai AFTER INSERT ON tracks BEGIN
+		INSERT INTO search_idx(id, title, artist, album, genre) 
+		VALUES (new.id, new.title, new.artist, (SELECT title FROM albums WHERE id=new.album_id), new.genre);
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS trg_tracks_ad AFTER DELETE ON tracks BEGIN
+		INSERT INTO search_idx(search_idx, id, title, artist, album, genre) 
+		VALUES('delete', old.id, old.title, old.artist, (SELECT title FROM albums WHERE id=old.album_id), old.genre);
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS trg_tracks_au AFTER UPDATE ON tracks BEGIN
+		INSERT INTO search_idx(search_idx, id, title, artist, album, genre) 
+		VALUES('delete', old.id, old.title, old.artist, (SELECT title FROM albums WHERE id=old.album_id), old.genre);
+		INSERT INTO search_idx(id, title, artist, album, genre) 
+		VALUES (new.id, new.title, new.artist, (SELECT title FROM albums WHERE id=new.album_id), new.genre);
+	END;
+	`
 	_, err := db.Conn.Exec(schema)
 	if err != nil {
 		return err

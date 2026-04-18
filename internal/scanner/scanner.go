@@ -9,9 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"sgound/internal/db"
 	"sgound/internal/tags"
@@ -31,6 +33,14 @@ type Scanner struct {
 	// Caché para optimización de inserciones SQL
 	seenArtists map[string]struct{}
 	seenAlbums  map[string]struct{}
+	
+	// Fast Path Cache: path -> {mtime, size}
+	dbFileCache map[string]dbFileInfo
+}
+
+type dbFileInfo struct {
+	mtime int64
+	size  int64
 }
 
 func NewScanner(database *db.MasterDatabase) *Scanner {
@@ -40,11 +50,13 @@ func NewScanner(database *db.MasterDatabase) *Scanner {
 		conflictedAlbums: make(map[string]struct{}),
 		seenArtists:      make(map[string]struct{}),
 		seenAlbums:       make(map[string]struct{}),
+		dbFileCache:      make(map[string]dbFileInfo),
 	}
 }
 
 func (s *Scanner) ScanDirectory(rootPath string) error {
-	slog.Info("Starting Turbo library scan", "path", rootPath)
+	slog.Info("Starting Optimized Turbo library scan", "path", rootPath)
+	start := time.Now()
 
 	s.muAlbums.Lock()
 	s.resolvedAlbums = make(map[string]string)
@@ -53,16 +65,34 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	s.seenAlbums = make(map[string]struct{})
 	s.muAlbums.Unlock()
 
-	jobs := make(chan string, 200)
-	results := make(chan *trackResult, 200)
+	// 1. Pre-cargar metadatos de la DB en RAM (FAST PATH OPTIMIZATION)
+	slog.Info("Indexing existing library metadata...")
+	rows, err := s.DB.Conn.Query("SELECT path, file_mtime, size FROM tracks")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var p string
+			var m, sz int64
+			if err := rows.Scan(&p, &m, &sz); err == nil {
+				s.dbFileCache[p] = dbFileInfo{mtime: m, size: sz}
+			}
+		}
+	}
+
+	numWorkers := runtime.NumCPU()
+	if numWorkers < 4 { numWorkers = 4 } // Mínimo para concurrencia básica
+	if numWorkers > 16 { numWorkers = 16 } // Cap para no saturar I/O de disco
+	
+	jobs := make(chan string, 500)
+	results := make(chan *trackResult, 500)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	count := 0
 
-	// DB WRITER (Batch Transactions para máxima velocidad)
+	// DB WRITER (Batch Transactions)
 	writerDone := make(chan bool)
 	go func() {
-		batchSize := 200
+		batchSize := 250
 		var batch []*trackResult
 		
 		flush := func() {
@@ -114,12 +144,25 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		writerDone <- true
 	}()
 
-	// 16 Workers (Como el código que pasaste)
-	for i := 0; i < 16; i++ {
+	// Workers Dinámicos
+	slog.Info("Starting workers", "count", numWorkers)
+	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for path := range jobs {
+				// FAST PATH: Check RAM cache instead of DB
+				fileStat, err := os.Stat(path)
+				if err != nil { continue }
+				
+				info, exists := s.dbFileCache[path]
+				if exists && info.mtime == fileStat.ModTime().Unix() && info.size == fileStat.Size() {
+					mu.Lock()
+					count++
+					mu.Unlock()
+					continue // Skip file, no changes
+				}
+
 				res, err := s.ParseFile(path)
 				if err != nil {
 					slog.Error("Failed to process file", "path", path, "error", err)
@@ -135,7 +178,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}()
 	}
 
-	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil { return nil }
 		if !d.IsDir() && isAudioFile(d.Name()) == nil { jobs <- path }
 		return nil
@@ -153,15 +196,16 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}
 	s.muAlbums.Unlock()
 
-	// Pruning
+	// Pruning (Limpieza de tracks eliminados físicamente)
 	orphans, err := s.DB.GetOrphanedTracks()
 	if err == nil && len(orphans) > 0 {
 		var ids []string
 		for _, o := range orphans { ids = append(ids, o.ID) }
 		s.DB.DeleteTracks(ids)
+		slog.Info("Pruned orphaned tracks from DB", "count", len(ids))
 	}
 
-	slog.Info("Completed library scan", "total", count)
+	slog.Info("Completed library scan", "total", count, "duration", time.Since(start))
 	return err
 }
 
@@ -200,14 +244,14 @@ func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 	fileMtime := fileStat.ModTime().Unix()
 	fileExt := strings.TrimPrefix(filepath.Ext(path), ".")
 
-	// FAST PATH: Si ya está en la DB y no cambió, ni siquiera abrimos el archivo
-	var trackId, currentAlbumId, status string
-	var dbMtime, dbSize int64
-	err = s.DB.Conn.QueryRow("SELECT id, file_mtime, size, album_id, status FROM tracks WHERE path = ?", path).
-		Scan(&trackId, &dbMtime, &dbSize, &currentAlbumId, &status)
-	
-	if err == nil && dbMtime == fileMtime && dbSize == fileSize {
-		return nil, nil 
+	// ID Persistente
+	trackId := tags.ReadPersistentID(path)
+	if trackId == "" { 
+		// Check DB if we have it by path to recover ID
+		s.DB.Conn.QueryRow("SELECT id FROM tracks WHERE path = ?", path).Scan(&trackId)
+		if trackId == "" {
+			trackId = GenerateID(path) 
+		}
 	}
 
 	f, err := os.Open(path)
@@ -255,12 +299,6 @@ func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 	}
 	if sampleRate == 0 { sampleRate = 44100 }
 
-	// ID Persistente
-	if trackId == "" {
-		trackId = tags.ReadPersistentID(path)
-		if trackId == "" { trackId = GenerateID(path) }
-	}
-
 	albumArtistTag := ""
 	if metadata != nil {
 		raw := metadata.Raw()
@@ -289,7 +327,9 @@ func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 	if dbAlbumArtist == "" { dbAlbumArtist = artistName }
 	artistId := GenerateID(dbAlbumArtist)
 
-	if status == "" { status = "pending" }
+	status := "pending"
+	// Check if track was already active in DB to keep status
+	s.DB.Conn.QueryRow("SELECT status FROM tracks WHERE id = ?", trackId).Scan(&status)
 
 	return &trackResult{
 		trackId: trackId, albumId: albumId, artistId: artistId, 

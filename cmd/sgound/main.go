@@ -46,7 +46,7 @@ func main() {
 	mux := apiServer.SetupRoutes()
 
 	// Initialize Watcher
-	w, err := watcher.NewWatcher(cfg.MusicPath, apiServer.HandleFileEvent)
+	w, err := watcher.NewWatcher(cfg.MusicPath, apiServer.HandleFileEvent, apiServer.HandleFileDelete)
 	if err != nil {
 		slog.Error("Failed to initialize file watcher", "error", err)
 	} else {
