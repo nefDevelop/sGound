@@ -92,7 +92,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	// DB WRITER (Batch Transactions)
 	writerDone := make(chan bool)
 	go func() {
-		batchSize := 250
+		batchSize := 50
 		var batch []*trackResult
 		
 		flush := func() {

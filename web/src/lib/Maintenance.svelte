@@ -4,6 +4,7 @@
   import ContextMenu from './ContextMenu.svelte';
   import { showToast } from './stores.js';
   import { fade } from 'svelte/transition';
+  import LogViewer from './LogViewer.svelte';
 
   let { onfixTags, subview = 'overview', onviewchange, onedit, refresh = $bindable() } = $props();
   
@@ -28,7 +29,7 @@
 
   // Re-fetch details when subview changes via navigation
   $effect(() => {
-    if (subview !== 'overview') {
+    if (subview !== 'overview' && subview !== 'logs') {
       fetchDetail(subview);
     }
   });
@@ -249,6 +250,17 @@
         <span class="val">{health.missingTags}</span>
         <button class="bento-btn primary" onclick={() => onfixTags?.()}>Batch Fix</button>
       </div>
+
+      <div class="bento-card highlight terminal">
+        <div class="card-header">
+          <Icon name="terminal" size={32} />
+          <span class="lbl">Server Activity</span>
+        </div>
+        <div class="terminal-preview">
+          Monitoring real-time events...
+        </div>
+        <button class="bento-btn primary" onclick={() => loadDetail('logs')}>View Logs</button>
+      </div>
     </div>
   {:else}
     <div class="detail-container">
@@ -351,6 +363,8 @@
                  </div>
                {/each}
              </div>
+          {:else if currentView === 'logs'}
+             <LogViewer />
           {:else}
             <table class="m-table">
               <thead>
@@ -439,6 +453,9 @@
 
   .card-header { display: flex; align-items: center; gap: 1.2rem; color: var(--text-muted); }
   .card-header .lbl { text-transform: uppercase; font-size: 0.9rem; font-weight: 800; letter-spacing: 0.1em; }
+
+  .bento-card.terminal { background: #0d1117; border-color: #30363d; }
+  .terminal-preview { flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #8b949e; opacity: 0.8; }
 
   .bento-card .val { font-size: 4rem; font-weight: 950; color: var(--text-main); line-height: 1; letter-spacing: -0.05em; }
 

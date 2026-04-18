@@ -24,7 +24,8 @@ func main() {
 		}
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	baseHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+	logger := slog.New(api.NewMemoryHandler(baseHandler))
 	slog.SetDefault(logger)
 
 	slog.Info("Starting sgound server")

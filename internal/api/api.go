@@ -134,6 +134,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/api/metadata/suggest", auth(s.handleMetadataSuggest))
 	mux.HandleFunc("/api/metadata/search", auth(s.handleMetadataSearch))
 	mux.HandleFunc("/api/autocomplete", auth(s.handleAutocomplete))
+	mux.HandleFunc("/api/logs", auth(s.handleGetLogs))
 	mux.HandleFunc("/api/openapi.yaml", s.handleServeOpenAPI)
 	mux.HandleFunc("/api/docs", s.handleServeSwaggerUI)
 
