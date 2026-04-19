@@ -38,8 +38,10 @@ type Scanner struct {
 }
 
 type dbFileInfo struct {
-	mtime int64
-	size  int64
+	mtime  int64
+	size   int64
+	id     string
+	status string
 }
 
 func NewScanner(database *db.MasterDatabase) *Scanner {
@@ -66,37 +68,67 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 	// 1. Pre-cargar metadatos de la DB en RAM (FAST PATH OPTIMIZATION)
 	slog.Info("Indexing existing library metadata...")
-	rows, err := s.DB.Conn.Query("SELECT path, file_mtime, size FROM tracks")
+	rows, err := s.DB.Conn.Query("SELECT id, path, file_mtime, size, status FROM tracks")
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
-			var p string
+			var id, p, status string
 			var m, sz int64
-			if err := rows.Scan(&p, &m, &sz); err == nil {
-				s.dbFileCache[p] = dbFileInfo{mtime: m, size: sz}
+			if err := rows.Scan(&id, &p, &m, &sz, &status); err == nil {
+				s.dbFileCache[p] = dbFileInfo{mtime: m, size: sz, id: id, status: status}
 			}
 		}
 	}
+	// DETERMINACIÓN LÓGICA DE WORKERS SEGÚN EL HARDWARE
+	numWorkers := 6 // Valor por defecto (Punto medio seguro)
 
-	// Optimizar para discos con latencia (HDD). 2 workers suele ser el sweet spot.
-	numWorkers := 2 
-	if numWorkers > 16 { numWorkers = 16 } // Cap para no saturar I/O de disco
-	
-	jobs := make(chan string, 500)
-	results := make(chan *trackResult, 500)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	count := 0
+	// Intentamos detectar el tipo de disco en sistemas Linux/Unix
+	devices, _ := filepath.Glob("/sys/block/*/queue/rotational")
+	if len(devices) > 0 {
+		isAnyHDD := false
+		for _, dev := range devices {
+			// Saltamos dispositivos virtuales como loop, ram o zram
+			if strings.Contains(dev, "loop") || strings.Contains(dev, "ram") || strings.Contains(dev, "zram") {
+				continue
+			}
+			data, err := os.ReadFile(dev)
+			if err == nil && strings.TrimSpace(string(data)) == "1" {
+				isAnyHDD = true
+				break
+			}
+		}
 
-	// DB WRITER (Batch Transactions)
-	writerDone := make(chan bool)
-	go func() {
-		batchSize := 50
+		if isAnyHDD {
+			numWorkers = 4  // Optimizado para HDD: evita latencia de cabezal
+			slog.Info("HDD detected: using conservative worker count", "count", numWorkers)
+		} else {
+			numWorkers = 16 // Optimizado para SSD: aprovecha el paralelismo
+			slog.Info("SSD/NVMe detected: using high-performance worker count", "count", numWorkers)
+		}
+	} else {
+		// Heurística alternativa: si estamos en Android/Termux, casi siempre es Flash (rápido)
+		if _, err := os.Stat("/system/build.prop"); err == nil {
+			numWorkers = 12
+			slog.Info("Android/Flash detected: using high-performance worker count", "count", numWorkers)
+		} else {
+			slog.Info("Could not determine storage type, using default workers", "count", numWorkers)
+		}
+	}
+
+	// Permitir sobrescribir por variable de entorno
+	if envWorkers := os.Getenv("SGOUND_SCANNER_WORKERS"); envWorkers != "" {
+		if val, err := strconv.Atoi(envWorkers); err == nil {
+			numWorkers = val
+			slog.Info("Worker count overridden by environment variable", "count", numWorkers)
+		}
+	}
+
+	slog.Info("Starting library scan", "workers", numWorkers)
+		batchSize := 100
 		var batch []*trackResult
 		
 		flush := func() {
 			if len(batch) == 0 { return }
-			slog.Info("Flushing scan batch to database", "count", len(batch))
 			tx, err := s.DB.Conn.Begin()
 			if err != nil {
 				slog.Error("Failed to start transaction", "error", err)
@@ -160,11 +192,18 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					mu.Lock()
 					count++
 					mu.Unlock()
-					continue // Skip file, no changes
+					continue // Totalmente omitido, ya está en la DB
 				}
 
-				slog.Info("Scanning file", "path", path)
-				res, err := s.ParseFile(path)
+				// DETERMINACIÓN DEL STATUS:
+				// Si el archivo ya está en la DB, respetamos su estado actual (active/rejected/etc)
+				// Si es un archivo totalmente nuevo, le ponemos 'pending' para que aparezca en el Inbox
+				status := "pending"
+				if exists {
+					status = info.status
+				}
+
+				res, err := s.ParseFileWithCache(path, status)
 				if err != nil {
 					slog.Error("Failed to process file", "path", path, "error", err)
 					continue
@@ -248,20 +287,24 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	return tx.Commit()
 }
 
-func (s *Scanner) ParseFile(path string) (*trackResult, error) {
+func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResult, error) {
 	fileStat, err := os.Stat(path)
 	if err != nil { return nil, err }
 	fileSize := fileStat.Size()
-	fileMtime := fileStat.ModTime().Unix()
+	fileMtime := fileStat.Unix()
 	fileExt := strings.TrimPrefix(filepath.Ext(path), ".")
 
-	// ID Persistente
-	trackId := tags.ReadPersistentID(path)
-	if trackId == "" { 
-		// Check DB if we have it by path to recover ID
-		s.DB.Conn.QueryRow("SELECT id FROM tracks WHERE path = ?", path).Scan(&trackId)
+	// ID Persistente (intentamos leerlo de la caché RAM primero, luego del archivo)
+	var trackId string
+	if info, ok := s.dbFileCache[path]; ok {
+		trackId = info.id
+	}
+	
+	// Si no está en caché o necesitamos validarlo, lo leemos del archivo
+	if trackId == "" {
+		trackId = tags.ReadPersistentID(path)
 		if trackId == "" {
-			trackId = GenerateID(path) 
+			trackId = GenerateID(path)
 		}
 	}
 
@@ -269,7 +312,7 @@ func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 	if err != nil { return nil, err }
 	defer f.Close()
 
-	// Metadatos
+	// Metadatos usando la librería dhowden/tag
 	metadata, err := tag.ReadFrom(f)
 	var artistName, albumName, title string
 	var trackNum, year, discNum, bitRate, sampleRate int
@@ -299,18 +342,24 @@ func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 		comment = metadata.Comment()
 	}
 
-	// Optimización: Intentar sacar duración de FLAC nativamente (SIN ffprobe)
-	if strings.ToLower(filepath.Ext(path)) == ".flac" {
+	// DURACIÓN OPTIMIZADA (Nativa sin procesos externos)
+	lowerExt := strings.ToLower(filepath.Ext(path))
+	if lowerExt == ".flac" {
 		if d, br, sr, err := getFLACDurationNative(path); err == nil && d > 0 {
+			duration = d
+			bitRate = br
+			sampleRate = sr
+		}
+	} else if lowerExt == ".mp3" {
+		if d, br, sr, err := getMP3DurationNative(path); err == nil && d > 0 {
 			duration = d
 			bitRate = br
 			sampleRate = sr
 		}
 	}
 
-	// ffprobe solo si es necesario (sin duración)
+	// Solo si fallan los métodos nativos, usamos ffprobe como último recurso
 	if duration == 0 {
-		slog.Info("File has no duration tag, spawning ffprobe", "path", path)
 		if data, err := getAudioMetadataWithFFprobe(path); err == nil {
 			duration = data.duration
 			bitRate = data.bitRate
@@ -348,20 +397,85 @@ func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 	if dbAlbumArtist == "" { dbAlbumArtist = artistName }
 	artistId := GenerateID(dbAlbumArtist)
 
-	status := "pending"
-	// Check if track was already active in DB to keep status
-	s.DB.Conn.QueryRow("SELECT status FROM tracks WHERE id = ?", trackId).Scan(&status)
-
 	return &trackResult{
 		trackId: trackId, albumId: albumId, artistId: artistId, 
 		artistName: artistName, dbAlbumArtist: dbAlbumArtist, albumName: albumName, 
 		title: title, path: path, genre: genre, format: fileExt, 
-		composer: composer, comment: comment, hash: "", status: status,
+		composer: composer, comment: comment, hash: "", status: oldStatus,
 		trackNum: trackNum, discNum: discNum, year: year, duration: duration, 
 		bitRate: bitRate, sampleRate: sampleRate, size: fileSize, 
 		fileMtime: fileMtime, replayGain: replayGain, instrumental: instrumental,
 	}, nil
 }
+
+// getMP3DurationNative lee los encabezados de un MP3 para calcular su duración rápidamente
+func getMP3DurationNative(path string) (float64, int, int, error) {
+	f, err := os.Open(path)
+	if err != nil { return 0, 0, 0, err }
+	defer f.Close()
+
+	// Un MP3 puede tener ID3v2 al principio. Saltamos si es necesario.
+	header := make([]byte, 10)
+	if _, err := f.Read(header); err != nil { return 0, 0, 0, err }
+	
+	offset := int64(0)
+	if string(header[:3]) == "ID3" {
+		// El tamaño de ID3v2 está en los bytes 6-9 (7 bits cada uno)
+		size := int64(header[6])<<21 | int64(header[7])<<14 | int64(header[8])<<7 | int64(header[9])
+		offset = 10 + size
+	}
+
+	// Buscamos el primer frame de audio (sincronía: 11 bits a 1)
+	f.Seek(offset, 0)
+	buf := make([]byte, 4096)
+	n, _ := f.Read(buf)
+	
+	frameOffset := -1
+	for i := 0; i < n-4; i++ {
+		if buf[i] == 0xFF && (buf[i+1]&0xE0) == 0xE0 {
+			frameOffset = i
+			break
+		}
+	}
+
+	if frameOffset == -1 { return 0, 0, 0, fmt.Errorf("no mp3 frame found") }
+
+	// Extraer info básica del frame (Bitrate y SampleRate)
+	// Byte 2 del frame: [BBBB][SS][P][C] -> B=Bitrate Index, S=SampleRate Index
+	b2 := buf[frameOffset+2]
+	srIndex := (b2 & 0x0C) >> 2
+	brIndex := (b2 & 0xF0) >> 4
+	
+	// Tablas simplificadas (MPEG1 Layer 3)
+	sampleRates := []int{44100, 48000, 32000, 0}
+	bitrates := []int{0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0}
+	
+	sr := sampleRates[srIndex]
+	br := bitrates[brIndex] * 1000
+
+	// Intentar buscar cabecera VBR (Xing o VBRI) que suelen estar poco después del frame header
+	// Xing está a 32 bytes del inicio del frame en MPEG1 Stereo
+	xingPos := frameOffset + 36
+	if xingPos < n-8 && (string(buf[xingPos:xingPos+4]) == "Xing" || string(buf[xingPos:xingPos+4]) == "Info") {
+		// El campo de frames está en el offset +8 (4 bytes)
+		numFrames := int64(buf[xingPos+8])<<24 | int64(buf[xingPos+9])<<16 | int64(buf[xingPos+10])<<8 | int64(buf[xingPos+11])
+		if numFrames > 0 {
+			duration := float64(numFrames*1152) / float64(sr)
+			return duration, br, sr, nil
+		}
+	}
+
+	// Si es CBR o no hay Xing, estimamos por tamaño de archivo
+	info, _ := os.Stat(path)
+	audioSize := info.Size() - offset
+	if br > 0 {
+		duration := float64(audioSize*8) / float64(br)
+		return duration, br, sr, nil
+	}
+
+	return 0, 0, 0, fmt.Errorf("could not determine duration")
+}
+
 
 type trackResult struct {
 	trackId, albumId, artistId, artistName, dbAlbumArtist, albumName, title, path, genre, format, composer, comment, hash, status string
