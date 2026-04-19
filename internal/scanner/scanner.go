@@ -74,7 +74,7 @@ func (s *Scanner) RegisterRawFile(path string) error {
 }
 
 func (s *Scanner) ScanDirectory(rootPath string) error {
-	slog.Info("Starting Optimized Turbo library scan", "path", rootPath)
+	slog.Info("Starting Hybrid Parallel library scan", "path", rootPath)
 	start := time.Now()
 
 	s.muAlbums.Lock()
@@ -100,61 +100,130 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 		slog.Info("Metadata cache loaded", "count", cacheCount)
 	}
-	// DETERMINACIÓN LÓGICA DE WORKERS SEGÚN EL HARDWARE
-	numWorkers := 6 // Valor por defecto (Punto medio seguro)
 
-	// Intentamos detectar el tipo de disco en sistemas Linux/Unix
-	devices, _ := filepath.Glob("/sys/block/*/queue/rotational")
-	if len(devices) > 0 {
-		isAnyHDD := false
-		for _, dev := range devices {
-			// Saltamos dispositivos virtuales como loop, ram o zram
-			if strings.Contains(dev, "loop") || strings.Contains(dev, "ram") || strings.Contains(dev, "zram") {
-				continue
-			}
-			data, err := os.ReadFile(dev)
-			if err == nil && strings.TrimSpace(string(data)) == "1" {
-				isAnyHDD = true
-				break
-			}
-		}
-
-		if isAnyHDD {
-			numWorkers = 4  
-			slog.Info("HDD detected", "workers", numWorkers)
-		} else {
-			numWorkers = 8 
-			slog.Info("SSD/NVMe detected", "workers", numWorkers)
-		}
-	} else {
-		// Heurística alternativa: si estamos en Android/Termux, casi siempre es Flash (rápido)
-		if _, err := os.Stat("/system/build.prop"); err == nil {
-			numWorkers = 12
-			slog.Info("Android/Flash detected: using high-performance worker count", "count", numWorkers)
-		} else {
-			slog.Info("Could not determine storage type, using default workers", "count", numWorkers)
-		}
-	}
-
-	// Permitir sobrescribir por variable de entorno
+	// DETERMINACIÓN LÓGICA DE WORKERS
+	numWorkers := 4
 	if envWorkers := os.Getenv("SGOUND_SCANNER_WORKERS"); envWorkers != "" {
-		if val, err := strconv.Atoi(envWorkers); err == nil {
-			numWorkers = val
-			slog.Info("Worker count overridden by environment variable", "count", numWorkers)
+		if val, err := strconv.Atoi(envWorkers); err == nil { numWorkers = val }
+	}
+
+	// CONFIGURACIÓN DE MEMORIA Y COLAS
+	debug.SetGCPercent(20) 
+	var (
+		jobs       = make(chan string, numWorkers*10)
+		results    = make(chan *trackResult, numWorkers*2)
+		slowJobs   = make(chan *trackResult, numWorkers*2)
+		wg         sync.WaitGroup
+		slowWg     sync.WaitGroup
+		writerDone = make(chan bool)
+		mu         sync.Mutex
+		count      int
+	)
+	tagSem := make(chan struct{}, 1)
+
+	// A. LANZAR ESCRITOR (Consume 'results' y guarda en DB)
+	go func() {
+		batchSize := 10
+		var batch []*trackResult
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		flush := func() {
+			if len(batch) == 0 { return }
+			slog.Debug("💾 Sync", "n", len(batch))
+			tx, err := s.DB.Conn.Begin()
+			if err != nil { return }
+			for _, r := range batch {
+				if _, seen := s.seenArtists[r.artistId]; !seen {
+					tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", r.artistId, r.dbAlbumArtist)
+					s.seenArtists[r.artistId] = struct{}{}
+				}
+				if _, seen := s.seenAlbums[r.albumId]; !seen {
+					tx.Exec(`INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END`, r.albumId, r.artistId, r.albumName, r.year)
+					s.seenAlbums[r.albumId] = struct{}{}
+				}
+				tx.Exec(`UPDATE tracks SET album_id=?, artist=?, title=?, track_num=?, disc_num=?, duration=?, genre=?, size=?, format=?, composer=?, comment=?, bit_rate=?, sample_rate=?, status=?, instrumental=?, replay_gain=?, file_mtime=?, file_hash=? WHERE id=?`,
+					r.albumId, r.artistName, r.title, r.trackNum, r.discNum, r.duration, r.genre, r.size, r.format, r.composer, r.comment, r.bitRate, r.sampleRate, "pending", r.instrumental, r.replayGain, r.fileMtime, r.hash, r.trackId)
+			}
+			tx.Commit()
+			batch = nil
+			s.seenArtists = make(map[string]struct{})
+			s.seenAlbums = make(map[string]struct{})
 		}
+		for {
+			select {
+			case r, ok := <-results:
+				if !ok { flush(); writerDone <- true; return }
+				batch = append(batch, r)
+				if len(batch) >= batchSize { flush() }
+			case <-ticker.C:
+				flush()
+			}
+		}
+	}()
+
+	// B. LANZAR ESPECIALISTA FFPROBE (Carril Lento)
+	slowWg.Add(1)
+	go func() {
+		defer slowWg.Done()
+		for res := range slowJobs {
+			slog.Debug("🐢 SlowLane", "file", filepath.Base(res.path))
+			if data, err := getAudioMetadataWithFFprobe(res.path); err == nil {
+				res.duration = data.duration
+				res.bitRate = data.bitRate
+				res.sampleRate = data.sampleRate
+				if data.replayGain != 0 { res.replayGain = data.replayGain }
+			}
+			res.status = "pending"
+			results <- res
+		}
+	}()
+
+	// C. LANZAR BIBLIOTECARIOS (Workers Nativos)
+	slog.Info("Starting lazy workers", "count", numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				res, err := func() (*trackResult, error) {
+					defer func() { if r := recover(); r != nil { slog.Error("🔥 Panic", "file", filepath.Base(path), "err", r) } }()
+					tagSem <- struct{}{}
+					defer func() { <-tagSem }()
+					return s.ParseFileWithCache(path, "pending")
+				}()
+				if err != nil || res == nil { continue }
+				if res.duration == 0 { slowJobs <- res } else { results <- res }
+				mu.Lock()
+				count++
+				currentCount := count
+				if currentCount % 5 == 0 {
+					runtime.GC(); debug.FreeOSMemory()
+					var m runtime.MemStats; runtime.ReadMemStats(&m)
+					slog.Info("🧠 RAM", "used_mb", m.Alloc/1024/1024, "sys_mb", m.Sys/1024/1024)
+				}
+				mu.Unlock()
+				if s.OnProgress != nil { s.OnProgress(path, currentCount) }
+			}
+		}()
 	}
 
-	// --- FASE 1: DESCUBRIMIENTO RÁPIDO ---
-	slog.Info("Phase 1: Discovering files...")
+	// D. DESCUBRIMIENTO Y ALIMENTACIÓN (En tiempo real)
+	slog.Info("Discovery started...")
 	discoveryCount := 0
-	
-	// Abrimos una transacción para que el descubrimiento sea instantáneo
-	tx, err := s.DB.Conn.Begin()
-	if err != nil {
-		return err
+
+	// Primero procesamos lo que YA estaba en estado 'raw' en la DB (de escaneos fallidos anteriores)
+	rowsRaw, _ := s.DB.Conn.Query("SELECT path FROM tracks WHERE status = 'raw'")
+	if rowsRaw != nil {
+		for rowsRaw.Next() {
+			var p string
+			if err := rowsRaw.Scan(&p); err == nil { jobs <- p }
+		}
+		rowsRaw.Close()
 	}
 
-	err = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
+	// Luego caminamos el disco para descubrir cosas nuevas
+	txDiscovery, _ := s.DB.Conn.Begin()
+	_ = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil { return nil }
 		name := d.Name()
 		if name != "." && strings.HasPrefix(name, ".") {
@@ -164,200 +233,28 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		if !d.IsDir() && isAudioFile(name) == nil {
 			fileStat, err := os.Stat(path)
 			if err != nil { return nil }
-			
 			info, exists := s.dbFileCache[path]
 			if !exists || info.mtime != fileStat.ModTime().Unix() || info.size != fileStat.Size() {
-				// Inserción directa rápida
+				// Registrar como RAW e informar a los workers inmediatamente
 				trackId := tags.ReadPersistentID(path)
 				if trackId == "" { trackId = GenerateID(path) }
-				
-				_, _ = tx.Exec(`
-					INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-				`, trackId, "raw_album", "Unknown", filepath.Base(path), path, "raw", 0, 0)
+				txDiscovery.Exec(`INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+					trackId, "raw_album", "Unknown", filepath.Base(path), path, "raw", 0, 0)
 
 				discoveryCount++
-				if discoveryCount % 500 == 0 {
+				jobs <- path
+				if discoveryCount % 100 == 0 {
 					slog.Info("➜ Discovered", "n", discoveryCount)
+					txDiscovery.Commit()
+					txDiscovery, _ = s.DB.Conn.Begin()
 				}
 			}
 		}
 		return nil
 	})
-	
-	tx.Commit()
-	slog.Info("Phase 1 finished", "discovered", discoveryCount)
+	txDiscovery.Commit()
+	slog.Info("Discovery finished", "total", discoveryCount)
 
-	// --- FASE 2: ANÁLISIS LAZY ---
-	slog.Info("Phase 2: Analyzing metadata (Lazy)...")
-	
-	// Cargar todos los 'raw' pendientes de la DB para procesar
-	rowsRaw, err := s.DB.Conn.Query("SELECT path FROM tracks WHERE status = 'raw'")
-	if err != nil {
-		return err
-	}
-	defer rowsRaw.Close()
-
-	var (
-		jobs       = make(chan string, numWorkers*2)
-		results    = make(chan *trackResult, numWorkers*2)
-		slowJobs   = make(chan *trackResult, numWorkers*2)
-		wg         sync.WaitGroup
-		slowWg     sync.WaitGroup
-		writerDone = make(chan bool)
-		mu         sync.Mutex
-		count      int
-	)
-
-	// Semáforo para que solo 1 worker lea etiquetas a la vez
-	tagSem := make(chan struct{}, 1)
-
-	// Lanzar los engranajes (Especialista ffprobe, Escritor a DB, Workers Nativos)
-	// (El código de los workers se mantiene igual, solo cambia el origen de los datos)
-	
-	// --- CARRIL LENTO (Especialista ffprobe) ---
-	slowWg.Add(1)
-	go func() {
-		defer slowWg.Done()
-		for res := range slowJobs {
-			slog.Debug("🐢 SlowLane", "file", filepath.Base(res.path))
-			data, err := getAudioMetadataWithFFprobe(res.path)
-			if err == nil {
-				res.duration = data.duration
-				res.bitRate = data.bitRate
-				res.sampleRate = data.sampleRate
-				if data.replayGain != 0 { res.replayGain = data.replayGain }
-			}
-			res.status = "pending" // Ya analizado
-			results <- res
-		}
-	}()
-
-	// --- ESCRITOR A DB ---
-	go func() {
-		batchSize := 10
-		var batch []*trackResult
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		
-		flush := func() {
-			if len(batch) == 0 { return }
-			slog.Debug("💾 Sync", "n", len(batch))
-			tx, err := s.DB.Conn.Begin()
-			if err != nil {
-				slog.Error("Failed to start transaction", "error", err)
-				return
-			}
-			
-			for _, r := range batch {
-				if _, seen := s.seenArtists[r.artistId]; !seen {
-					tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", r.artistId, r.dbAlbumArtist)
-					s.seenArtists[r.artistId] = struct{}{}
-				}
-				if _, seen := s.seenAlbums[r.albumId]; !seen {
-					tx.Exec(`
-						INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)
-						ON CONFLICT(id) DO UPDATE SET 
-							year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END
-					`, r.albumId, r.artistId, r.albumName, r.year)
-					s.seenAlbums[r.albumId] = struct{}{}
-				}
-				tx.Exec(
-					`UPDATE tracks SET 
-					album_id=?, artist=?, title=?, track_num=?, disc_num=?, duration=?, genre=?, size=?, format=?, composer=?, comment=?, bit_rate=?, sample_rate=?, status=?, instrumental=?, replay_gain=?, file_mtime=?, file_hash=? 
-					WHERE id=?`,
-					r.albumId, r.artistName, r.title, r.trackNum, r.discNum, r.duration, r.genre, r.size, r.format, r.composer, r.comment, r.bitRate, r.sampleRate, "pending", r.instrumental, r.replayGain, r.fileMtime, r.hash, r.trackId,
-				)
-
-				s.muAlbums.Lock()
-				resolved, exists := s.resolvedAlbums[r.albumId]
-				if !exists {
-					s.resolvedAlbums[r.albumId] = r.dbAlbumArtist
-				} else if resolved != r.dbAlbumArtist {
-					s.conflictedAlbums[r.albumId] = struct{}{}
-				}
-				s.muAlbums.Unlock()
-			}
-			tx.Commit()
-			batch = nil
-			s.seenArtists = make(map[string]struct{})
-			s.seenAlbums = make(map[string]struct{})
-		}
-
-		for {
-			select {
-			case r, ok := <-results:
-				if !ok {
-					flush()
-					writerDone <- true
-					return
-				}
-				batch = append(batch, r)
-				if len(batch) >= batchSize {
-					flush()
-				}
-			case <-ticker.C:
-				flush()
-			}
-		}
-	}()
-
-	// --- CARRIL RÁPIDO (Workers Nativos) ---
-	slog.Info("Starting workers", "count", numWorkers)
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for path := range jobs {
-				res, err := func() (*trackResult, error) {
-					defer func() {
-						if r := recover(); r != nil {
-							slog.Error("🔥 Panic", "file", filepath.Base(path), "err", r)
-						}
-					}()
-					
-					tagSem <- struct{}{}
-					defer func() { <-tagSem }()
-
-					slog.Debug("➜ Start", "file", filepath.Base(path))
-					r, e := s.ParseFileWithCache(path, "pending")
-					slog.Debug("➜ Done", "file", filepath.Base(path))
-					return r, e
-				}()
-
-				if err != nil { continue }
-
-				if res != nil {
-					if res.duration == 0 {
-						slowJobs <- res
-					} else {
-						results <- res
-					}
-				}
-
-				mu.Lock()
-				count++
-				currentCount := count
-				if currentCount % 5 == 0 {
-					runtime.GC()
-					debug.FreeOSMemory()
-					var m runtime.MemStats
-					runtime.ReadMemStats(&m)
-					slog.Info("🧠 RAM", "used_mb", m.Alloc/1024/1024, "sys_mb", m.Sys/1024/1024)
-				}
-				mu.Unlock()
-				if s.OnProgress != nil { s.OnProgress(path, currentCount) }
-			}
-		}()
-	}
-
-	// Alimentar la cola de trabajos
-	for rowsRaw.Next() {
-		var p string
-		if err := rowsRaw.Scan(&p); err == nil {
-			jobs <- p
-		}
-	}
 	close(jobs)
 	wg.Wait()
 	close(slowJobs)
@@ -374,7 +271,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		slog.Info("Pruned orphaned tracks from DB", "count", len(ids))
 	}
 
-	slog.Info("Completed library scan", "total", count, "duration", time.Since(start))
+	slog.Info("Scan completed", "total", count, "duration", time.Since(start))
 
 	// Votación de artistas de álbum
 	s.muAlbums.Lock()
@@ -384,8 +281,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	s.muAlbums.Unlock()
 
 	return nil
-	}
-
+}
 func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 	status := "pending"
 	var currentStatus string
