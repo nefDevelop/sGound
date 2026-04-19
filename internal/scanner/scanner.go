@@ -126,26 +126,18 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	)
 	tagSem := make(chan struct{}, 1)
 
-	// A. LANZAR ESCRITOR (Único punto de volcado de ANÁLISIS)
+	// A. ESCRITOR DE ANÁLISIS (W-Writer)
 	go func() {
-		batchSize := 20 // Lote de 20 según solicitud
+		batchSize := 20
 		var batch []*trackResult
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 		flush := func() {
-			if len(batch) == 0 {
-				return
-			}
-
-			// BLOQUEO TOTAL DE ESCRITURA
+			if len(batch) == 0 { return }
 			s.muDB.Lock()
-
-			slog.Debug("💾 Sync Analysis", "n", len(batch))
+			slog.Debug("💾 W-Writer: Syncing", "n", len(batch))
 			tx, err := s.DB.Conn.Begin()
-			if err != nil {
-				s.muDB.Unlock()
-				return
-			}
+			if err != nil { s.muDB.Unlock(); return }
 			for _, r := range batch {
 				if _, seen := s.seenArtists[r.artistId]; !seen {
 					tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", r.artistId, r.dbAlbumArtist)
@@ -160,7 +152,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			}
 			tx.Commit()
 			s.muDB.Unlock()
-
 			batch = nil
 			s.seenArtists = make(map[string]struct{})
 			s.seenAlbums = make(map[string]struct{})
@@ -168,85 +159,65 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		for {
 			select {
 			case r, ok := <-results:
-				if !ok {
-					flush()
-					writerDone <- true
-					return
-				}
+				if !ok { flush(); writerDone <- true; return }
 				batch = append(batch, r)
-				if len(batch) >= batchSize {
-					flush()
-				}
+				if len(batch) >= batchSize { flush() }
 			case <-ticker.C:
 				flush()
 			}
 		}
 	}()
 
-	// B. LANZAR ESPECIALISTA FFPROBE (Carril Lento)
+	// B. ESPECIALISTA FFPROBE (W-Slow)
 	slowWg.Add(1)
 	go func() {
 		defer slowWg.Done()
 		for res := range slowJobs {
-			slog.Debug("🐢 SlowLane", "file", filepath.Base(res.path))
+			slog.Debug("🐢 W-Slow: ffprobe", "file", filepath.Base(res.path))
 			if data, err := getAudioMetadataWithFFprobe(res.path); err == nil {
 				res.duration = data.duration
 				res.bitRate = data.bitRate
 				res.sampleRate = data.sampleRate
-				if data.replayGain != 0 {
-					res.replayGain = data.replayGain
-				}
+				if data.replayGain != 0 { res.replayGain = data.replayGain }
 			}
 			res.status = "pending"
 			results <- res
 		}
 	}()
 
-	// C. LANZAR BIBLIOTECARIOS (Workers Nativos)
+	// C. BIBLIOTECARIOS (W1-Wn)
 	slog.Info("Starting lazy workers", "count", numWorkers)
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
-		go func() {
+		id := i + 1
+		go func(wId int) {
 			defer wg.Done()
 			for path := range jobs {
 				res, err := func() (*trackResult, error) {
-					defer func() {
-						if r := recover(); r != nil {
-							slog.Error("🔥 Panic", "file", filepath.Base(path), "err", r)
-						}
-					}()
+					defer func() { if r := recover(); r != nil { slog.Error("🔥 Panic", "worker", wId, "file", filepath.Base(path), "err", r) } }()
 					tagSem <- struct{}{}
 					defer func() { <-tagSem }()
+					slog.Debug("📖 W"+strconv.Itoa(wId), "file", filepath.Base(path))
 					return s.ParseFileWithCache(path, "pending")
 				}()
-				if err != nil || res == nil {
-					continue
-				}
-				if res.duration == 0 {
-					slowJobs <- res
-				} else {
-					results <- res
-				}
+				if err != nil || res == nil { continue }
+				if res.duration == 0 { slowJobs <- res } else { results <- res }
 				mu.Lock()
 				count++
 				currentCount := count
-				if currentCount%5 == 0 {
-					runtime.GC()
-					debug.FreeOSMemory()
-					var m runtime.MemStats
-					runtime.ReadMemStats(&m)
+				if currentCount % 5 == 0 {
+					runtime.GC(); debug.FreeOSMemory()
+					var m runtime.MemStats; runtime.ReadMemStats(&m)
 					slog.Info("🧠 RAM", "used_mb", m.Alloc/1024/1024, "sys_mb", m.Sys/1024/1024)
 				}
 				mu.Unlock()
-				if s.OnProgress != nil {
-					s.OnProgress(path, currentCount)
-				}
+				if s.OnProgress != nil { s.OnProgress(path, currentCount) }
 			}
-		}()
+		}(id)
 	}
 
-	// D. DESCUBRIMIENTO Y ALIMENTACIÓN (En tiempo real)
-	slog.Info("Discovery started...")
+	// D. EXPLORADOR (W-Explorer)
+	slog.Info("W-Explorer: Discovery started...")
 	discoveryCount := 0
 
 	// Primero procesamos lo que YA estaba en estado 'raw' en la DB
@@ -254,71 +225,47 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	if rowsRaw != nil {
 		for rowsRaw.Next() {
 			var p string
-			if err := rowsRaw.Scan(&p); err == nil {
-				jobs <- p
-			}
+			if err := rowsRaw.Scan(&p); err == nil { jobs <- p }
 		}
 		rowsRaw.Close()
 	}
 
-	// Luego caminamos el disco recopilando en bloques para no bloquear la DB
-	var pathBuffer []string
-
-	flushDiscovery := func() {
-		if len(pathBuffer) == 0 {
-			return
-		}
+	type rawInfo struct { id, path string }
+	var buffer []rawInfo
+	flushDisc := func() {
+		if len(buffer) == 0 { return }
 		s.muDB.Lock()
-		tx, err := s.DB.Conn.Begin()
-		if err == nil {
-			for _, p := range pathBuffer {
-				trackId := tags.ReadPersistentID(p)
-				if trackId == "" {
-					trackId = GenerateID(p)
-				}
-				_, _ = tx.Exec(`INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-					trackId, "raw_album", "Unknown", filepath.Base(p), p, "raw", 0, 0)
-				jobs <- p
-			}
-			tx.Commit()
+		slog.Debug("📂 W-Explorer: Committing", "n", len(buffer))
+		tx, _ := s.DB.Conn.Begin()
+		for _, info := range buffer {
+			tx.Exec(`INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+				info.id, "raw_album", "Unknown", filepath.Base(info.path), info.path, "raw", 0, 0)
+			jobs <- info.path
 		}
+		tx.Commit()
 		s.muDB.Unlock()
-		discoveryCount += len(pathBuffer)
-		if discoveryCount%100 == 0 || discoveryCount < 100 {
-			slog.Info("➜ Discovered", "total", discoveryCount)
-		}
-		pathBuffer = nil
+		discoveryCount += len(buffer)
+		slog.Info("➜ Discovered", "total", discoveryCount)
+		buffer = nil
 	}
 
 	_ = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		name := d.Name()
-		if name != "." && strings.HasPrefix(name, ".") {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !d.IsDir() && isAudioFile(name) == nil {
-			fileStat, err := os.Stat(path)
-			if err != nil {
-				return nil
-			}
+		if err != nil { return nil }
+		if !d.IsDir() && isAudioFile(d.Name()) == nil {
+			fileStat, _ := os.Stat(path)
 			info, exists := s.dbFileCache[path]
 			if !exists || info.mtime != fileStat.ModTime().Unix() || info.size != fileStat.Size() {
-				pathBuffer = append(pathBuffer, path)
-				if len(pathBuffer) >= 100 {
-					flushDiscovery()
-				}
+				tId := tags.ReadPersistentID(path)
+				if tId == "" { tId = GenerateID(path) }
+				buffer = append(buffer, rawInfo{tId, path})
+				if len(buffer) >= 50 { flushDisc() }
 			}
 		}
 		return nil
 	})
+	flushDisc()
+	slog.Info("W-Explorer: Finished", "total", discoveryCount)
 
-	flushDiscovery() // Volcado final
-	slog.Info("Discovery finished", "total", discoveryCount)
 	close(jobs)
 	wg.Wait()
 	close(slowJobs)
@@ -330,9 +277,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	orphans, err := s.DB.GetOrphanedTracks()
 	if err == nil && len(orphans) > 0 {
 		var ids []string
-		for _, o := range orphans {
-			ids = append(ids, o.ID)
-		}
+		for _, o := range orphans { ids = append(ids, o.ID) }
 		s.DB.DeleteTracks(ids)
 		slog.Info("Pruned orphaned tracks from DB", "count", len(ids))
 	}
@@ -348,6 +293,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 	return nil
 }
+
 func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 	status := "pending"
 	var currentStatus string
@@ -607,10 +553,10 @@ func getMP3DurationNative(path string) (float64, int, int, error) {
 
 type trackResult struct {
 	trackId, albumId, artistId, artistName, dbAlbumArtist, albumName, title, path, genre, format, composer, comment, hash, status string
-	trackNum, discNum, year, bitRate, sampleRate                                                                                  int
-	duration, replayGain                                                                                                          float64
-	size, fileMtime                                                                                                               int64
-	instrumental                                                                                                                  bool
+	trackNum, discNum, year, bitRate, sampleRate int
+	duration, replayGain float64
+	size, fileMtime int64
+	instrumental bool
 }
 
 func isAudioFile(filename string) error {
@@ -630,7 +576,7 @@ func (s *Scanner) ParseFileWithSemaphore(path string, status string, sem chan st
 
 	// Si la duración falló (es 0), necesitamos ffprobe con semáforo
 	if res.duration == 0 {
-		sem <- struct{}{}        // Adquirir
+		sem <- struct{}{}         // Adquirir
 		defer func() { <-sem }() // Liberar
 
 		data, err := getAudioMetadataWithFFprobe(path)
@@ -650,7 +596,7 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,bit_rate:stream=sample_rate:format_tags=REPLAYGAIN_TRACK_GAIN,replaygain_track_gain", "-of", "default=nokey=0", path)
+	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,bit_rate:stream=sample_rate:format_tags=REPLAYGAIN_TRACK_GAIN,replaygain_track_gain", "-of", "default=noprint_wrappers=1:nokey=0", path)
 	out, err := cmd.Output()
 	if err != nil {
 		return audioMetadata{}, err
