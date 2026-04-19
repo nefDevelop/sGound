@@ -16,7 +16,8 @@
     onselectMaintenance,
     onsmartAlbums,
     onsmartSearch,
-    oncleanupLibrary
+    onCleanupLibrary,
+    scanStatus
   } = $props();
 
   let stats = $state({
@@ -117,6 +118,16 @@
           <Icon name="list" size={14} /> {stats.totalPlaylists}
         </button>
       </div>
+
+      {#if scanStatus?.scanning}
+        <div class="welcome-scan-status">
+          <div class="welcome-spinner"></div>
+          <div class="scan-info">
+            <span class="label">Indexando...</span>
+            <span class="count"><b>{scanStatus.processed}</b> canciones</span>
+          </div>
+        </div>
+      {/if}
     </section>
 
     <!-- Health Tile -->
@@ -474,7 +485,59 @@
   .chip.secondary { background: var(--secondary-10); color: var(--secondary); }
   .chip.tertiary { background: var(--tertiary-10); color: var(--tertiary); }
 
-  .welcome-chips { margin-top: auto; padding-top: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap; position: relative; z-index: 1; }
+  .welcome-chips { margin-top: auto; padding-top: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap; position: relative; z-index: 1; padding-right: 180px; }
+
+  .welcome-scan-status {
+    position: absolute;
+    bottom: 1.5rem;
+    right: 1.8rem;
+    background: var(--surface-container-highest);
+    border: 1px solid var(--primary-20);
+    padding: 0.6rem 1.2rem;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    z-index: 5;
+    animation: slideIn 0.3s cubic-bezier(0.2, 0, 0, 1);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  .welcome-spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--primary-20);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .scan-info {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+  }
+
+  .scan-info .label {
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .scan-info .count {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-main);
+  }
 
   .genre-bars { display: flex; flex-direction: column; gap: 0.8rem; }
   .bar-item { display: flex; flex-direction: column; gap: 0.3rem; }

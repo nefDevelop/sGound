@@ -478,6 +478,31 @@
           const res = await fetch(`/api/tracks/${track.id}`, { method: 'DELETE' });
           if (res.ok) {
             showToast("Archivo eliminado del disco", "success");
+
+            // Si la pista eliminada es la que está sonando, saltamos o detenemos
+            if (currentPlaying && track.id === currentPlaying.id) {
+              if (handleSkipNext) {
+                handleSkipNext();
+              } else {
+                isPlaying.set(false);
+              }
+            }
+
+            // También la eliminamos de la cola si está presente
+            const q = get(queue);
+            const foundIdx = q.findIndex(t => t.id === track.id);
+            if (foundIdx !== -1) {
+              const updatedQueue = q.filter(t => t.id !== track.id);
+              queue.set(updatedQueue);
+              
+              const currentIdx = get(currentIndex);
+              if (foundIdx < currentIdx) {
+                currentIndex.set(currentIdx - 1);
+              } else if (foundIdx === currentIdx && updatedQueue.length === 0) {
+                isPlaying.set(false);
+              }
+            }
+
             fetchTracks();
             if (callback) callback();
           }
@@ -660,15 +685,7 @@
       <h2>Sgound</h2>
     </div>
 
-    {#if scanStatus.scanning}
-    <div class="scan-status-item">
-      <div class="spinner"></div>
-      <div class="info">
-        <span class="label">Indexando...</span>
-        <span class="count"><b>{scanStatus.processed}</b> canciones</span>
-      </div>
-    </div>
-    {/if}
+
 
     <nav>
       <div class="nav-label">General</div>
@@ -827,7 +844,8 @@
           }}
           onsmartAlbums={() => { /* logic */ }}
           onsmartSearch={() => { /* logic */ }}
-          oncleanupLibrary={() => { /* logic */ }}
+          onCleanupLibrary={() => { /* logic */ }}
+          {scanStatus}
         />
       {:else if currentView === "library"}
         {#if tracks.length === 0}
