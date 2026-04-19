@@ -43,8 +43,8 @@ type Settings struct {
 
 func ConnectMaster(dbPath string) (*MasterDatabase, error) {
 	slog.Info("Connecting to master database", "path", dbPath)
-	// Añadimos parámetros para mejorar la concurrencia y evitar bloqueos (Busy Timeout y modo WAL)
-	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", dbPath)
+	// Aumentamos a 15 segundos el timeout para ser ultra pacientes con los bloqueos
+	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)", dbPath)
 	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
