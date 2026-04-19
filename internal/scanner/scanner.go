@@ -131,16 +131,22 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 	slog.Info("Starting library scan", "workers", numWorkers)
 
+	// Configuración de memoria agresiva para contenedores
+	debug.SetGCPercent(20) 
+
 	var (
 		jobs       = make(chan string, numWorkers*2)
 		results    = make(chan *trackResult, numWorkers*2)
-		slowJobs   = make(chan *trackResult, numWorkers*2) // Carril lento para ffprobe
+		slowJobs   = make(chan *trackResult, numWorkers*2)
 		wg         sync.WaitGroup
 		slowWg     sync.WaitGroup
 		writerDone = make(chan bool)
 		mu         sync.Mutex
 		count      int
 	)
+
+	// Semáforo para que solo 1 worker lea etiquetas a la vez (ahorro masivo de RAM)
+	tagSem := make(chan struct{}, 1)
 
 	// --- CARRIL LENTO (Especialista ffprobe) ---
 	slowWg.Add(1)
@@ -256,8 +262,18 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 							slog.Error("🔥 Panic", "file", filepath.Base(path), "err", r)
 						}
 					}()
-					// USAMOS PARSE DIRECTO (CARRIL RÁPIDO)
-					return s.ParseFileWithCache(path, status)
+					
+					// ADQUIRIR SEMÁFORO DE ETIQUETAS
+					tagSem <- struct{}{}
+					defer func() { <-tagSem }()
+
+					slog.Debug("➜ Start", "file", filepath.Base(path))
+					r, e := s.ParseFileWithCache(path, status)
+					if e != nil {
+						slog.Error("❌ TagError", "file", filepath.Base(path), "err", e)
+					}
+					slog.Debug("➜ Done", "file", filepath.Base(path))
+					return r, e
 				}()
 
 				if err != nil {
