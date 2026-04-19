@@ -41,7 +41,7 @@
     }
 
     try {
-      const res = await fetch(`/api/library/inbox?limit=${limit}&offset=${tracksOffset}`);
+      const res = await fetch(`/api/tracks?status=pending&limit=${limit}&offset=${tracksOffset}`);
       if (res.ok) {
         const data = (await res.json()) || [];
         if (append) {
