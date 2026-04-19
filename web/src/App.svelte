@@ -162,13 +162,13 @@
          if (currentView === 'inbox') inboxRef?.fetchInbox(true);
          if (currentView === 'dashboard') dashRef?.refresh();
       }
-// Si el escaneo ha terminado ahora mismo
-if (wasScanning && !data.scanning) {
-  stopPolling();
-  fetchTracks();
-  fetchPlaylists();
-  inboxRef?.fetchInbox(false, false, true);
-}
+
+      // Si el escaneo ha terminado ahora mismo
+      if (wasScanning && !data.scanning) {
+        stopPolling();
+        fetchTracks();
+        fetchPlaylists();
+        inboxRef?.fetchInbox(false, false, true);
         dashRef?.refresh();
         showToast("Escaneo finalizado: <b>" + data.processed + "</b> archivos procesados", "success");
       }
