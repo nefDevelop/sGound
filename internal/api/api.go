@@ -1319,13 +1319,16 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.getDB(r).Conn.Query(query, finalArgs...)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Error("Database query failed in handleGetTracks", "error", err, "query", query)
+		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
 	tracks := make([]interface{}, 0)
+	rowCount := 0
 	for rows.Next() {
+		rowCount++
 		if minimal {
 			var id, title, genre, artist, album, format string
 			var trackNum, duration, year, rating, instrumental int
@@ -1353,6 +1356,8 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+	
+	slog.Info("handleGetTracks result", "status", status, "rows_found", rowCount, "tracks_returned", len(tracks), "limit", limit, "offset", offset)
 	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tracks)
@@ -2175,7 +2180,11 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 		whereInbox += " AND " + pathFilter
 	}
 	var inboxCount int
-	s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks t "+whereInbox, pathArgs...).Scan(&inboxCount)
+	err := s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks t "+whereInbox, pathArgs...).Scan(&inboxCount)
+	if err != nil {
+		slog.Error("Failed to calculate inboxCount in handleScanStatus", "error", err)
+	}
+	slog.Info("handleScanStatus count", "inboxCount", inboxCount, "filter", whereInbox)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
