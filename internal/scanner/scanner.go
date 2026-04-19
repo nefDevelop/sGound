@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -249,6 +250,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				mu.Lock()
 				count++
 				currentCount := count
+				if currentCount % 100 == 0 {
+					runtime.GC()
+					slog.Debug("🧹 GC Cleaned")
+				}
 				mu.Unlock()
 				if s.OnProgress != nil { s.OnProgress(path, currentCount) }
 			}
@@ -636,6 +641,7 @@ func getFLACDurationNative(path string) (float64, int, int, error) {
 	if err != nil { return 0, 0, 0, err }
 	defer f.Close()
 
+	// Leer encabezado "fLaC"
 	// Leer encabezado "fLaC"
 	head := make([]byte, 4)
 	if _, err := f.Read(head); err != nil || string(head) != "fLaC" {
