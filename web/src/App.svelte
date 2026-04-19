@@ -158,7 +158,11 @@
 
       // REGLA: Solo refrescar si ha cambiado el INBOX o el estado RAW o si el escaneo ha terminado/empezado
       if (data.inboxCount !== prevInbox || data.rawCount !== prevRaw || wasScanning !== data.scanning) {
-         if (currentView === 'library' || currentView === 'tracks') fetchTracks(false, true);
+         // Si estamos escaneando, NO refrescamos la biblioteca (solo el Inbox o Dashboard)
+         // Esto evita saturar el HDD con queries pesadas mientras lee archivos
+         if (currentView === 'library' || currentView === 'tracks') {
+            if (!data.scanning || wasScanning !== data.scanning) fetchTracks(false, true);
+         }
          if (currentView === 'inbox') inboxRef?.fetchInbox(true);
          if (currentView === 'dashboard') dashRef?.refresh();
       }

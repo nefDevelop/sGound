@@ -26,6 +26,9 @@ import (
 type Scanner struct {
 	DB         *db.MasterDatabase
 	OnProgress func(path string, count int)
+	
+	// Canales de prioridad
+	PriorityJobs chan string
 
 	// Mutexes para sincronización
 	muDB             sync.Mutex          // Bloqueo de escritura en DB
@@ -51,6 +54,7 @@ type dbFileInfo struct {
 func NewScanner(database *db.MasterDatabase) *Scanner {
 	return &Scanner{
 		DB:               database,
+		PriorityJobs:     make(chan string, 100),
 		resolvedAlbums:   make(map[string]string),
 		conflictedAlbums: make(map[string]struct{}),
 		seenArtists:      make(map[string]struct{}),
@@ -193,12 +197,31 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		id := i + 1
 		go func(wId int) {
 			defer wg.Done()
-			for path := range jobs {
+			for {
+				var path string
+				var ok bool
+				
+				// SELECT CON PRIORIDAD
+				select {
+				case path, ok = <-s.PriorityJobs:
+					if ok { slog.Debug("👑 W"+strconv.Itoa(wId)+": PRIORITY", "file", filepath.Base(path)) }
+				default:
+					select {
+					case path, ok = <-s.PriorityJobs:
+						if ok { slog.Debug("👑 W"+strconv.Itoa(wId)+": PRIORITY", "file", filepath.Base(path)) }
+					case path, ok = <-jobs:
+					}
+				}
+
+				if !ok { return } // Fin de escaneo
+
 				res, err := func() (*trackResult, error) {
 					defer func() { if r := recover(); r != nil { slog.Error("🔥 Panic", "worker", wId, "file", filepath.Base(path), "err", r) } }()
 					tagSem <- struct{}{}
 					defer func() { <-tagSem }()
-					slog.Debug("📖 W"+strconv.Itoa(wId), "file", filepath.Base(path))
+					if !strings.Contains(path, "PRIORITY") { // Evitar log doble
+						slog.Debug("📖 W"+strconv.Itoa(wId), "file", filepath.Base(path))
+					}
 					return s.ParseFileWithCache(path, "pending")
 				}()
 				if err != nil || res == nil { continue }

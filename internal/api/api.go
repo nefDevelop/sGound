@@ -35,6 +35,7 @@ import (
 	"sgound/internal/watcher"
 	"sgound/web"
 	"sync"
+	"sync/atomic"
 )
 
 type ScanStatus struct {
@@ -52,9 +53,9 @@ type Server struct {
 	jwtSecret        []byte
 	scanStatuses     sync.Map // [string]*ScanStatus
 	organizeStatuses sync.Map // [string]*OrganizeStatus
-	inboxCount       int
-	rawCount         int
-	inboxMu          sync.Mutex
+	inboxCount       atomic.Int64
+	rawCount         atomic.Int64
+	activeScanner    *scanner.Scanner // Referencia al escáner en curso
 }
 
 type OrganizeStatus struct {
@@ -88,14 +89,12 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 }
 
 func (s *Server) updateInboxCount() {
-	var pending, raw int
+	var pending, raw int64
 	_ = s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&pending)
 	_ = s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'raw'").Scan(&raw)
 	
-	s.inboxMu.Lock()
-	s.inboxCount = pending
-	s.rawCount = raw
-	s.inboxMu.Unlock()
+	s.inboxCount.Store(pending)
+	s.rawCount.Store(raw)
 	slog.Debug("📥 Cache updated", "pending", pending, "raw", raw)
 }
 
@@ -136,6 +135,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/api/library/organize/status", auth(s.handleOrganizeStatus))
 	mux.HandleFunc("/api/library/status", auth(s.handleScanStatus))
 	mux.HandleFunc("/api/library/inbox", auth(s.handleGetInbox))
+	mux.HandleFunc("/api/library/inbox/prioritize", auth(s.handlePrioritizeTrack))
 	mux.HandleFunc("/api/library/inbox/analyze", auth(s.handleAnalyzeInbox))
 	mux.HandleFunc("/api/library/inbox/apply-suggestions", auth(s.handleApplyInboxSuggestions))
 	mux.HandleFunc("/api/tracks/approve", auth(s.handleApproveTracks))
@@ -618,6 +618,8 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		sc := scanner.NewScanner(s.MasterDB)
+		s.activeScanner = sc // Guardar referencia activa
+
 		sc.OnProgress = func(path string, count int) {
 			// Throttling: Solo actualizamos el estado cada 10 archivos para no saturar
 			if count % 10 == 0 {
@@ -631,6 +633,7 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			status.Scanning = false
 			s.scanStatuses.Store("global", status)
+			s.activeScanner = nil // Limpiar referencia
 			s.updateInboxCount() // Actualización final
 			// Trigger enrichment for new artists
 			s.EnrichArtists()
@@ -1413,6 +1416,40 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tracks)
+}
+
+func (s *Server) handlePrioritizeTrack(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	trackID := r.URL.Query().Get("id")
+	if trackID == "" {
+		http.Error(w, "Missing track ID", http.StatusBadRequest)
+		return
+	}
+
+	// Buscar el path en la DB
+	var path string
+	err := s.MasterDB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+	if err != nil {
+		http.Error(w, "Track not found", http.StatusNotFound)
+		return
+	}
+
+	// Si hay un escáner activo, le pasamos el trabajo por el carril VIP
+	if s.activeScanner != nil {
+		select {
+		case s.activeScanner.PriorityJobs <- path:
+			slog.Debug("👑 Track prioritized", "id", trackID)
+		default:
+			// Si la cola VIP está llena, no hacemos nada (poco probable)
+		}
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"status":"prioritized"}`))
 }
 
 func (s *Server) handleGetInbox(w http.ResponseWriter, r *http.Request) {
@@ -2230,10 +2267,8 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Usamos el contador en caché para que sea ultra rápido
-	s.inboxMu.Lock()
-	ic := s.inboxCount
-	rc := s.rawCount
-	s.inboxMu.Unlock()
+	ic := s.inboxCount.Load()
+	rc := s.rawCount.Load()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

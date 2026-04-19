@@ -86,18 +86,30 @@
     items: []
   });
 
+  async function prioritizeTrack(id) {
+    try {
+      await fetch(`/api/library/inbox/prioritize?id=${id}`, { method: 'POST' });
+    } catch (e) {
+      console.error("Failed to prioritize", e);
+    }
+  }
+
   function showContextMenu(track, e) {
     e.preventDefault();
+    
+    // Si es un track 'raw', pedimos prioridad al servidor
+    if (track.status === 'raw') prioritizeTrack(track.id);
+
     contextMenu = {
       visible: true,
       x: e.clientX,
       y: e.clientY,
       track,
       items: [
-        { label: 'Play', icon: 'play', action: () => onplay?.(track) },
-        { label: 'Add to queue', icon: 'plus', action: () => onqueue?.(track) },
+        { label: 'Play', icon: 'play', action: () => onplay?.(track), disabled: track.status === 'raw' },
+        { label: 'Add to queue', icon: 'plus', action: () => onqueue?.(track), disabled: track.status === 'raw' },
         { divider: true },
-        { label: 'Edit tags', icon: 'edit', action: () => onedit?.(track) },
+        { label: 'Edit tags', icon: 'edit', action: () => onedit?.(track), disabled: track.status === 'raw' },
         ...(!isInbox ? [{ label: 'Organize file', icon: 'folder', action: () => handleOrganize(track.id) }] : []),
         { divider: true },
         { label: 'Copy title', icon: 'fileText', action: () => navigator.clipboard.writeText(track.title) },
@@ -112,6 +124,9 @@
     // Si estamos editando o pulsamos el checkbox/rating, no seleccionar la fila
     if (editingCell.trackId || e.target.closest('input[type="checkbox"]') || e.target.closest('.col-rating')) return;
     
+    // Si es RAW, avisar al servidor de que nos interesa este archivo
+    if (track.status === 'raw') prioritizeTrack(track.id);
+
     toggleSelect(track.id);
   }
 
