@@ -713,7 +713,6 @@ func getFLACDurationNative(path string) (float64, int, int, error) {
 	if _, err := f.Read(head); err != nil || string(head) != "fLaC" {
 		return 0, 0, 0, fmt.Errorf("not a flac file")
 	}
-	}
 
 	// El bloque STREAMINFO es el primero y tiene un tamaño fijo de 34 bytes (más 4 de cabecera de bloque)
 	// Cabecera de bloque: 1 bit (isLast), 7 bits (type), 24 bits (length)
