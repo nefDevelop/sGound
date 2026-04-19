@@ -124,6 +124,17 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}
 
 	slog.Info("Starting library scan", "workers", numWorkers)
+
+	var (
+		jobs       = make(chan string, numWorkers*2)
+		results    = make(chan *trackResult, numWorkers*2)
+		wg         sync.WaitGroup
+		writerDone = make(chan bool)
+		mu         sync.Mutex
+		count      int
+	)
+
+	go func() {
 		batchSize := 100
 		var batch []*trackResult
 		
@@ -259,6 +270,16 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	return err
 }
 
+func (s *Scanner) ParseFile(path string) (*trackResult, error) {
+	status := "pending"
+	var currentStatus string
+	err := s.DB.Conn.QueryRow("SELECT status FROM tracks WHERE path = ?", path).Scan(&currentStatus)
+	if err == nil {
+		status = currentStatus
+	}
+	return s.ParseFileWithCache(path, status)
+}
+
 func (s *Scanner) ParseAndSaveFile(path string) error {
 	res, err := s.ParseFile(path)
 	if err != nil { return err }
@@ -291,7 +312,7 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	fileStat, err := os.Stat(path)
 	if err != nil { return nil, err }
 	fileSize := fileStat.Size()
-	fileMtime := fileStat.Unix()
+	fileMtime := fileStat.ModTime().Unix()
 	fileExt := strings.TrimPrefix(filepath.Ext(path), ".")
 
 	// ID Persistente (intentamos leerlo de la caché RAM primero, luego del archivo)
