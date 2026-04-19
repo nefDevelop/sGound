@@ -147,6 +147,13 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	// --- FASE 1: DESCUBRIMIENTO RÁPIDO ---
 	slog.Info("Phase 1: Discovering files...")
 	discoveryCount := 0
+	
+	// Abrimos una transacción para que el descubrimiento sea instantáneo
+	tx, err := s.DB.Conn.Begin()
+	if err != nil {
+		return err
+	}
+
 	err = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil { return nil }
 		name := d.Name()
@@ -155,21 +162,30 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			return nil
 		}
 		if !d.IsDir() && isAudioFile(name) == nil {
-			// Solo registramos si no está en caché o ha cambiado
 			fileStat, err := os.Stat(path)
 			if err != nil { return nil }
 			
 			info, exists := s.dbFileCache[path]
 			if !exists || info.mtime != fileStat.ModTime().Unix() || info.size != fileStat.Size() {
-				s.RegisterRawFile(path)
+				// Inserción directa rápida
+				trackId := tags.ReadPersistentID(path)
+				if trackId == "" { trackId = GenerateID(path) }
+				
+				_, _ = tx.Exec(`
+					INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				`, trackId, "raw_album", "Unknown", filepath.Base(path), path, "raw", 0, 0)
+
 				discoveryCount++
-				if discoveryCount % 100 == 0 {
+				if discoveryCount % 500 == 0 {
 					slog.Info("➜ Discovered", "n", discoveryCount)
 				}
 			}
 		}
 		return nil
 	})
+	
+	tx.Commit()
 	slog.Info("Phase 1 finished", "discovered", discoveryCount)
 
 	// --- FASE 2: ANÁLISIS LAZY ---
