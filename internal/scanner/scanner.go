@@ -223,7 +223,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	_ = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil { return nil }
 		if !d.IsDir() && isAudioFile(d.Name()) == nil {
-			info, exists := s.dbFileCache[path]
+			_, exists := s.dbFileCache[path]
 			if !exists {
 				pathBuffer = append(pathBuffer, path)
 				if len(pathBuffer) >= 50 { flushDisc() }
