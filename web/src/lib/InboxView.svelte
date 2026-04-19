@@ -33,11 +33,14 @@
     }
   });
 
-  export async function fetchInbox(append = false, silent = false) {
+  let pendingAnalysisCount = 0;
+
+  export async function fetchInbox(append = false, silent = false, isFinal = false) {
     if (!silent) loading = true;
     if (!append) {
       tracksOffset = 0;
       hasMore = true;
+      pendingAnalysisCount = 0;
     }
 
     try {
@@ -54,9 +57,13 @@
           hasMore = false;
         }
         tracksOffset += data.length;
+        pendingAnalysisCount += data.length;
 
-        // Solo analizar si es la primera carga o hay nuevos datos
-        if (data.length > 0) analyzeInbox();
+        // REGLA: Analizar solo si tenemos un lote de 20+ o si es el aviso final
+        if (pendingAnalysisCount >= 20 || isFinal) {
+           analyzeInbox();
+           pendingAnalysisCount = 0;
+        }
       }
     } catch (e) {
       console.error(e);

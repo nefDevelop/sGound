@@ -155,19 +155,20 @@
       scanStatus = data;
       inboxCount.set(data.inboxCount);
 
-      // REGLA: Si algo ha cambiado (procesados o inbox), refrescar la vista actual
-      if (data.processed !== prevProcessed || data.inboxCount !== prevInbox) {
+      // REGLA: Solo refrescar si ha cambiado el INBOX o si el escaneo ha terminado/empezado
+      // NO refrescar por 'processed' ya que cambia miles de veces por segundo
+      if (data.inboxCount !== prevInbox || wasScanning !== data.scanning) {
          if (currentView === 'library' || currentView === 'tracks') fetchTracks(false, true);
          if (currentView === 'inbox') inboxRef?.fetchInbox(true);
          if (currentView === 'dashboard') dashRef?.refresh();
       }
-
-      // Si el escaneo ha terminado ahora mismo
-      if (wasScanning && !data.scanning) {
-        stopPolling();
-        fetchTracks();
-        fetchPlaylists();
-        inboxRef?.fetchInbox();
+// Si el escaneo ha terminado ahora mismo
+if (wasScanning && !data.scanning) {
+  stopPolling();
+  fetchTracks();
+  fetchPlaylists();
+  inboxRef?.fetchInbox(false, false, true);
+}
         dashRef?.refresh();
         showToast("Escaneo finalizado: <b>" + data.processed + "</b> archivos procesados", "success");
       }

@@ -583,8 +583,11 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		sc := scanner.NewScanner(s.MasterDB)
 		sc.OnProgress = func(path string, count int) {
-			status.Processed = count
-			s.scanStatuses.Store("global", status)
+			// Throttling: Solo actualizamos el estado cada 10 archivos para no saturar
+			if count % 10 == 0 {
+				status.Processed = count
+				s.scanStatuses.Store("global", status)
+			}
 		}
 
 		defer func() {
@@ -1505,6 +1508,7 @@ func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
 		FROM tracks t 
 		JOIN albums al ON t.album_id = al.id 
 		WHERE t.status = 'pending'
+		LIMIT 100
 	`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
