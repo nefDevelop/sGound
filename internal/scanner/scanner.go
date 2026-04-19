@@ -59,6 +59,37 @@ func NewScanner(database *db.MasterDatabase) *Scanner {
 	}
 }
 
+func (s *Scanner) ParseAndSaveFile(path string) error {
+	res, err := s.ParseFileWithCache(path, "active")
+	if err != nil { return err }
+	if res == nil { return nil }
+
+	s.muDB.Lock()
+	defer s.muDB.Unlock()
+
+	tx, err := s.DB.Conn.Begin()
+	if err != nil { return err }
+
+	tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", res.artistId, res.dbAlbumArtist)
+	tx.Exec(`
+		INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET 
+			year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END
+	`, res.albumId, res.artistId, res.albumName, res.year)
+
+	_, err = tx.Exec(
+		`INSERT OR REPLACE INTO tracks 
+		(id, album_id, artist, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, instrumental, replay_gain, file_mtime, file_hash) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		res.trackId, res.albumId, res.artistName, res.title, res.trackNum, res.discNum, res.path, res.duration, res.genre, res.size, res.format, res.composer, res.comment, res.bitRate, res.sampleRate, res.status, res.instrumental, res.replayGain, res.fileMtime, res.hash,
+	)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Scanner) ScanDirectory(rootPath string) error {
 	slog.Info("Starting Phase-Balanced library scan", "path", rootPath)
 	start := time.Now()
