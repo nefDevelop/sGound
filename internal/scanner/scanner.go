@@ -30,8 +30,8 @@ type Scanner struct {
 	// Canales de prioridad
 	PriorityJobs chan string
 
-	// Pool de memoria para reutilizar buffers y estabilizar sys_mb
-	bufferPool sync.Pool
+	// Sistema de "Tickets de RAM" (4 slots fijos para workers)
+	ramTickets chan struct{}
 
 	// Mutexes para sincronización
 	muDB             sync.Mutex          // Bloqueo de escritura en DB
@@ -58,11 +58,7 @@ func NewScanner(database *db.MasterDatabase) *Scanner {
 	return &Scanner{
 		DB:               database,
 		PriorityJobs:     make(chan string, 100),
-		bufferPool: sync.Pool{
-			New: func() interface{} {
-				return make([]byte, 512*1024) // 512KB por buffer
-			},
-		},
+		ramTickets:       make(chan struct{}, 4),
 		resolvedAlbums:   make(map[string]string),
 		conflictedAlbums: make(map[string]struct{}),
 		seenArtists:      make(map[string]struct{}),
@@ -233,11 +229,19 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				}
 				if !ok { return }
 				res, err := func() (*trackResult, error) {
+					// PEDIR TICKET DE RAM
+					s.ramTickets <- struct{}{}
+					defer func() { <-s.ramTickets }()
+
 					defer func() { if r := recover(); r != nil { slog.Error("🔥 Panic", "worker", wId, "file", filepath.Base(path), "err", r) } }()
 					tagSem <- struct{}{}
 					defer func() { <-tagSem }()
-					slog.Debug("📖 W"+strconv.Itoa(wId), "file", filepath.Base(path))
-					return s.ParseFileWithCache(path, "pending")
+					
+					r, e := s.ParseFileWithCache(path, "pending")
+					if e == nil && r != nil {
+						slog.Debug("📖 W"+strconv.Itoa(wId), "size_kb", r.MetadataSize/1024, "file", filepath.Base(path))
+					}
+					return r, e
 				}()
 				if err != nil || res == nil { continue }
 				if res.duration == 0 { slowJobs <- res } else { results <- res }
@@ -367,6 +371,10 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	albumId := GenerateID(groupingKey + "|" + NormalizeString(albumName))
 	dbAlbumArtist := albumArtistTag; if dbAlbumArtist == "" { dbAlbumArtist = artistName }
 	artistId := GenerateID(dbAlbumArtist)
+
+	// ESTIMAR TAMAÑO DE RAM
+	mSize := len(artistName) + len(albumName) + len(title) + len(genre) + len(composer) + len(comment) + 500
+
 	return &trackResult{
 		trackId: trackId, albumId: albumId, artistId: artistId,
 		artistName: artistName, dbAlbumArtist: dbAlbumArtist, albumName: albumName,
@@ -374,7 +382,8 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 		composer: composer, comment: comment, hash: "", status: oldStatus,
 		trackNum: trackNum, discNum: discNum, year: year, duration: duration,
 		bitRate: bitRate, sampleRate: sampleRate, size: fileStat.Size(),
-		fileMtime: fileStat.ModTime().Unix(),
+		fileMtime: fileStat.ModTime().Unix(), instrumental: false,
+		MetadataSize: mSize,
 	}, nil
 }
 
@@ -486,4 +495,5 @@ type trackResult struct {
 	duration, replayGain float64
 	size, fileMtime int64
 	instrumental bool
+	MetadataSize    int // Tamaño estimado en memoria (bytes)
 }
