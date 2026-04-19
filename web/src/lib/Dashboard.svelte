@@ -76,7 +76,6 @@
         data.mostPlayed = data.mostPlayed || [];
         data.trends = data.trends || [];
         stats = data;
-        inboxCount.set(data.inboxCount);
       }
       if (hRes.ok) health = await hRes.json();
     } catch (e) { console.error(e); }

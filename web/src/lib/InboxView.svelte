@@ -22,7 +22,6 @@
       if (res.ok) {
         const data = (await res.json()) || [];
         tracks = data;
-        inboxCount.set(tracks.length);
         if (tracks.length > 0) analyzeInbox();
       }
     } catch (e) {
