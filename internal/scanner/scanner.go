@@ -27,8 +27,9 @@ type Scanner struct {
 	DB         *db.MasterDatabase
 	OnProgress func(path string, count int)
 
-	// Caché para optimización de agrupación de álbumes
-	muAlbums         sync.Mutex
+	// Mutexes para sincronización
+	muDB             sync.Mutex // Bloqueo de escritura en DB
+	muAlbums         sync.Mutex // Bloqueo de caché de álbumes
 	resolvedAlbums   map[string]string   // albumId -> artista principal
 	conflictedAlbums map[string]struct{} // albumId -> requiere votación
 
@@ -121,17 +122,24 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	)
 	tagSem := make(chan struct{}, 1)
 
-	// A. LANZAR ESCRITOR (Consume 'results' y guarda en DB)
+	// A. LANZAR ESCRITOR (Único punto de volcado de ANÁLISIS)
 	go func() {
-		batchSize := 10
+		batchSize := 20 // Lote de 20 según solicitud
 		var batch []*trackResult
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 		flush := func() {
 			if len(batch) == 0 { return }
-			slog.Debug("💾 Sync", "n", len(batch))
+			
+			// BLOQUEO TOTAL DE ESCRITURA
+			s.muDB.Lock()
+			
+			slog.Debug("💾 Sync Analysis", "n", len(batch))
 			tx, err := s.DB.Conn.Begin()
-			if err != nil { return }
+			if err != nil { 
+				s.muDB.Unlock()
+				return 
+			}
 			for _, r := range batch {
 				if _, seen := s.seenArtists[r.artistId]; !seen {
 					tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", r.artistId, r.dbAlbumArtist)
@@ -145,6 +153,8 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					r.albumId, r.artistName, r.title, r.trackNum, r.discNum, r.duration, r.genre, r.size, r.format, r.composer, r.comment, r.bitRate, r.sampleRate, "pending", r.instrumental, r.replayGain, r.fileMtime, r.hash, r.trackId)
 			}
 			tx.Commit()
+			s.muDB.Unlock()
+			
 			batch = nil
 			s.seenArtists = make(map[string]struct{})
 			s.seenAlbums = make(map[string]struct{})
@@ -222,6 +232,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}
 
 	// Luego caminamos el disco para descubrir cosas nuevas
+	s.muDB.Lock()
 	txDiscovery, _ := s.DB.Conn.Begin()
 	_ = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil { return nil }
@@ -243,16 +254,20 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 				discoveryCount++
 				jobs <- path
-				if discoveryCount % 100 == 0 {
+				if discoveryCount % 50 == 0 {
 					slog.Info("➜ Discovered", "n", discoveryCount)
 					txDiscovery.Commit()
+					s.muDB.Unlock()
+					// Breve pausa para dejar paso al análisis si es necesario
 					txDiscovery, _ = s.DB.Conn.Begin()
+					s.muDB.Lock()
 				}
 			}
 		}
 		return nil
 	})
 	txDiscovery.Commit()
+	s.muDB.Unlock()
 	slog.Info("Discovery finished", "total", discoveryCount)
 
 	close(jobs)
