@@ -51,6 +51,8 @@ type Server struct {
 	jwtSecret        []byte
 	scanStatuses     sync.Map // [string]*ScanStatus
 	organizeStatuses sync.Map // [string]*OrganizeStatus
+	inboxCount       int
+	inboxMu          sync.Mutex
 }
 
 type OrganizeStatus struct {
@@ -77,9 +79,21 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 		organizeStatuses: sync.Map{},
 	}
 
-	// s.EnrichArtists()
+	// Inicializar contador
+	s.updateInboxCount()
 
 	return s
+}
+
+func (s *Server) updateInboxCount() {
+	var count int
+	// Query simple sin JOINs para que sea ultra rápida
+	err := s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&count)
+	if err == nil {
+		s.inboxMu.Lock()
+		s.inboxCount = count
+		s.inboxMu.Unlock()
+	}
 }
 
 type contextKey string
@@ -606,12 +620,15 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 			if count % 10 == 0 {
 				status.Processed = count
 				s.scanStatuses.Store("global", status)
+				// Actualizar caché de inbox cada vez que avanzamos para que el UI lo vea
+				s.updateInboxCount()
 			}
 		}
 
 		defer func() {
 			status.Scanning = false
 			s.scanStatuses.Store("global", status)
+			s.updateInboxCount() // Actualización final
 			// Trigger enrichment for new artists
 			s.EnrichArtists()
 		}()
@@ -2205,25 +2222,16 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 		processed = sStatus.Processed
 	}
 
-	// Obtener contador de inbox (pendientes filtrados por permiso)
-	user, _ := r.Context().Value(userKey).(*db.User)
-	pathFilter, pathArgs := s.getPathFilter(user)
-	whereInbox := "WHERE status = 'pending'"
-	if pathFilter != "" {
-		whereInbox += " AND " + pathFilter
-	}
-	var inboxCount int
-	err := s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks t "+whereInbox, pathArgs...).Scan(&inboxCount)
-	if err != nil {
-		slog.Error("Failed to calculate inboxCount in handleScanStatus", "error", err)
-	}
-	slog.Debug("Inbox", "count", inboxCount)
+	// Usamos el contador en caché para que sea ultra rápido
+	s.inboxMu.Lock()
+	ic := s.inboxCount
+	s.inboxMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"scanning":   scanning,
 		"processed":  processed,
-		"inboxCount": inboxCount,
+		"inboxCount": ic,
 	})
 }
 

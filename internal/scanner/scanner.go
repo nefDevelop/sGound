@@ -299,10 +299,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				count++
 				currentCount := count
 				if currentCount % 10 == 0 {
-					var m runtime.MemStats
-					runtime.ReadMemStats(&m)
 					runtime.GC()
 					debug.FreeOSMemory()
+					var m runtime.MemStats
+					runtime.ReadMemStats(&m)
 					slog.Info("🧠 RAM", 
 						"used_mb", m.Alloc/1024/1024, 
 						"sys_mb", m.Sys/1024/1024)
