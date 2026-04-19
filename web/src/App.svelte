@@ -183,8 +183,8 @@
 
   function startPolling() {
     if (pollingInterval) return;
-    // Polling más rápido (cada segundo) durante el escaneo
-    pollingInterval = setInterval(checkScanStatus, 1000);
+    // Polling más relajado (cada 3 segundos) durante el escaneo
+    pollingInterval = setInterval(checkScanStatus, 3000);
   }
 
   function stopPolling() {

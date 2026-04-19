@@ -546,6 +546,12 @@ func (s *Server) EnrichArtists() {
 		slog.Info("📈 Enrolling artists for enrichment", "count", len(artists))
 
 		for _, a := range artists {
+			// Skip generic names that won't have meaningful metadata
+			lowerName := strings.ToLower(a.Name)
+			if lowerName == "various artists" || lowerName == "unknown artist" || lowerName == "unknown" {
+				continue
+			}
+
 			ext, err := s.externalMeta.GetArtistInfo(a.Name)
 			if err == nil && ext != nil {
 				tagsStr := strings.Join(ext.Tags, ",")
@@ -2188,7 +2194,7 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("Failed to calculate inboxCount in handleScanStatus", "error", err)
 	}
-	slog.Info("handleScanStatus count", "inboxCount", inboxCount, "filter", whereInbox)
+	slog.Debug("handleScanStatus count", "inboxCount", inboxCount, "filter", whereInbox)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

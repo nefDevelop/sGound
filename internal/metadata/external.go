@@ -126,7 +126,7 @@ func (e *ExternalMetadata) enrichWithLastFM(name string, info *ArtistInfo) {
 
 func (e *ExternalMetadata) searchBestTitle(name string) string {
 	searchURL := fmt.Sprintf("https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=%s&format=json&srlimit=1", url.QueryEscape(name))
-	client := &http.Client{}
+	client := &http.Client{Timeout: 5 * time.Second}
 	req, _ := http.NewRequest("GET", searchURL, nil)
 	req.Header.Set("User-Agent", "SgoundMusicPlayer/1.0 (admin@example.com)")
 
@@ -152,7 +152,7 @@ func (e *ExternalMetadata) searchBestTitle(name string) string {
 
 func (e *ExternalMetadata) fetchSummary(title, lang string) (*ArtistInfo, error) {
 	searchURL := fmt.Sprintf("https://%s.wikipedia.org/api/rest_v1/page/summary/%s", lang, title)
-	client := &http.Client{}
+	client := &http.Client{Timeout: 5 * time.Second}
 	req, _ := http.NewRequest("GET", searchURL, nil)
 	req.Header.Set("User-Agent", "SgoundMusicPlayer/1.0 (admin@example.com)")
 
