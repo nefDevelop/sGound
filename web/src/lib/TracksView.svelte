@@ -375,6 +375,7 @@
               class="track-row" 
               class:active={currentPlaying && currentPlaying.id === track.id}
               class:selected={hasCol('checkbox') && selectedIds.has(track.id)}
+              class:is-raw={track.status === 'raw'}
               onclick={(e) => handleRowClick(track, e)}
               ondblclick={() => onplay?.(track)}
               oncontextmenu={(e) => showContextMenu(track, e)}
@@ -424,7 +425,12 @@
                       {/if}
                     </div>
                       {:else}
-                        <span class="title-text">{track.title}</span>
+                        <span class="title-text">
+                          {track.title}
+                          {#if track.status === 'raw'}
+                            <span class="raw-badge">Procesando...</span>
+                          {/if}
+                        </span>
                         <span class="mobile-subtitle">{track.artist}</span>
                       {/if}
                     </div>
@@ -735,4 +741,30 @@
     gap: 4px; 
   }
   .year-suggestion { margin-top: 1px; }
+
+  .track-row.is-raw {
+    opacity: 0.7;
+  }
+  .track-row.is-raw :global(.artwork-img) {
+    filter: grayscale(1);
+  }
+  .raw-badge {
+    background: var(--warning-10, #fff3cd);
+    color: var(--warning, #856404);
+    font-size: 0.65rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    animation: pulse-warn 2s infinite;
+    display: inline-block;
+    vertical-align: middle;
+  }
+
+  @keyframes pulse-warn {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+  }
 </style>

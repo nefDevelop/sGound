@@ -58,6 +58,21 @@ func NewScanner(database *db.MasterDatabase) *Scanner {
 	}
 }
 
+func (s *Scanner) RegisterRawFile(path string) error {
+	// Generar un ID básico y usar el nombre del archivo como título temporal
+	trackId := tags.ReadPersistentID(path)
+	if trackId == "" { trackId = GenerateID(path) }
+	
+	title := filepath.Base(path)
+	
+	// Insertar como 'raw' si no existe
+	_, err := s.DB.Conn.Exec(`
+		INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, trackId, "raw_album", "Unknown", title, path, "raw", 0, 0)
+	return err
+}
+
 func (s *Scanner) ScanDirectory(rootPath string) error {
 	slog.Info("Starting Optimized Turbo library scan", "path", rootPath)
 	start := time.Now()
@@ -129,10 +144,43 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 	}
 
-	slog.Info("Starting library scan", "workers", numWorkers)
+	// --- FASE 1: DESCUBRIMIENTO RÁPIDO ---
+	slog.Info("Phase 1: Discovering files...")
+	discoveryCount := 0
+	err = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil { return nil }
+		name := d.Name()
+		if name != "." && strings.HasPrefix(name, ".") {
+			if d.IsDir() { return filepath.SkipDir }
+			return nil
+		}
+		if !d.IsDir() && isAudioFile(name) == nil {
+			// Solo registramos si no está en caché o ha cambiado
+			fileStat, err := os.Stat(path)
+			if err != nil { return nil }
+			
+			info, exists := s.dbFileCache[path]
+			if !exists || info.mtime != fileStat.ModTime().Unix() || info.size != fileStat.Size() {
+				s.RegisterRawFile(path)
+				discoveryCount++
+				if discoveryCount % 100 == 0 {
+					slog.Info("➜ Discovered", "n", discoveryCount)
+				}
+			}
+		}
+		return nil
+	})
+	slog.Info("Phase 1 finished", "discovered", discoveryCount)
 
-	// Configuración de memoria agresiva para contenedores
-	debug.SetGCPercent(20) 
+	// --- FASE 2: ANÁLISIS LAZY ---
+	slog.Info("Phase 2: Analyzing metadata (Lazy)...")
+	
+	// Cargar todos los 'raw' pendientes de la DB para procesar
+	rowsRaw, err := s.DB.Conn.Query("SELECT path FROM tracks WHERE status = 'raw'")
+	if err != nil {
+		return err
+	}
+	defer rowsRaw.Close()
 
 	var (
 		jobs       = make(chan string, numWorkers*2)
@@ -145,9 +193,12 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		count      int
 	)
 
-	// Semáforo para que solo 1 worker lea etiquetas a la vez (ahorro masivo de RAM)
+	// Semáforo para que solo 1 worker lea etiquetas a la vez
 	tagSem := make(chan struct{}, 1)
 
+	// Lanzar los engranajes (Especialista ffprobe, Escritor a DB, Workers Nativos)
+	// (El código de los workers se mantiene igual, solo cambia el origen de los datos)
+	
 	// --- CARRIL LENTO (Especialista ffprobe) ---
 	slowWg.Add(1)
 	go func() {
@@ -161,6 +212,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				res.sampleRate = data.sampleRate
 				if data.replayGain != 0 { res.replayGain = data.replayGain }
 			}
+			res.status = "pending" // Ya analizado
 			results <- res
 		}
 	}()
@@ -195,10 +247,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					s.seenAlbums[r.albumId] = struct{}{}
 				}
 				tx.Exec(
-					`INSERT OR REPLACE INTO tracks 
-					(id, album_id, artist, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, instrumental, replay_gain, file_mtime, file_hash) 
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-					r.trackId, r.albumId, r.artistName, r.title, r.trackNum, r.discNum, r.path, r.duration, r.genre, r.size, r.format, r.composer, r.comment, r.bitRate, r.sampleRate, r.status, r.instrumental, r.replayGain, r.fileMtime, r.hash,
+					`UPDATE tracks SET 
+					album_id=?, artist=?, title=?, track_num=?, disc_num=?, duration=?, genre=?, size=?, format=?, composer=?, comment=?, bit_rate=?, sample_rate=?, status=?, instrumental=?, replay_gain=?, file_mtime=?, file_hash=? 
+					WHERE id=?`,
+					r.albumId, r.artistName, r.title, r.trackNum, r.discNum, r.duration, r.genre, r.size, r.format, r.composer, r.comment, r.bitRate, r.sampleRate, "pending", r.instrumental, r.replayGain, r.fileMtime, r.hash, r.trackId,
 				)
 
 				s.muAlbums.Lock()
@@ -212,8 +264,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			}
 			tx.Commit()
 			batch = nil
-			
-			// LIMPIEZA CRÍTICA: Vaciar cachés temporales para liberar RAM
 			s.seenArtists = make(map[string]struct{})
 			s.seenAlbums = make(map[string]struct{})
 		}
@@ -243,23 +293,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		go func() {
 			defer wg.Done()
 			for path := range jobs {
-				// FAST PATH: Check RAM cache instead of DB
-				fileStat, err := os.Stat(path)
-				if err != nil { continue }
-				
-				info, exists := s.dbFileCache[path]
-				if exists && info.mtime == fileStat.ModTime().Unix() && info.size == fileStat.Size() {
-					mu.Lock()
-					count++
-					mu.Unlock()
-					continue // Totalmente omitido, ya está en la DB
-				}
-
-				status := "pending"
-				if exists {
-					status = info.status
-				}
-
 				res, err := func() (*trackResult, error) {
 					defer func() {
 						if r := recover(); r != nil {
@@ -267,30 +300,21 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 						}
 					}()
 					
-					// ADQUIRIR SEMÁFORO DE ETIQUETAS
 					tagSem <- struct{}{}
 					defer func() { <-tagSem }()
 
 					slog.Debug("➜ Start", "file", filepath.Base(path))
-					r, e := s.ParseFileWithCache(path, status)
-					if e != nil {
-						slog.Error("❌ TagError", "file", filepath.Base(path), "err", e)
-					}
+					r, e := s.ParseFileWithCache(path, "pending")
 					slog.Debug("➜ Done", "file", filepath.Base(path))
 					return r, e
 				}()
 
-				if err != nil {
-					continue
-				}
+				if err != nil { continue }
 
-				// Lógica de derivación:
 				if res != nil {
 					if res.duration == 0 {
-						// Al carril lento
 						slowJobs <- res
 					} else {
-						// Al carril de resultados directos
 						results <- res
 					}
 				}
@@ -303,9 +327,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					debug.FreeOSMemory()
 					var m runtime.MemStats
 					runtime.ReadMemStats(&m)
-					slog.Info("🧠 RAM", 
-						"used_mb", m.Alloc/1024/1024, 
-						"sys_mb", m.Sys/1024/1024)
+					slog.Info("🧠 RAM", "used_mb", m.Alloc/1024/1024, "sys_mb", m.Sys/1024/1024)
 				}
 				mu.Unlock()
 				if s.OnProgress != nil { s.OnProgress(path, currentCount) }
@@ -313,35 +335,19 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}()
 	}
 
-	err = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil { return nil }
-
-		// Skip hidden folders and files (like .Trash-1000, .git, etc)
-		name := d.Name()
-		if name != "." && strings.HasPrefix(name, ".") {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
+	// Alimentar la cola de trabajos
+	for rowsRaw.Next() {
+		var p string
+		if err := rowsRaw.Scan(&p); err == nil {
+			jobs <- p
 		}
-
-		if !d.IsDir() && isAudioFile(name) == nil { jobs <- path }
-		return nil
-	})
-
+	}
 	close(jobs)
 	wg.Wait()
-	close(slowJobs) // Avisamos al carril lento que ya no hay más nativos fallidos
-	slowWg.Wait()   // Esperamos a que el carril lento termine sus ffprobes
-	close(results)  // Avisamos al escritor de DB que todo ha terminado
+	close(slowJobs)
+	slowWg.Wait()
+	close(results)
 	<-writerDone
-
-	// Votación de artistas de álbum
-	s.muAlbums.Lock()
-	for id := range s.conflictedAlbums {
-		s.recalculateAlbumArtist(id)
-	}
-	s.muAlbums.Unlock()
 
 	// Pruning (Limpieza de tracks eliminados físicamente)
 	orphans, err := s.DB.GetOrphanedTracks()
@@ -353,8 +359,16 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}
 
 	slog.Info("Completed library scan", "total", count, "duration", time.Since(start))
-	return err
-}
+
+	// Votación de artistas de álbum
+	s.muAlbums.Lock()
+	for id := range s.conflictedAlbums {
+		s.recalculateAlbumArtist(id)
+	}
+	s.muAlbums.Unlock()
+
+	return nil
+	}
 
 func (s *Scanner) ParseFile(path string) (*trackResult, error) {
 	status := "pending"

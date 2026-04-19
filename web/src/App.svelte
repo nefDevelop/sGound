@@ -19,7 +19,7 @@
   import InboxView from "./lib/InboxView.svelte";
   import Toast from "./lib/Toast.svelte";
   import FullPlayer from "./lib/FullPlayer.svelte";
-  import { showToast, audioQuality, queue, currentIndex, isPlaying, inboxCount } from "./lib/stores.js";
+  import { showToast, audioQuality, queue, currentIndex, isPlaying, inboxCount, rawCount } from "./lib/stores.js";
   import { get } from "svelte/store";
   import { generatePalette, applyTheme } from "./lib/theme.js";
   import Login from "./lib/Login.svelte";
@@ -117,7 +117,7 @@
     }
   });
 
-  let scanStatus = $state({ scanning: false, processed: 0, inboxCount: 0 });
+  let scanStatus = $state({ scanning: false, processed: 0, inboxCount: 0, rawCount: 0 });
   let pollingInterval = null;
   let dashRef = $state(null);
   let inboxRef = $state(null);
@@ -149,15 +149,15 @@
       const data = await res.json();
       
       const wasScanning = scanStatus.scanning;
-      const prevProcessed = scanStatus.processed;
       const prevInbox = $inboxCount;
+      const prevRaw = $rawCount;
       
       scanStatus = data;
       inboxCount.set(data.inboxCount);
+      rawCount.set(data.rawCount || 0);
 
-      // REGLA: Solo refrescar si ha cambiado el INBOX o si el escaneo ha terminado/empezado
-      // NO refrescar por 'processed' ya que cambia miles de veces por segundo
-      if (data.inboxCount !== prevInbox || wasScanning !== data.scanning) {
+      // REGLA: Solo refrescar si ha cambiado el INBOX o el estado RAW o si el escaneo ha terminado/empezado
+      if (data.inboxCount !== prevInbox || data.rawCount !== prevRaw || wasScanning !== data.scanning) {
          if (currentView === 'library' || currentView === 'tracks') fetchTracks(false, true);
          if (currentView === 'inbox') inboxRef?.fetchInbox(true);
          if (currentView === 'dashboard') dashRef?.refresh();

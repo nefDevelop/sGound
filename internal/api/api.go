@@ -40,6 +40,7 @@ import (
 type ScanStatus struct {
 	Scanning  bool `json:"scanning"`
 	Processed int  `json:"processed"`
+	RawCount  int  `json:"rawCount"`
 }
 
 type Server struct {
@@ -52,6 +53,7 @@ type Server struct {
 	scanStatuses     sync.Map // [string]*ScanStatus
 	organizeStatuses sync.Map // [string]*OrganizeStatus
 	inboxCount       int
+	rawCount         int
 	inboxMu          sync.Mutex
 }
 
@@ -86,14 +88,15 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 }
 
 func (s *Server) updateInboxCount() {
-	var count int
-	err := s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&count)
-	if err == nil {
-		s.inboxMu.Lock()
-		s.inboxCount = count
-		s.inboxMu.Unlock()
-		slog.Debug("📥 Cache updated", "count", count)
-	}
+	var pending, raw int
+	_ = s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&pending)
+	_ = s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'raw'").Scan(&raw)
+	
+	s.inboxMu.Lock()
+	s.inboxCount = pending
+	s.rawCount = raw
+	s.inboxMu.Unlock()
+	slog.Debug("📥 Cache updated", "pending", pending, "raw", raw)
 }
 
 type contextKey string
@@ -2229,12 +2232,14 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	// Usamos el contador en caché para que sea ultra rápido
 	s.inboxMu.Lock()
 	ic := s.inboxCount
+	rc := s.rawCount
 	s.inboxMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"scanning":   scanning,
 		"processed":  processed,
+		"rawCount":    rc,
 		"inboxCount": ic,
 	})
 }

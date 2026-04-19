@@ -3,7 +3,7 @@
   import Icon from './Icon.svelte';
   import TracksView from './TracksView.svelte';
   import { fade } from 'svelte/transition';
-  import { inboxCount } from './stores.js';
+  import { inboxCount, rawCount } from './stores.js';
 
   let { onplay, onedit, onapproved, onrejected, onhide, onbulkReject, ondeletePhysical } = $props();
   
@@ -44,7 +44,8 @@
     }
 
     try {
-      const res = await fetch(`/api/tracks?status=pending&limit=${limit}&offset=${tracksOffset}`);
+      // Incluimos tanto 'pending' como 'raw' para que aparezcan en el Inbox
+      const res = await fetch(`/api/tracks?status=pending,raw&limit=${limit}&offset=${tracksOffset}`);
       if (res.ok) {
         const data = (await res.json()) || [];
         if (append) {
@@ -183,6 +184,12 @@
         <div class="chip primary" title="Total de pistas en el Inbox">
           <Icon name="inbox" size={14} />
           {$inboxCount} pistas
+        </div>
+      {/if}
+      {#if $rawCount > 0}
+        <div class="chip warning" title="Pistas descubiertas pendientes de analizar">
+          <Icon name="loader" size={14} class="spin" />
+          {$rawCount} analizando...
         </div>
       {/if}
       {#if hasMore}
