@@ -1289,18 +1289,18 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Dynamic selection for memory optimization
-	selectFields := `t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
+	selectFields := `t.id, t.title, COALESCE(t.track_num, 0), COALESCE(t.disc_num, 0), COALESCE(t.duration, 0), COALESCE(t.genre, ''), 
 		       COALESCE(t.artist, a.name, 'Artist Desconocido') as artist, COALESCE(al.title, 'Álbum Desconocido') as album, COALESCE(al.year, 0) as year,
-		       t.size, t.format, t.bit_rate, t.sample_rate,
-		       t.composer, t.comment, t.status, 
+		       COALESCE(t.size, 0), COALESCE(t.format, ''), COALESCE(t.bit_rate, 0), COALESCE(t.sample_rate, 0),
+		       COALESCE(t.composer, ''), COALESCE(t.comment, ''), t.status, 
 		       COALESCE(ut.rating, 0) as rating, 
-		       t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0),
+		       COALESCE(t.instrumental, 0), COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0),
 		       COALESCE(ut.play_count, 0) as play_count`
 
 	if minimal {
-		selectFields = `t.id, t.title, t.track_num, t.duration, COALESCE(t.genre, ''), 
+		selectFields = `t.id, t.title, COALESCE(t.track_num, 0), COALESCE(t.duration, 0), COALESCE(t.genre, ''), 
 		       COALESCE(t.artist, a.name, 'Artist Desconocido') as artist, COALESCE(al.title, 'Álbum Desconocido') as album, COALESCE(al.year, 0) as year,
-		       t.format, COALESCE(ut.rating, 0) as rating, t.instrumental`
+		       COALESCE(t.format, ''), COALESCE(ut.rating, 0) as rating, COALESCE(t.instrumental, 0)`
 	}
 
 	query := fmt.Sprintf(`

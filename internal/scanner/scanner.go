@@ -135,7 +135,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	)
 
 	go func() {
-		batchSize := 100
+		batchSize := 25
 		var batch []*trackResult
 		
 		flush := func() {
