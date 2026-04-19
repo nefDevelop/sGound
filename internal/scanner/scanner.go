@@ -30,6 +30,9 @@ type Scanner struct {
 	// Canales de prioridad
 	PriorityJobs chan string
 
+	// Pool de memoria para reutilizar buffers y estabilizar sys_mb
+	bufferPool sync.Pool
+
 	// Mutexes para sincronización
 	muDB             sync.Mutex          // Bloqueo de escritura en DB
 	muAlbums         sync.Mutex          // Bloqueo de caché de álbumes
@@ -55,6 +58,11 @@ func NewScanner(database *db.MasterDatabase) *Scanner {
 	return &Scanner{
 		DB:               database,
 		PriorityJobs:     make(chan string, 100),
+		bufferPool: sync.Pool{
+			New: func() interface{} {
+				return make([]byte, 512*1024) // 512KB por buffer
+			},
+		},
 		resolvedAlbums:   make(map[string]string),
 		conflictedAlbums: make(map[string]struct{}),
 		seenArtists:      make(map[string]struct{}),
