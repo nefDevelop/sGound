@@ -298,7 +298,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				mu.Lock()
 				count++
 				currentCount := count
-				if currentCount % 10 == 0 {
+				if currentCount % 5 == 0 {
 					runtime.GC()
 					debug.FreeOSMemory()
 					var m runtime.MemStats

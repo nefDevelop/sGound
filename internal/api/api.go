@@ -87,12 +87,12 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 
 func (s *Server) updateInboxCount() {
 	var count int
-	// Query simple sin JOINs para que sea ultra rápida
 	err := s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&count)
 	if err == nil {
 		s.inboxMu.Lock()
 		s.inboxCount = count
 		s.inboxMu.Unlock()
+		slog.Debug("📥 Cache updated", "count", count)
 	}
 }
 
@@ -1535,6 +1535,7 @@ func (s *Server) handleRejectTracks(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
+	s.updateInboxCount()
 }
 
 func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
@@ -1779,6 +1780,7 @@ func (s *Server) handleApplyInboxSuggestions(w http.ResponseWriter, r *http.Requ
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
+	s.updateInboxCount()
 }
 
 func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
@@ -1816,6 +1818,7 @@ func (s *Server) handleRateTrack(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
+	s.updateInboxCount()
 }
 
 func (s *Server) handleDeleteTrack(trackID string, w http.ResponseWriter, r *http.Request) {
@@ -1848,6 +1851,7 @@ func (s *Server) handleDeleteTrack(trackID string, w http.ResponseWriter, r *htt
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
+	s.updateInboxCount()
 }
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
