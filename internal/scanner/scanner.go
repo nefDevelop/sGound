@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -71,13 +72,16 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	rows, err := s.DB.Conn.Query("SELECT id, path, file_mtime, size, status FROM tracks")
 	if err == nil {
 		defer rows.Close()
+		cacheCount := 0
 		for rows.Next() {
 			var id, p, status string
 			var m, sz int64
 			if err := rows.Scan(&id, &p, &m, &sz, &status); err == nil {
 				s.dbFileCache[p] = dbFileInfo{mtime: m, size: sz, id: id, status: status}
+				cacheCount++
 			}
 		}
+		slog.Info("Metadata cache loaded", "count", cacheCount)
 	}
 	// DETERMINACIÓN LÓGICA DE WORKERS SEGÚN EL HARDWARE
 	numWorkers := 6 // Valor por defecto (Punto medio seguro)
@@ -140,6 +144,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		
 		flush := func() {
 			if len(batch) == 0 { return }
+			slog.Debug("Flushing batch to DB", "size", len(batch))
 			tx, err := s.DB.Conn.Begin()
 			if err != nil {
 				slog.Error("Failed to start transaction", "error", err)
@@ -523,9 +528,14 @@ func isAudioFile(filename string) error {
 }
 
 func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
-	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration,bit_rate:stream=sample_rate:format_tags=REPLAYGAIN_TRACK_GAIN,replaygain_track_gain", "-of", "default=noprint_wrappers=1:nokey=0", path)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,bit_rate:stream=sample_rate:format_tags=REPLAYGAIN_TRACK_GAIN,replaygain_track_gain", "-of", "default=nokey=0", path)
 	out, err := cmd.Output()
-	if err != nil { return audioMetadata{}, err }
+	if err != nil {
+		return audioMetadata{}, err
+	}
 	
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	data := audioMetadata{sampleRate: 44100}
