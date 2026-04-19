@@ -212,6 +212,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			}
 			tx.Commit()
 			batch = nil
+			
+			// LIMPIEZA CRÍTICA: Vaciar cachés temporales para liberar RAM
+			s.seenArtists = make(map[string]struct{})
+			s.seenAlbums = make(map[string]struct{})
 		}
 
 		for {
