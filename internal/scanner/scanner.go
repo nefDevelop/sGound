@@ -103,10 +103,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 
 		if isAnyHDD {
-			numWorkers = 4  // Optimizado para HDD: evita latencia de cabezal
-			slog.Info("HDD detected: using conservative worker count", "count", numWorkers)
+			numWorkers = 4  // Aumentado a 4 según solicitud del usuario
+			slog.Info("HDD detected: using standard worker count", "count", numWorkers)
 		} else {
-			numWorkers = 16 // Optimizado para SSD: aprovecha el paralelismo
+			numWorkers = 8 // Valor equilibrado para SSD
 			slog.Info("SSD/NVMe detected: using high-performance worker count", "count", numWorkers)
 		}
 	} else {

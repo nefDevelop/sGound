@@ -77,8 +77,7 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 		organizeStatuses: sync.Map{},
 	}
 
-	// Iniciar enriquecimiento de artistas al arrancar
-	s.EnrichArtists()
+	// s.EnrichArtists()
 
 	return s
 }
@@ -523,7 +522,18 @@ func (s *Server) extractID(r *http.Request, prefix string) string {
 func (s *Server) EnrichArtists() {
 	go func() {
 		slog.Info("🚀 Background artist enrichment started")
-		rows, err := s.MasterDB.Conn.Query("SELECT id, name FROM artists WHERE (image_url IS NULL OR image_url = '') OR (bio IS NULL OR bio = '') OR (tags IS NULL OR tags = '')")
+		// Solo enriquecer artistas que tengan al menos un track activo (aprobado)
+		query := `
+			SELECT DISTINCT a.id, a.name 
+			FROM artists a
+			JOIN albums al ON a.id = al.artist_id
+			JOIN tracks t ON al.id = t.album_id
+			WHERE t.status = 'active' AND (
+				(a.image_url IS NULL OR a.image_url = '') OR 
+				(a.bio IS NULL OR a.bio = '') OR 
+				(a.tags IS NULL OR a.tags = '')
+			)`
+		rows, err := s.MasterDB.Conn.Query(query)
 		if err != nil {
 			slog.Error("Failed to query artists for enrichment", "error", err)
 			return
