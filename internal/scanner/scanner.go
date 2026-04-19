@@ -104,11 +104,11 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 
 		if isAnyHDD {
-			numWorkers = 4  // Aumentado a 4 según solicitud del usuario
-			slog.Info("HDD detected: using standard worker count", "count", numWorkers)
+			numWorkers = 4  
+			slog.Info("HDD detected", "workers", numWorkers)
 		} else {
-			numWorkers = 8 // Valor equilibrado para SSD
-			slog.Info("SSD/NVMe detected: using high-performance worker count", "count", numWorkers)
+			numWorkers = 8 
+			slog.Info("SSD/NVMe detected", "workers", numWorkers)
 		}
 	} else {
 		// Heurística alternativa: si estamos en Android/Termux, casi siempre es Flash (rápido)
@@ -235,24 +235,34 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				res, err := func() (*trackResult, error) {
 					defer func() {
 						if r := recover(); r != nil {
-							slog.Error("Panic", "path", path, "recover", r)
+							slog.Error("🔥 Panic", "file", filepath.Base(path), "err", r)
 						}
 					}()
-					slog.Debug("➜", "file", filepath.Base(path))
-					return s.ParseFileWithCache(path, status)
+					slog.Debug("➜ Start", "file", filepath.Base(path))
+					r, e := s.ParseFileWithCache(path, status)
+					if e != nil {
+						slog.Error("❌ TagError", "file", filepath.Base(path), "err", e)
+					}
+					slog.Debug("➜ Done", "file", filepath.Base(path))
+					return r, e
 				}()
 
 				if err != nil {
-					slog.Error("Failed to process file", "path", path, "error", err)
 					continue
 				}
 				if res != nil { results <- res }
 				mu.Lock()
 				count++
 				currentCount := count
-				if currentCount % 100 == 0 {
+				if currentCount % 50 == 0 {
+					var m runtime.MemStats
+					runtime.ReadMemStats(&m)
 					runtime.GC()
-					slog.Debug("🧹 GC Cleaned")
+					slog.Info("🧠 RAM", 
+						"used_mb", m.Alloc/1024/1024, 
+						"total_mb", m.TotalAlloc/1024/1024,
+						"sys_mb", m.Sys/1024/1024,
+						"gc_count", m.NumGC)
 				}
 				mu.Unlock()
 				if s.OnProgress != nil { s.OnProgress(path, currentCount) }
