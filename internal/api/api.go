@@ -1331,8 +1331,10 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		rowCount++
 		if minimal {
 			var id, title, genre, artist, album, format string
-			var trackNum, duration, year, rating, instrumental int
+			var trackNum, year, rating, instrumental int
+			var duration float64
 			if err := rows.Scan(&id, &title, &trackNum, &duration, &genre, &artist, &album, &year, &format, &rating, &instrumental); err != nil {
+				slog.Error("Scan failed (minimal)", "error", err)
 				continue
 			}
 			tracks = append(tracks, map[string]interface{}{
@@ -1341,9 +1343,11 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 			})
 		} else {
 			var id, title, genre, artist, album, format, composer, comment, tStatus string
-			var trackNum, discNum, duration, year, bitRate, sampleRate, rating, instrumental, trackTotal, discTotal, playCount int
+			var trackNum, discNum, year, bitRate, sampleRate, rating, instrumental, trackTotal, discTotal, playCount int
+			var duration float64
 			var size int64
 			if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating, &instrumental, &trackTotal, &discTotal, &playCount); err != nil {
+				slog.Error("Scan failed (full)", "error", err)
 				continue
 			}
 			tracks = append(tracks, map[string]interface{}{
