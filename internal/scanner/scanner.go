@@ -224,6 +224,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					defer func() { if r := recover(); r != nil { slog.Error("🔥 Panic", "worker", wId, "file", filepath.Base(path), "err", r) } }()
 					tagSem <- struct{}{}
 					defer func() { <-tagSem }()
+					slog.Debug("📖 W"+strconv.Itoa(wId), "file", filepath.Base(path))
 					return s.ParseFileWithCache(path, "pending")
 				}()
 				if err != nil || res == nil { continue }
@@ -247,8 +248,8 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	discoveryCount := 0
 	
 	// 'raw' existentes
-	rowsRaw, _ := s.DB.Conn.Query("SELECT path FROM tracks WHERE status = 'raw'")
-	if rowsRaw != nil {
+	rowsRaw, err := s.DB.Conn.Query("SELECT path FROM tracks WHERE status = 'raw'")
+	if err == nil && rowsRaw != nil {
 		for rowsRaw.Next() {
 			var p string
 			if err := rowsRaw.Scan(&p); err == nil { jobs <- p }
@@ -266,11 +267,16 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		for _, info := range buffer {
 			tx.Exec(`INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 				info.id, "raw_album", "Unknown", filepath.Base(info.path), info.path, "raw", 0, 0)
-			jobs <- info.path
 		}
 		tx.Commit()
 		s.muDB.Unlock()
-		time.Sleep(200 * time.Millisecond) // SILENCIO DE RADIO
+
+		// ENVIAR A COLA FUERA DEL BLOQUEO DE DB (Evita Deadlock)
+		for _, info := range buffer {
+			jobs <- info.path
+		}
+
+		time.Sleep(100 * time.Millisecond) // RESPIRO
 		discoveryCount += len(buffer)
 		slog.Info("➜ Discovered", "total", discoveryCount)
 		buffer = nil
