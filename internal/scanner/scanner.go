@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -133,12 +134,32 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	var (
 		jobs       = make(chan string, numWorkers*2)
 		results    = make(chan *trackResult, numWorkers*2)
+		slowJobs   = make(chan *trackResult, numWorkers*2) // Carril lento para ffprobe
 		wg         sync.WaitGroup
+		slowWg     sync.WaitGroup
 		writerDone = make(chan bool)
 		mu         sync.Mutex
 		count      int
 	)
 
+	// --- CARRIL LENTO (Especialista ffprobe) ---
+	slowWg.Add(1)
+	go func() {
+		defer slowWg.Done()
+		for res := range slowJobs {
+			slog.Debug("🐢 SlowLane", "file", filepath.Base(res.path))
+			data, err := getAudioMetadataWithFFprobe(res.path)
+			if err == nil {
+				res.duration = data.duration
+				res.bitRate = data.bitRate
+				res.sampleRate = data.sampleRate
+				if data.replayGain != 0 { res.replayGain = data.replayGain }
+			}
+			results <- res
+		}
+	}()
+
+	// --- ESCRITOR A DB ---
 	go func() {
 		batchSize := 10
 		var batch []*trackResult
@@ -205,7 +226,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 	}()
 
-	// Workers Dinámicos
+	// --- CARRIL RÁPIDO (Workers Nativos) ---
 	slog.Info("Starting workers", "count", numWorkers)
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
@@ -224,9 +245,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					continue // Totalmente omitido, ya está en la DB
 				}
 
-				// DETERMINACIÓN DEL STATUS:
-				// Si el archivo ya está en la DB, respetamos su estado actual (active/rejected/etc)
-				// Si es un archivo totalmente nuevo, le ponemos 'pending' para que aparezca en el Inbox
 				status := "pending"
 				if exists {
 					status = info.status
@@ -238,31 +256,36 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 							slog.Error("🔥 Panic", "file", filepath.Base(path), "err", r)
 						}
 					}()
-					slog.Debug("➜ Start", "file", filepath.Base(path))
-					r, e := s.ParseFileWithCache(path, status)
-					if e != nil {
-						slog.Error("❌ TagError", "file", filepath.Base(path), "err", e)
-					}
-					slog.Debug("➜ Done", "file", filepath.Base(path))
-					return r, e
+					// USAMOS PARSE DIRECTO (CARRIL RÁPIDO)
+					return s.ParseFileWithCache(path, status)
 				}()
 
 				if err != nil {
 					continue
 				}
-				if res != nil { results <- res }
+
+				// Lógica de derivación:
+				if res != nil {
+					if res.duration == 0 {
+						// Al carril lento
+						slowJobs <- res
+					} else {
+						// Al carril de resultados directos
+						results <- res
+					}
+				}
+
 				mu.Lock()
 				count++
 				currentCount := count
-				if currentCount % 50 == 0 {
+				if currentCount % 10 == 0 {
 					var m runtime.MemStats
 					runtime.ReadMemStats(&m)
 					runtime.GC()
+					debug.FreeOSMemory()
 					slog.Info("🧠 RAM", 
 						"used_mb", m.Alloc/1024/1024, 
-						"total_mb", m.TotalAlloc/1024/1024,
-						"sys_mb", m.Sys/1024/1024,
-						"gc_count", m.NumGC)
+						"sys_mb", m.Sys/1024/1024)
 				}
 				mu.Unlock()
 				if s.OnProgress != nil { s.OnProgress(path, currentCount) }
@@ -288,7 +311,9 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 	close(jobs)
 	wg.Wait()
-	close(results)
+	close(slowJobs) // Avisamos al carril lento que ya no hay más nativos fallidos
+	slowWg.Wait()   // Esperamos a que el carril lento termine sus ffprobes
+	close(results)  // Avisamos al escritor de DB que todo ha terminado
 	<-writerDone
 
 	// Votación de artistas de álbum
@@ -554,6 +579,26 @@ func isAudioFile(filename string) error {
 	return nil
 }
 
+func (s *Scanner) ParseFileWithSemaphore(path string, status string, sem chan struct{}) (*trackResult, error) {
+	res, err := s.ParseFileWithCache(path, status)
+	if err != nil { return nil, err }
+	
+	// Si la duración falló (es 0), necesitamos ffprobe con semáforo
+	if res.duration == 0 {
+		sem <- struct{}{} // Adquirir
+		defer func() { <-sem }() // Liberar
+		
+		data, err := getAudioMetadataWithFFprobe(path)
+		if err == nil {
+			res.duration = data.duration
+			res.bitRate = data.bitRate
+			res.sampleRate = data.sampleRate
+			if data.replayGain != 0 { res.replayGain = data.replayGain }
+		}
+	}
+	return res, nil
+}
+
 func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -651,11 +696,23 @@ func getFLACDurationNative(path string) (float64, int, int, error) {
 	if err != nil { return 0, 0, 0, err }
 	defer f.Close()
 
-	// Leer encabezado "fLaC"
+	// FLAC puede tener cabecera ID3v2 al principio
+	header := make([]byte, 10)
+	if _, err := f.Read(header); err != nil { return 0, 0, 0, err }
+
+	offset := int64(0)
+	if string(header[:3]) == "ID3" {
+		// El tamaño de ID3v2 está en los bytes 6-9 (7 bits cada uno)
+		size := int64(header[6])<<21 | int64(header[7])<<14 | int64(header[8])<<7 | int64(header[9])
+		offset = 10 + size
+	}
+	f.Seek(offset, 0)
+
 	// Leer encabezado "fLaC"
 	head := make([]byte, 4)
 	if _, err := f.Read(head); err != nil || string(head) != "fLaC" {
 		return 0, 0, 0, fmt.Errorf("not a flac file")
+	}
 	}
 
 	// El bloque STREAMINFO es el primero y tiene un tamaño fijo de 34 bytes (más 4 de cabecera de bloque)
