@@ -67,6 +67,12 @@ func NewScanner(database *db.MasterDatabase) *Scanner {
 	}
 }
 
+// copyString fuerza una nueva asignación de memoria para romper vínculos con buffers grandes
+func copyString(s string) string {
+	if s == "" { return "" }
+	return string([]byte(s))
+}
+
 func (s *Scanner) ParseAndSaveFile(path string) error {
 	res, err := s.ParseFileWithCache(path, "active")
 	if err != nil { return err }
@@ -136,8 +142,8 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	debug.SetMemoryLimit(300 * 1024 * 1024) 
 
 	var (
-		jobs       = make(chan string, 1000)
-		results    = make(chan *trackResult, numWorkers*2)
+		jobs       = make(chan string, 2000)
+		results    = make(chan *trackResult, numWorkers*5)
 		slowJobs   = make(chan *trackResult, numWorkers*2)
 		wg         sync.WaitGroup
 		slowWg     sync.WaitGroup
@@ -147,7 +153,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	)
 	tagSem := make(chan struct{}, 1)
 
-	// A. ESCRITOR DE DB (Lotes de 50)
+	// A. ESCRITOR DE DB (Centraliza la limpieza de RAM)
 	go func() {
 		batchSize := 50 
 		var batch []*trackResult
@@ -174,9 +180,19 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			tx.Commit()
 			s.muDB.Unlock()
 			
+			// LIMPIEZA TOTAL TRAS GUARDAR
 			batch = nil
 			s.seenArtists = make(map[string]struct{})
 			s.seenAlbums = make(map[string]struct{})
+			s.muAlbums.Lock()
+			s.resolvedAlbums = make(map[string]string)
+			s.muAlbums.Unlock()
+
+			runtime.GC()
+			debug.FreeOSMemory()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			slog.Info("🧠 RAM Status", "used_mb", m.Alloc/1024/1024, "sys_mb", m.Sys/1024/1024)
 		}
 		for {
 			select {
@@ -239,7 +255,11 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					
 					r, e := s.ParseFileWithCache(path, "pending")
 					if e == nil && r != nil {
-						slog.Debug("📖 W"+strconv.Itoa(wId), "size_kb", r.MetadataSize/1024, "file", filepath.Base(path))
+						sizeStr := strconv.Itoa(r.MetadataSize) + "B"
+						if r.MetadataSize > 1024 {
+							sizeStr = fmt.Sprintf("%.1fKB", float64(r.MetadataSize)/1024.0)
+						}
+						slog.Debug("📖 W"+strconv.Itoa(wId), "mem", sizeStr, "file", filepath.Base(path))
 					}
 					return r, e
 				}()
@@ -248,11 +268,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				mu.Lock()
 				count++
 				currentCount := count
-				if currentCount % 10 == 0 {
-					runtime.GC(); debug.FreeOSMemory()
-					var m runtime.MemStats; runtime.ReadMemStats(&m)
-					slog.Info("🧠 RAM", "used_mb", m.Alloc/1024/1024, "sys_mb", m.Sys/1024/1024)
-				}
 				mu.Unlock()
 				if s.OnProgress != nil { s.OnProgress(path, currentCount) }
 			}
@@ -266,11 +281,11 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	// 'raw' existentes
 	rowsRaw, err := s.DB.Conn.Query("SELECT path FROM tracks WHERE status = 'raw'")
 	if err == nil && rowsRaw != nil {
+		defer rowsRaw.Close()
 		for rowsRaw.Next() {
 			var p string
 			if err := rowsRaw.Scan(&p); err == nil { jobs <- p }
 		}
-		rowsRaw.Close()
 	}
 
 	type rawInfo struct { id, path string }
@@ -301,7 +316,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		if !d.IsDir() && IsAudioFile(d.Name()) == nil {
 			_, exists := s.dbFileCache[path]
 			if !exists {
-				tId := GenerateID(path) // Rápido sin disk I/O
+				tId := GenerateID(path) 
 				buffer = append(buffer, rawInfo{tId, path})
 				if len(buffer) >= 200 { flushDisc() }
 			}
@@ -343,12 +358,18 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		genre = "Unknown"
 	} else {
-		artistName = metadata.Artist(); if artistName == "" { artistName = "Unknown Artist" }
-		albumName = metadata.Album(); if albumName == "" { albumName = "Unknown Album" }
-		title = metadata.Title(); if title == "" { title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)) }
+		// CLONAR CADENAS PARA LIBERAR RAM (Crucial para evitar OOM)
+		artistName = copyString(metadata.Artist())
+		if artistName == "" { artistName = "Unknown Artist" }
+		albumName = copyString(metadata.Album())
+		if albumName == "" { albumName = "Unknown Album" }
+		title = copyString(metadata.Title())
+		if title == "" { title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)) }
 		trackNum, _ = metadata.Track(); discNum, _ = metadata.Disc(); year = metadata.Year()
-		genre = metadata.Genre(); if genre == "" { genre = "Unknown" }
-		composer = metadata.Composer(); comment = metadata.Comment()
+		genre = copyString(metadata.Genre())
+		if genre == "" { genre = "Unknown" }
+		composer = copyString(metadata.Composer())
+		comment = copyString(metadata.Comment())
 	}
 	lowerExt := strings.ToLower(filepath.Ext(path))
 	if lowerExt == ".flac" { duration, bitRate, sampleRate, _ = getFLACDurationNative(path)
@@ -358,7 +379,10 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	if metadata != nil {
 		raw := metadata.Raw()
 		for _, tagKey := range []string{"albumartist", "ALBUMARTIST", "TPE2"} {
-			if val, ok := raw[tagKey].(string); ok && val != "" { albumArtistTag = val; break }
+			if val, ok := raw[tagKey].(string); ok && val != "" { 
+				albumArtistTag = copyString(val)
+				break 
+			}
 		}
 	}
 	var groupingKey string
@@ -372,17 +396,17 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	dbAlbumArtist := albumArtistTag; if dbAlbumArtist == "" { dbAlbumArtist = artistName }
 	artistId := GenerateID(dbAlbumArtist)
 
-	// ESTIMAR TAMAÑO DE RAM
-	mSize := len(artistName) + len(albumName) + len(title) + len(genre) + len(composer) + len(comment) + 500
+	// ESTIMAR TAMAÑO DE RAM REAL (Bytes)
+	mSize := len(artistName) + len(albumName) + len(title) + len(genre) + len(composer) + len(comment) + len(trackId) + len(path) + 1024
 
 	return &trackResult{
-		trackId: trackId, albumId: albumId, artistId: artistId,
+		trackId: copyString(trackId), albumId: albumId, artistId: artistId,
 		artistName: artistName, dbAlbumArtist: dbAlbumArtist, albumName: albumName,
-		title: title, path: path, genre: genre, format: strings.TrimPrefix(filepath.Ext(path), "."),
+		title: title, path: copyString(path), genre: genre, format: strings.TrimPrefix(filepath.Ext(path), "."),
 		composer: composer, comment: comment, hash: "", status: oldStatus,
 		trackNum: trackNum, discNum: discNum, year: year, duration: duration,
 		bitRate: bitRate, sampleRate: sampleRate, size: fileStat.Size(),
-		fileMtime: fileStat.ModTime().Unix(), instrumental: false,
+		fileMtime: fileStat.ModTime().Unix(),
 		MetadataSize: mSize,
 	}, nil
 }
@@ -494,6 +518,6 @@ type trackResult struct {
 	trackNum, discNum, year, bitRate, sampleRate int
 	duration, replayGain float64
 	size, fileMtime int64
-	instrumental bool
-	MetadataSize    int // Tamaño estimado en memoria (bytes)
+	MetadataSize    int
+	instrumental    bool
 }
