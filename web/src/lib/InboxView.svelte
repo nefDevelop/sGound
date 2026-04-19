@@ -99,6 +99,7 @@
   }
 
   async function analyzeInbox() {
+    if (isAnalyzing) return;
     isAnalyzing = true;
     try {
       const res = await fetch('/api/library/inbox/analyze');
@@ -131,7 +132,7 @@
       });
       if (res.ok) {
         suggestions = [];
-        await fetchInbox(); // Recargamos para ver los cambios "oficiales"
+        await fetchInbox(); // Aquí sí recargamos porque hemos cambiado datos en el servidor
       }
     } catch (e) {
       console.error(e);
@@ -149,9 +150,15 @@
         body: JSON.stringify({ suggestions: [sug] })
       });
       if (res.ok) {
-        // Quitamos la sugerencia de la lista local
+        // Quitamos la sugerencia de la lista local y actualizamos el track
         suggestions = suggestions.filter(s => s.trackId !== track.id);
-        await fetchInbox();
+        // En lugar de recargar todo, actualizamos solo este track localmente
+        tracks = tracks.map(t => {
+          if (t.id === track.id) {
+            return { ...t, artist: sug.artist, year: sug.year, suggestedArtist: null, suggestedYear: null };
+          }
+          return t;
+        });
       }
     } catch (e) {
       console.error(e);
