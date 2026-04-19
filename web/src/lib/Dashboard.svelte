@@ -316,7 +316,14 @@
   .tile-header h3 { margin: 0; font-size: 1.1rem; font-weight: 800; letter-spacing: -0.2px; }
 
   /* Welcome Tile */
-  .welcome-tile { grid-column: span 3; background: linear-gradient(135deg, var(--surface-container) 0%, var(--surface-container-high) 100%); overflow: hidden; }
+  .welcome-tile { 
+    grid-column: span 3; 
+    background: linear-gradient(135deg, var(--surface-container) 0%, var(--surface-container-high) 100%); 
+    overflow: hidden; 
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
   .welcome-tile::after { content: ''; position: absolute; top: -50%; right: -20%; width: 280px; height: 280px; background: var(--primary-10); filter: blur(60px); border-radius: 50%; z-index: 0; }
   .welcome-tile h1 { 
     font-size: clamp(2rem, 5vw, 3rem); 
@@ -490,11 +497,12 @@
     position: absolute;
     bottom: 1.5rem;
     right: 1.8rem;
-    background: linear-gradient(
+    background: var(--surface-container-highest);
+    background-image: linear-gradient(
       110deg, 
-      var(--surface-container-highest) 30%, 
-      rgba(var(--primary-rgb), 0.2) 50%, 
-      var(--surface-container-highest) 70%
+      var(--surface-container-highest) 35%, 
+      rgba(var(--primary-rgb), 0.4) 50%, 
+      var(--surface-container-highest) 65%
     );
     background-size: 200% 100%;
     border: 1px solid var(--primary-20);
