@@ -1290,7 +1290,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 
 	// Dynamic selection for memory optimization
 	selectFields := `t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), 
-		       COALESCE(t.artist, a.name) as artist, al.title as album, al.year as year,
+		       COALESCE(t.artist, a.name, 'Artist Desconocido') as artist, COALESCE(al.title, 'Álbum Desconocido') as album, COALESCE(al.year, 0) as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
 		       t.composer, t.comment, t.status, 
 		       COALESCE(ut.rating, 0) as rating, 
@@ -1299,15 +1299,15 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 
 	if minimal {
 		selectFields = `t.id, t.title, t.track_num, t.duration, COALESCE(t.genre, ''), 
-		       COALESCE(t.artist, a.name) as artist, al.title as album, al.year as year,
+		       COALESCE(t.artist, a.name, 'Artist Desconocido') as artist, COALESCE(al.title, 'Álbum Desconocido') as album, COALESCE(al.year, 0) as year,
 		       t.format, COALESCE(ut.rating, 0) as rating, t.instrumental`
 	}
 
 	query := fmt.Sprintf(`
 		SELECT %s
 		FROM tracks t
-		JOIN albums al ON t.album_id = al.id
-		JOIN artists a ON al.artist_id = a.id
+		LEFT JOIN albums al ON t.album_id = al.id
+		LEFT JOIN artists a ON al.artist_id = a.id
 		LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
 		%s
 		ORDER BY a.name, al.year, t.track_num
