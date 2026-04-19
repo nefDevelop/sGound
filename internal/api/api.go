@@ -573,6 +573,15 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Evitar escaneos duplicados
+	if val, ok := s.scanStatuses.Load("global"); ok {
+		if val.(*ScanStatus).Scanning {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"status":"already scanning"}`))
+			return
+		}
+	}
+
 	// Status global de escaneo
 	status := &ScanStatus{Scanning: true, Processed: 0}
 	s.scanStatuses.Store("global", status)

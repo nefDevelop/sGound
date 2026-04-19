@@ -214,7 +214,16 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					status = info.status
 				}
 
-				res, err := s.ParseFileWithCache(path, status)
+				res, err := func() (*trackResult, error) {
+					defer func() {
+						if r := recover(); r != nil {
+							slog.Error("Panic recovered while processing file", "path", path, "recover", r)
+						}
+					}()
+					slog.Debug("Processing file", "path", path)
+					return s.ParseFileWithCache(path, status)
+				}()
+
 				if err != nil {
 					slog.Error("Failed to process file", "path", path, "error", err)
 					continue

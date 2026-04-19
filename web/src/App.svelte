@@ -670,13 +670,13 @@
 {:else if !isLoggedIn}
   <Login 
     on:setup={(e) => { setupUsername = e.detail.username; setupRequired = true; }}
-    on:login={() => { 
-      isLoggedIn = true; 
-      triggerScan();
-      fetchPlaylists(); 
-      loadTheme(); 
-    }} />
-{:else}
+    on:login={() => {
+      isLoggedIn = true;
+      checkScanStatus();
+      fetchTracks();
+      fetchPlaylists();
+      loadTheme();
+    }} />{:else}
 <main class="app-layout" class:is-cinema={currentView === 'fullplayer' && playerSubView === 'cinema'}>
   <aside class="sidebar">
     <div class="brand">
