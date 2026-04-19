@@ -139,12 +139,14 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	)
 
 	go func() {
-		batchSize := 25
+		batchSize := 10
 		var batch []*trackResult
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
 		
 		flush := func() {
 			if len(batch) == 0 { return }
-			slog.Debug("Flushing batch to DB", "size", len(batch))
+			slog.Debug("💾 Sync", "n", len(batch))
 			tx, err := s.DB.Conn.Begin()
 			if err != nil {
 				slog.Error("Failed to start transaction", "error", err)
@@ -184,12 +186,22 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			batch = nil
 		}
 
-		for r := range results {
-			batch = append(batch, r)
-			if len(batch) >= batchSize { flush() }
+		for {
+			select {
+			case r, ok := <-results:
+				if !ok {
+					flush()
+					writerDone <- true
+					return
+				}
+				batch = append(batch, r)
+				if len(batch) >= batchSize {
+					flush()
+				}
+			case <-ticker.C:
+				flush()
+			}
 		}
-		flush()
-		writerDone <- true
 	}()
 
 	// Workers Dinámicos
@@ -222,10 +234,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				res, err := func() (*trackResult, error) {
 					defer func() {
 						if r := recover(); r != nil {
-							slog.Error("Panic recovered while processing file", "path", path, "recover", r)
+							slog.Error("Panic", "path", path, "recover", r)
 						}
 					}()
-					slog.Debug("Processing file", "path", path)
+					slog.Debug("➜", "file", filepath.Base(path))
 					return s.ParseFileWithCache(path, status)
 				}()
 

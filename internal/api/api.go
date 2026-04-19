@@ -558,7 +558,7 @@ func (s *Server) EnrichArtists() {
 				similarStr := strings.Join(ext.Similar, ",")
 				_, _ = s.MasterDB.Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?",
 					ext.Image, ext.Biography, tagsStr, similarStr, a.ID)
-				slog.Debug("Artist enriched", "name", a.Name)
+				slog.Debug("✨", "artist", a.Name)
 			}
 			// Wait to avoid Wikipedia/Last.fm rate limits
 			time.Sleep(1500 * time.Millisecond)
@@ -2207,7 +2207,7 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("Failed to calculate inboxCount in handleScanStatus", "error", err)
 	}
-	slog.Debug("handleScanStatus count", "inboxCount", inboxCount, "filter", whereInbox)
+	slog.Debug("Inbox", "count", inboxCount)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

@@ -33,7 +33,7 @@ func (e *ExternalMetadata) GetArtistInfo(artistName string) (*ArtistInfo, error)
 	artistName = strings.TrimSpace(artistName)
 	artistName = strings.TrimSuffix(artistName, ".")
 
-	slog.Debug("🔍 Buscando info enriquecida", "nombre", artistName, "lang", e.Config.Language)
+	slog.Debug("🔍", "search", artistName)
 
 	// 1. Wikipedia para Bio e Imagen (Prioridad absoluta)
 	wikiTitle := strings.ReplaceAll(artistName, " ", "_")
