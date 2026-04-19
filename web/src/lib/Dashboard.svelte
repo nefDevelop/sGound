@@ -492,9 +492,9 @@
     right: 1.8rem;
     background: linear-gradient(
       110deg, 
-      var(--surface-container-highest) 40%, 
-      var(--primary-05) 50%, 
-      var(--surface-container-highest) 60%
+      var(--surface-container-highest) 30%, 
+      rgba(var(--primary-rgb), 0.2) 50%, 
+      var(--surface-container-highest) 70%
     );
     background-size: 200% 100%;
     border: 1px solid var(--primary-20);
@@ -504,14 +504,14 @@
     align-items: center;
     gap: 1rem;
     z-index: 5;
-    animation: slideIn 0.3s cubic-bezier(0.2, 0, 0, 1), shimmer 2.5s linear infinite;
+    animation: slideIn 0.3s cubic-bezier(0.2, 0, 0, 1), shimmer 2s infinite linear;
     box-shadow: 0 8px 16px rgba(0,0,0,0.2);
     overflow: hidden;
   }
 
   @keyframes shimmer {
-    from { background-position: 200% 0; }
-    to { background-position: -200% 0; }
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 
   @keyframes slideIn {
