@@ -1310,7 +1310,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN artists a ON al.artist_id = a.id
 		LEFT JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?
 		%s
-		ORDER BY a.name, al.year, t.track_num
+		ORDER BY t.path ASC, t.track_num ASC, t.id ASC
 		LIMIT ? OFFSET ?`, selectFields, whereClause)
 
 	// Prepend username to args for the LEFT JOIN and append limit/offset

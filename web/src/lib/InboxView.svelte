@@ -9,20 +9,54 @@
   
   let tracks = $state([]);
   let loading = $state(true);
+  let tracksOffset = $state(0);
+  let hasMore = $state(true);
+  const limit = 40; // El usuario sugirió 20-40, usamos 40 para balancear.
   let selectedTracks = $state([]);
   let suggestions = $state([]);
   let isAnalyzing = $state(false);
 
-  onMount(fetchInbox);
+  onMount(() => {
+    fetchInbox();
+    
+    // Escuchar scroll del contenedor global (.scroll-view)
+    const scrollView = document.querySelector('.scroll-view');
+    if (scrollView) {
+      const handleScroll = () => {
+        const { scrollTop, scrollHeight, clientHeight } = scrollView;
+        if (scrollHeight - scrollTop <= clientHeight + 300 && !loading && hasMore) {
+          fetchInbox(true, true);
+        }
+      };
+      scrollView.addEventListener('scroll', handleScroll);
+      return () => scrollView.removeEventListener('scroll', handleScroll);
+    }
+  });
 
-  export async function fetchInbox(silent = false) {
+  export async function fetchInbox(append = false, silent = false) {
     if (!silent) loading = true;
+    if (!append) {
+      tracksOffset = 0;
+      hasMore = true;
+    }
+
     try {
-      const res = await fetch('/api/library/inbox');
+      const res = await fetch(`/api/library/inbox?limit=${limit}&offset=${tracksOffset}`);
       if (res.ok) {
         const data = (await res.json()) || [];
-        tracks = data;
-        if (tracks.length > 0) analyzeInbox();
+        if (append) {
+          tracks = [...tracks, ...data];
+        } else {
+          tracks = data;
+        }
+
+        if (data.length < limit) {
+          hasMore = false;
+        }
+        tracksOffset += data.length;
+
+        // Solo analizar si es la primera carga o hay nuevos datos
+        if (data.length > 0) analyzeInbox();
       }
     } catch (e) {
       console.error(e);
@@ -130,12 +164,19 @@
     <div class="title-row">
       <h1>Inbox</h1>
     </div>
-    {#if tracks.length > 0}
-      <div class="chip primary" title="Total de pistas en el Inbox">
-        <Icon name="inbox" size={14} />
-        {tracks.length}
-      </div>
-    {/if}
+    <div class="header-info">
+      {#if $inboxCount > 0}
+        <div class="chip primary" title="Total de pistas en el Inbox">
+          <Icon name="inbox" size={14} />
+          {$inboxCount} pistas
+        </div>
+      {/if}
+      {#if hasMore}
+        <div class="chip ghost" title="Mostrando parcial">
+          Cargando de {limit} en {limit}...
+        </div>
+      {/if}
+    </div>
     
       <div class="actions">
         {#if suggestions.length > 0}
@@ -187,14 +228,17 @@
         isInbox={true}
         showHeader={false}
       />
+      {#if loading && tracks.length > 0}
+        <div class="loader-more">
+           <Icon name="loader" size={24} class="spin" />
+           <span>Cargando más pistas...</span>
+        </div>
+      {/if}
     {/if}
   </div>
 </div>
 
 <style>
-  .inbox-view {
-    /* Eliminamos height 100% y display flex para que fluya en el scroll-view de App */
-  }
 
   .section-header {
     display: flex;
@@ -205,7 +249,6 @@
   }
 
   h1 { font-size: 2.5rem; font-weight: 950; margin: 0; letter-spacing: -1.5px; color: var(--text-main); }
-  .desc { color: var(--text-muted); margin-top: 0.5rem; max-width: 600px; }
 
   .actions { display: flex; gap: 1rem; }
 
@@ -245,4 +288,26 @@
     gap: 1rem;
     text-align: center;
   }
+
+  .loader-more {
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    color: var(--primary);
+    font-weight: 700;
+  }
+
+  .spin {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .header-info { display: flex; gap: 1rem; align-items: center; }
+  .chip.ghost { background: var(--surface-container-highest); color: var(--text-muted); font-size: 0.75rem; border: 1px solid var(--border-color); }
 </style>

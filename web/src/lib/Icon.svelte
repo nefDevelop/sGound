@@ -3,6 +3,8 @@
   export let size = 18;
   export let color = "currentColor";
   export let strokeWidth = 2;
+  let className = "";
+  export { className as class };
 
   const icons = {
     play: `<polygon points="5 3 19 12 5 21 5 3"></polygon>`,
@@ -80,7 +82,7 @@
   stroke-width={strokeWidth} 
   stroke-linecap="round" 
   stroke-linejoin="round"
-  class="lucide-icon"
+  class="lucide-icon {className}"
 >
   {@html icons[name] || ""}
 </svg>
