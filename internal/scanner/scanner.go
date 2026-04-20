@@ -156,6 +156,9 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		count      int
 	)
 
+	// Freno inteligente para picos de lectura de tags
+	tagSem := make(chan struct{}, 2)
+
 	// A. ESCRITOR DE DB
 	go func() {
 		batchSize := 50 
@@ -192,7 +195,14 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			slog.Info("🧠 RAM Status", "used_mb", m.Alloc/1024/1024, "sys_mb", m.Sys/1024/1024)
+			sysMB := m.Sys / 1024 / 1024
+			slog.Info("🧠 RAM Status", "used_mb", m.Alloc/1024/1024, "sys_mb", sysMB)
+
+			// 🚨 FRENO INTELIGENTE PARA DOCKER 🚨
+			if sysMB > 250 {
+				slog.Warn("🧹 Emergency Flush: Devolviendo RAM al OS...")
+				debug.FreeOSMemory()
+			}
 		}
 		for {
 			select {
@@ -251,7 +261,11 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 					defer func() { if r := recover(); r != nil { slog.Error("🔥 Panic", "worker", wId, "file", filepath.Base(path), "err", r) } }()
 					
+					// Freno para extracción de tags
+					tagSem <- struct{}{}
 					r, e := s.ParseFileWithCache(path, "pending")
+					<-tagSem
+
 					if e == nil && r != nil {
 						sizeStr := strconv.Itoa(r.MetadataSize) + "B"
 						if r.MetadataSize > 1024 {
