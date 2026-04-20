@@ -200,8 +200,18 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					slog.Error("🔥 Panic", "worker", wId, "file", filepath.Base(p), "err", r)
 				}
 			}()
-			return s.ParseFileWithCache(p, "pending")
+			
+			r, e := s.ParseFileWithCache(p, "pending")
+			if e == nil && r != nil {
+				sizeStr := strconv.Itoa(r.MetadataSize) + "B"
+				if r.MetadataSize > 1024 {
+					sizeStr = fmt.Sprintf("%.1fKB", float64(r.MetadataSize)/1024.0)
+				}
+				slog.Info("📖 W"+strconv.Itoa(wId), "mem", sizeStr, "file", filepath.Base(p))
+			}
+			return r, e
 		}()
+		
 		if err != nil || res == nil {
 			return
 		}
@@ -314,6 +324,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				select {
 				case path, ok = <-s.PriorityJobs:
 					if ok {
+						slog.Info("👑 W"+strconv.Itoa(wId)+": PRIORITY", "file", filepath.Base(path))
 						processTrack(path, wId)
 						continue
 					}
@@ -323,14 +334,12 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				// 2. Intento FLAC (Aduana) - No bloqueante
 				select {
 				case flacSem <- struct{}{}:
-					// Hemos conseguido paso a la vía pesada
 					select {
 					case path, ok = <-jobsFLAC:
 						if ok {
 							processTrack(path, wId)
 						}
 					default:
-						// No hay FLACs, ok se mantiene true para probar MP3
 					}
 					<-flacSem
 					if path != "" {
@@ -340,7 +349,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 						goto checkMP3
 					}
 				default:
-					// Aduana ocupada, saltar a MP3
 				}
 
 			checkMP3:
@@ -353,11 +361,9 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				default:
 				}
 
-				// Condición de salida: Si el explorador terminó y las colas están vacías
 				if !scanActive && len(jobsMP3) == 0 && len(jobsFLAC) == 0 && len(s.PriorityJobs) == 0 {
 					return
 				}
-
 				time.Sleep(10 * time.Millisecond)
 			}
 		}(id)
@@ -399,6 +405,8 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 		tx.Commit()
 		s.muDB.Unlock()
+		
+		slog.Debug("📂 W-Explorer: Syncing raw", "n", len(buffer))
 		for _, info := range buffer {
 			queueJob(info.path)
 		}
@@ -425,7 +433,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	})
 	flushDisc()
 
-	scanActive = false // Indicar a los workers que el explorador ha terminado
+	scanActive = false
 	wg.Wait()
 	close(slowJobs)
 	slowWg.Wait()
@@ -447,7 +455,6 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 		return nil, err
 	}
 
-	// Abrir metadatos con el nuevo motor multiformato
 	meta, err := tags.Open(path)
 
 	var artistName, albumName, title, genre, composer, comment, albumArtistTag string
@@ -636,7 +643,6 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,bit_rate:stream=sample_rate:format_tags=REPLAYGAIN_TRACK_GAIN,replaygain_track_gain", "-of", "json", path)
-
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return audioMetadata{}, err
@@ -644,14 +650,7 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 	if err := cmd.Start(); err != nil {
 		return audioMetadata{}, err
 	}
-
-	// ELIMINADOR DE ZOMBIES: Garantiza que el subproceso se limpia al salir
-	defer func() {
-		// Si quedó algo en el buffer, lo leemos para no bloquear el Wait()
-		_, _ = io.Copy(io.Discard, stdout)
-		cmd.Wait()
-	}()
-
+	defer func() { _, _ = io.Copy(io.Discard, stdout); cmd.Wait() }()
 	var output struct {
 		Format struct {
 			Duration string            `json:"duration"`
@@ -662,11 +661,9 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 			SampleRate string `json:"sample_rate"`
 		} `json:"streams"`
 	}
-
 	if err := json.NewDecoder(stdout).Decode(&output); err != nil {
 		return audioMetadata{}, err
 	}
-
 	data := audioMetadata{sampleRate: 44100}
 	if output.Format.Duration != "" {
 		data.duration, _ = strconv.ParseFloat(output.Format.Duration, 64)
@@ -677,8 +674,6 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 	if len(output.Streams) > 0 && output.Streams[0].SampleRate != "" {
 		data.sampleRate, _ = strconv.Atoi(output.Streams[0].SampleRate)
 	}
-
-	// ReplayGain
 	for k, v := range output.Format.Tags {
 		lk := strings.ToLower(k)
 		if lk == "replaygain_track_gain" || lk == "REPLAYGAIN_TRACK_GAIN" {
@@ -686,7 +681,6 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 			data.replayGain, _ = strconv.ParseFloat(val, 64)
 		}
 	}
-
 	return data, nil
 }
 
