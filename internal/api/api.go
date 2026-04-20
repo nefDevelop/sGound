@@ -1323,8 +1323,18 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if status != "all" {
-		whereClause += " AND t.status = ?"
-		args = append(args, status)
+		statusList := strings.Split(status, ",")
+		if len(statusList) > 1 {
+			placeholders := make([]string, len(statusList))
+			for i := range statusList {
+				placeholders[i] = "?"
+				args = append(args, statusList[i])
+			}
+			whereClause += " AND t.status IN (" + strings.Join(placeholders, ",") + ")"
+		} else {
+			whereClause += " AND t.status = ?"
+			args = append(args, status)
+		}
 	}
 
 	genre := r.URL.Query().Get("genre")
@@ -1453,9 +1463,9 @@ func (s *Server) handlePrioritizeTrack(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetInbox(w http.ResponseWriter, r *http.Request) {
-	// Forzar filtro por status=pending
+	// Forzar filtro por status=pending y raw para el Inbox
 	q := r.URL.Query()
-	q.Set("status", "pending")
+	q.Set("status", "pending,raw")
 	r.URL.RawQuery = q.Encode()
 	s.handleGetTracks(w, r)
 }

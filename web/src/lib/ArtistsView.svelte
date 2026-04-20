@@ -1,5 +1,5 @@
 <script>
-  import { inboxCount } from './stores.js';
+  import { inboxCount, rawCount } from './stores.js';
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade } from 'svelte/transition';
@@ -74,10 +74,10 @@
     <div class="status-box">Sourcing artist profiles...</div>
   {:else if filteredArtists.length === 0}
     <div class="empty-state">
-      {#if $inboxCount > 0 && !searchTerm}
+      {#if ($inboxCount > 0 || $rawCount > 0) && !searchTerm}
         <div class="inbox-alert">
           <Icon name="inbox" size={48} />
-          <p>Aún no tienes artistas en tu biblioteca, pero tienes <b>{$inboxCount}</b> canciones en el Inbox esperando.</p>
+          <p>Aún no tienes artistas en tu biblioteca, pero tienes <b>{$inboxCount + $rawCount}</b> canciones en el Inbox esperando.</p>
           <button class="primary-btn" onclick={onnavinbox}>Ir al Inbox</button>
         </div>
       {:else}

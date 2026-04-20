@@ -1,5 +1,5 @@
 <script>
-  import { inboxCount } from './stores.js';
+  import { inboxCount, rawCount } from './stores.js';
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
@@ -93,10 +93,10 @@
     </div>
   {:else if albums.length === 0}
     <div class="empty-state">
-      {#if $inboxCount > 0 && !artistId}
+      {#if ($inboxCount > 0 || $rawCount > 0) && !artistId}
         <div class="inbox-alert">
           <Icon name="inbox" size={48} />
-          <p>Tu biblioteca de álbumes está vacía, pero tienes <b>{$inboxCount}</b> canciones en el Inbox pendientes de aprobar.</p>
+          <p>Tu biblioteca de álbumes está vacía, pero tienes <b>{$inboxCount + $rawCount}</b> canciones en el Inbox pendientes de aprobar.</p>
           <button class="primary-btn" onclick={onnavinbox}>Ir al Inbox</button>
         </div>
       {:else}

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { inboxCount } from './stores.js';
+  import { inboxCount, rawCount } from './stores.js';
   
   let { 
     onplay, 
@@ -93,10 +93,10 @@
     <section class="bento-item welcome-tile">
       <div class="welcome-header">
         <h1>Welcome back, <span>User</span></h1>
-        {#if $inboxCount > 0}
+        {#if $inboxCount > 0 || $rawCount > 0}
           <button class="inbox-notification-badge" onclick={onselectInbox} title="View pending tracks">
             <Icon name="inbox" size={18} />
-            <span class="badge-number">{$inboxCount}</span>
+            <span class="badge-number">{$inboxCount + $rawCount}</span>
           </button>
         {/if}
       </div>
