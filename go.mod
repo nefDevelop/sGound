@@ -3,6 +3,7 @@ module sgound
 go 1.25.0
 
 require (
+	github.com/abema/go-mp4 v1.5.0
 	github.com/bogem/id3v2/v2 v2.1.4
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/disintegration/imaging v1.6.2
