@@ -45,7 +45,16 @@ func (f *flacMetadata) parseVorbis(data []byte) {
 	
 	for i := uint32(0); i < listLen; i++ {
 		var commentLen uint32
-		binary.Read(reader, binary.LittleEndian, &commentLen)
+		if err := binary.Read(reader, binary.LittleEndian, &commentLen); err != nil {
+			break
+		}
+		
+		// 🛡️ ESCUDO ANTI-SPIKES: Valida que la longitud tiene sentido.
+		// Si el tag dice que pesa más que los bytes que nos quedan por leer o es 0, está corrupto.
+		if int(commentLen) > reader.Len() || commentLen == 0 {
+			break // Evitamos asignar gigabytes de memoria por error
+		}
+		
 		comment := make([]byte, commentLen)
 		reader.Read(comment)
 		

@@ -115,9 +115,24 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 func (s *Scanner) ScanDirectory(rootPath string) error {
 	// ======= SALVAVIDAS PARA DOCKER =======
-	// Obligamos a Go a ser estricto con la RAM y devolverla al SO/Docker agresivamente.
 	debug.SetMemoryLimit(150 * 1024 * 1024)
 	// ======================================
+
+	// ======= PERRO GUARDIÁN DE RAM (Watchdog) =======
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			realOSMB := (m.Sys - m.HeapReleased) / 1024 / 1024
+			if realOSMB > 250 {
+				slog.Warn("🚨 WATCHDOG: RAM crítica detectada, purgando...", "real_mb", realOSMB)
+				debug.FreeOSMemory()
+			}
+		}
+	}()
+	// ===========================================
 
 	slog.Info("Starting Pulse-Batch library scan", "path", rootPath)
 	start := time.Now()
@@ -129,21 +144,17 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	s.seenAlbums = make(map[string]struct{})
 	s.muAlbums.Unlock()
 
-	// 1. Pre-cargar metadatos de la DB
-	slog.Info("Indexing existing library metadata...")
+	// Indexar metadatos existentes
 	rows, err := s.DB.Conn.Query("SELECT id, path, file_mtime, size, status FROM tracks")
 	if err == nil {
 		defer rows.Close()
-		cacheCount := 0
 		for rows.Next() {
 			var id, p, status string
 			var m, sz int64
 			if err := rows.Scan(&id, &p, &m, &sz, &status); err == nil {
 				s.dbFileCache[p] = dbFileInfo{mtime: m, size: sz, id: id, status: status}
-				cacheCount++
 			}
 		}
-		slog.Info("Metadata cache loaded", "count", cacheCount)
 	}
 
 	numWorkers := 4
@@ -154,7 +165,8 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}
 
 	var (
-		jobs       = make(chan string, 500)
+		jobsMP3    = make(chan string, 500) // Vía rápida (MP3, OGG, M4A, etc)
+		jobsFLAC   = make(chan string, 100) // Vía pesada (FLAC)
 		results    = make(chan *trackResult, numWorkers*5)
 		slowJobs   = make(chan *trackResult, numWorkers*2)
 		wg         sync.WaitGroup
@@ -162,10 +174,50 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		writerDone = make(chan bool)
 		mu         sync.Mutex
 		count      int
+		scanActive = true
 	)
 
-	// Freno inteligente para picos de lectura de tags
-	tagSem := make(chan struct{}, 2)
+	// Aduana FLAC: Solo un worker a la vez puede procesar archivos pesados
+	flacSem := make(chan struct{}, 1)
+
+	// Clasificar y enviar a la cola correcta
+	queueJob := func(path string) {
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".flac" || ext == ".wav" {
+			jobsFLAC <- path
+		} else {
+			jobsMP3 <- path
+		}
+	}
+
+	// Helper para procesar una pista y despachar resultados
+	processTrack := func(p string, wId int) {
+		res, err := func() (*trackResult, error) {
+			s.ramTickets <- struct{}{}
+			defer func() { <-s.ramTickets }()
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("🔥 Panic", "worker", wId, "file", filepath.Base(p), "err", r)
+				}
+			}()
+			return s.ParseFileWithCache(p, "pending")
+		}()
+		if err != nil || res == nil {
+			return
+		}
+		if res.duration == 0 {
+			slowJobs <- res
+		} else {
+			results <- res
+		}
+		mu.Lock()
+		count++
+		currentCount := count
+		mu.Unlock()
+		if s.OnProgress != nil {
+			s.OnProgress(p, currentCount)
+		}
+	}
 
 	// A. ESCRITOR DE DB
 	go func() {
@@ -178,12 +230,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				return
 			}
 			s.muDB.Lock()
-			slog.Debug("💾 W-Writer: Syncing", "n", len(batch))
-			tx, err := s.DB.Conn.Begin()
-			if err != nil {
-				s.muDB.Unlock()
-				return
-			}
+			tx, _ := s.DB.Conn.Begin()
 			for _, r := range batch {
 				if _, seen := s.seenArtists[r.artistId]; !seen {
 					tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", r.artistId, r.dbAlbumArtist)
@@ -198,32 +245,12 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			}
 			tx.Commit()
 			s.muDB.Unlock()
-
 			batch = nil
 			s.seenArtists = make(map[string]struct{})
 			s.seenAlbums = make(map[string]struct{})
 			s.muAlbums.Lock()
 			s.resolvedAlbums = make(map[string]string)
 			s.muAlbums.Unlock()
-
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			sysMB := m.Sys / 1024 / 1024
-			releasedMB := m.HeapReleased / 1024 / 1024
-			realOSMB := sysMB - releasedMB
-
-			slog.Info("🧠 RAM Status", 
-				"used_mb", m.Alloc/1024/1024, 
-				"sys_mb", sysMB, 
-				"real_os_mb", realOSMB,
-			)
-
-			// 🚨 FRENO INTELIGENTE PARA DOCKER 🚨
-			// Si la RAM real retenida supera los 250MB, forzamos la devolución al OS
-			if realOSMB > 250 {
-				slog.Warn("🧹 Emergency Flush: Devolviendo RAM al OS...", "real_os_mb", realOSMB)
-				debug.FreeOSMemory()
-			}
 		}
 		for {
 			select {
@@ -248,7 +275,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	go func() {
 		defer slowWg.Done()
 		for res := range slowJobs {
-			slog.Debug("🐢 W-Slow: ffprobe", "file", filepath.Base(res.path))
 			if data, err := getAudioMetadataWithFFprobe(res.path); err == nil {
 				res.duration = data.duration
 				res.bitRate = data.bitRate
@@ -263,7 +289,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}()
 
 	// C. ANALISTAS (BIBLIOTECARIOS)
-	slog.Info("Starting analysts", "count", numWorkers)
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		id := i + 1
@@ -272,63 +297,56 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			for {
 				var path string
 				var ok bool
+
+				// 1. Siempre mirar Prioridad primero
 				select {
 				case path, ok = <-s.PriorityJobs:
 					if ok {
-						slog.Debug("👑 W"+strconv.Itoa(wId)+": PRIORITY", "file", filepath.Base(path))
+						processTrack(path, wId)
+						continue
 					}
 				default:
-					select {
-					case path, ok = <-s.PriorityJobs:
-						if ok {
-							slog.Debug("👑 W"+strconv.Itoa(wId)+": PRIORITY", "file", filepath.Base(path))
-						}
-					case path, ok = <-jobs:
-					}
 				}
-				if !ok {
+
+				// 2. Intento FLAC (Aduana) - No bloqueante
+				select {
+				case flacSem <- struct{}{}:
+					// Hemos conseguido paso a la vía pesada
+					select {
+					case path, ok = <-jobsFLAC:
+						if ok {
+							processTrack(path, wId)
+						}
+					default:
+						// No hay FLACs, ok se mantiene true para probar MP3
+					}
+					<-flacSem
+					if path != "" {
+						continue
+					}
+					if !ok {
+						goto checkMP3
+					}
+				default:
+					// Aduana ocupada, saltar a MP3
+				}
+
+			checkMP3:
+				select {
+				case path, ok = <-jobsMP3:
+					if ok {
+						processTrack(path, wId)
+						continue
+					}
+				default:
+				}
+
+				// Condición de salida: Si el explorador terminó y las colas están vacías
+				if !scanActive && len(jobsMP3) == 0 && len(jobsFLAC) == 0 && len(s.PriorityJobs) == 0 {
 					return
 				}
-				res, err := func() (*trackResult, error) {
-					// PEDIR TICKET DE RAM
-					s.ramTickets <- struct{}{}
-					defer func() { <-s.ramTickets }()
 
-					defer func() {
-						if r := recover(); r != nil {
-							slog.Error("🔥 Panic", "worker", wId, "file", filepath.Base(path), "err", r)
-						}
-					}()
-
-					// Freno para extracción de tags
-					tagSem <- struct{}{}
-					r, e := s.ParseFileWithCache(path, "pending")
-					<-tagSem
-
-					if e == nil && r != nil {
-						sizeStr := strconv.Itoa(r.MetadataSize) + "B"
-						if r.MetadataSize > 1024 {
-							sizeStr = fmt.Sprintf("%.1fKB", float64(r.MetadataSize)/1024.0)
-						}
-						slog.Debug("📖 W"+strconv.Itoa(wId), "mem", sizeStr, "file", filepath.Base(path))
-					}
-					return r, e
-				}()
-				if err != nil || res == nil {
-					continue
-				}
-				if res.duration == 0 {
-					slowJobs <- res
-				} else {
-					results <- res
-				}
-				mu.Lock()
-				count++
-				currentCount := count
-				mu.Unlock()
-				if s.OnProgress != nil {
-					s.OnProgress(path, currentCount)
-				}
+				time.Sleep(10 * time.Millisecond)
 			}
 		}(id)
 	}
@@ -348,11 +366,9 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			}
 		}
 		rowsRaw.Close()
-
-		// Inyectamos al canal en una gorutina para no frenar el resto del Explorador ni bloquear SQLite
 		go func() {
 			for _, p := range rawPaths {
-				jobs <- p
+				queueJob(p)
 			}
 		}()
 	}
@@ -364,7 +380,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			return
 		}
 		s.muDB.Lock()
-		slog.Debug("📂 W-Explorer: Syncing", "n", len(buffer))
 		tx, _ := s.DB.Conn.Begin()
 		for _, info := range buffer {
 			tx.Exec(`INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -372,13 +387,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 		tx.Commit()
 		s.muDB.Unlock()
-
 		for _, info := range buffer {
-			jobs <- info.path
+			queueJob(info.path)
 		}
-
 		discoveryCount += len(buffer)
-		slog.Info("➜ Discovered", "total", discoveryCount)
 		if s.OnDiscovery != nil {
 			s.OnDiscovery(discoveryCount)
 		}
@@ -390,10 +402,8 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			return nil
 		}
 		if !d.IsDir() && IsAudioFile(d.Name()) == nil {
-			_, exists := s.dbFileCache[path]
-			if !exists {
-				tId := GenerateID(path)
-				buffer = append(buffer, rawInfo{tId, path})
+			if _, exists := s.dbFileCache[path]; !exists {
+				buffer = append(buffer, rawInfo{GenerateID(path), path})
 				if len(buffer) >= 50 {
 					flushDisc()
 				}
@@ -402,9 +412,8 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		return nil
 	})
 	flushDisc()
-	slog.Info("W-Explorer: Finished", "total", discoveryCount)
 
-	close(jobs)
+	scanActive = false // Indicar a los workers que el explorador ha terminado
 	wg.Wait()
 	close(slowJobs)
 	slowWg.Wait()
