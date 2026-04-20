@@ -209,11 +209,19 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			sysMB := m.Sys / 1024 / 1024
-			slog.Info("🧠 RAM Status", "used_mb", m.Alloc/1024/1024, "sys_mb", sysMB)
+			releasedMB := m.HeapReleased / 1024 / 1024
+			realOSMB := sysMB - releasedMB
+
+			slog.Info("🧠 RAM Status", 
+				"used_mb", m.Alloc/1024/1024, 
+				"sys_mb", sysMB, 
+				"real_os_mb", realOSMB,
+			)
 
 			// 🚨 FRENO INTELIGENTE PARA DOCKER 🚨
-			if sysMB > 250 {
-				slog.Warn("🧹 Emergency Flush: Devolviendo RAM al OS...")
+			// Si la RAM real retenida supera los 250MB, forzamos la devolución al OS
+			if realOSMB > 250 {
+				slog.Warn("🧹 Emergency Flush: Devolviendo RAM al OS...", "real_os_mb", realOSMB)
 				debug.FreeOSMemory()
 			}
 		}
