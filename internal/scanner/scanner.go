@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -11,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -138,12 +138,8 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		if val, err := strconv.Atoi(envWorkers); err == nil { numWorkers = val }
 	}
 
-	// Configuración de memoria agresiva para contenedores
-	debug.SetGCPercent(10) 
-	debug.SetMemoryLimit(300 * 1024 * 1024) 
-
 	var (
-		jobs       = make(chan string, 2000)
+		jobs       = make(chan string, 500)
 		results    = make(chan *trackResult, numWorkers*5)
 		slowJobs   = make(chan *trackResult, numWorkers*2)
 		wg         sync.WaitGroup
@@ -154,7 +150,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	)
 	tagSem := make(chan struct{}, 1)
 
-	// A. ESCRITOR DE DB (Centraliza la limpieza de RAM)
+	// A. ESCRITOR DE DB
 	go func() {
 		batchSize := 50 
 		var batch []*trackResult
@@ -181,7 +177,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			tx.Commit()
 			s.muDB.Unlock()
 			
-			// LIMPIEZA TOTAL TRAS GUARDAR
 			batch = nil
 			s.seenArtists = make(map[string]struct{})
 			s.seenAlbums = make(map[string]struct{})
@@ -189,8 +184,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			s.resolvedAlbums = make(map[string]string)
 			s.muAlbums.Unlock()
 
-			runtime.GC()
-			debug.FreeOSMemory()
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			slog.Info("🧠 RAM Status", "used_mb", m.Alloc/1024/1024, "sys_mb", m.Sys/1024/1024)
@@ -282,11 +275,21 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	// 'raw' existentes
 	rowsRaw, err := s.DB.Conn.Query("SELECT path FROM tracks WHERE status = 'raw'")
 	if err == nil && rowsRaw != nil {
-		defer rowsRaw.Close()
+		var rawPaths []string
 		for rowsRaw.Next() {
 			var p string
-			if err := rowsRaw.Scan(&p); err == nil { jobs <- p }
+			if err := rowsRaw.Scan(&p); err == nil {
+				rawPaths = append(rawPaths, p)
+			}
 		}
+		rowsRaw.Close()
+
+		// Inyectamos al canal en una gorutina para no frenar el resto del Explorador ni bloquear SQLite
+		go func() {
+			for _, p := range rawPaths {
+				jobs <- p
+			}
+		}()
 	}
 
 	type rawInfo struct { id, path string }
@@ -469,15 +472,48 @@ func IsAudioFile(filename string) error {
 
 func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second); defer cancel()
-	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,bit_rate:stream=sample_rate:format_tags=REPLAYGAIN_TRACK_GAIN,replaygain_track_gain", "-of", "default=noprint_wrappers=1:nokey=0", path)
-	out, _ := cmd.Output(); lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,bit_rate:stream=sample_rate:format_tags=REPLAYGAIN_TRACK_GAIN,replaygain_track_gain", "-of", "json", path)
+	
+	stdout, err := cmd.StdoutPipe()
+	if err != nil { return audioMetadata{}, err }
+	if err := cmd.Start(); err != nil { return audioMetadata{}, err }
+
+	var output struct {
+		Format struct {
+			Duration string `json:"duration"`
+			BitRate  string `json:"bit_rate"`
+			Tags     map[string]string `json:"tags"`
+		} `json:"format"`
+		Streams []struct {
+			SampleRate string `json:"sample_rate"`
+		} `json:"streams"`
+	}
+
+	if err := json.NewDecoder(stdout).Decode(&output); err != nil {
+		return audioMetadata{}, err
+	}
+	cmd.Wait()
+
 	data := audioMetadata{sampleRate: 44100}
-	for _, line := range lines {
-		if strings.HasPrefix(line, "duration=") { data.duration, _ = strconv.ParseFloat(strings.TrimPrefix(line, "duration="), 64)
-		} else if strings.HasPrefix(line, "bit_rate=") { data.bitRate, _ = strconv.Atoi(strings.TrimPrefix(line, "bit_rate="))
-		} else if strings.HasPrefix(line, "sample_rate=") { data.sampleRate, _ = strconv.Atoi(strings.TrimPrefix(line, "sample_rate="))
+	if output.Format.Duration != "" {
+		data.duration, _ = strconv.ParseFloat(output.Format.Duration, 64)
+	}
+	if output.Format.BitRate != "" {
+		data.bitRate, _ = strconv.Atoi(output.Format.BitRate)
+	}
+	if len(output.Streams) > 0 && output.Streams[0].SampleRate != "" {
+		data.sampleRate, _ = strconv.Atoi(output.Streams[0].SampleRate)
+	}
+	
+	// ReplayGain
+	for k, v := range output.Format.Tags {
+		lk := strings.ToLower(k)
+		if lk == "replaygain_track_gain" || lk == "REPLAYGAIN_TRACK_GAIN" {
+			val := strings.TrimSuffix(v, " dB")
+			data.replayGain, _ = strconv.ParseFloat(val, 64)
 		}
 	}
+
 	return data, nil
 }
 
