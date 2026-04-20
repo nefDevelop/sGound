@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -106,6 +107,11 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 }
 
 func (s *Scanner) ScanDirectory(rootPath string) error {
+	// ======= SALVAVIDAS PARA DOCKER =======
+	// Obligamos a Go a ser estricto con la RAM y devolverla al SO/Docker agresivamente.
+	debug.SetMemoryLimit(150 * 1024 * 1024)
+	// ======================================
+
 	slog.Info("Starting Pulse-Batch library scan", "path", rootPath)
 	start := time.Now()
 
@@ -148,7 +154,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		mu         sync.Mutex
 		count      int
 	)
-	tagSem := make(chan struct{}, 1)
 
 	// A. ESCRITOR DE DB
 	go func() {
@@ -244,8 +249,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					defer func() { <-s.ramTickets }()
 
 					defer func() { if r := recover(); r != nil { slog.Error("🔥 Panic", "worker", wId, "file", filepath.Base(path), "err", r) } }()
-					tagSem <- struct{}{}
-					defer func() { <-tagSem }()
 					
 					r, e := s.ParseFileWithCache(path, "pending")
 					if e == nil && r != nil {
