@@ -251,6 +251,18 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			s.muAlbums.Lock()
 			s.resolvedAlbums = make(map[string]string)
 			s.muAlbums.Unlock()
+
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			sysMB := m.Sys / 1024 / 1024
+			releasedMB := m.HeapReleased / 1024 / 1024
+			realOSMB := sysMB - releasedMB
+
+			slog.Info("🧠 RAM Status", 
+				"used_mb", m.Alloc/1024/1024, 
+				"sys_mb", sysMB, 
+				"real_os_mb", realOSMB,
+			)
 		}
 		for {
 			select {
