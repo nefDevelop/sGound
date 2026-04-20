@@ -617,6 +617,9 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"global scan started"}`))
 
 	go func() {
+		// Actualizar contador inmediatamente al empezar por si ya hay tracks raw/pending
+		s.updateInboxCount()
+
 		sc := scanner.NewScanner(s.MasterDB)
 		s.activeScanner = sc // Guardar referencia activa
 
@@ -626,8 +629,8 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		}
 
 		sc.OnProgress = func(path string, count int) {
-			// Throttling: Solo actualizamos el estado cada 10 archivos para no saturar
-			if count%10 == 0 {
+			// Throttling: Solo actualizamos el estado cada 5 archivos para que la UI sea más fluida
+			if count%5 == 0 {
 				status.Processed = count
 				s.scanStatuses.Store("global", status)
 				// Actualizar caché de inbox cada vez que avanzamos para que el UI lo vea
