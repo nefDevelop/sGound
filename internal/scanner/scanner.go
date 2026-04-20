@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -481,6 +482,13 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 	if err != nil { return audioMetadata{}, err }
 	if err := cmd.Start(); err != nil { return audioMetadata{}, err }
 
+	// ELIMINADOR DE ZOMBIES: Garantiza que el subproceso se limpia al salir
+	defer func() {
+		// Si quedó algo en el buffer, lo leemos para no bloquear el Wait()
+		_, _ = io.Copy(io.Discard, stdout)
+		cmd.Wait()
+	}()
+
 	var output struct {
 		Format struct {
 			Duration string `json:"duration"`
@@ -495,7 +503,6 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 	if err := json.NewDecoder(stdout).Decode(&output); err != nil {
 		return audioMetadata{}, err
 	}
-	cmd.Wait()
 
 	data := audioMetadata{sampleRate: 44100}
 	if output.Format.Duration != "" {

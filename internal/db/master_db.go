@@ -50,6 +50,10 @@ func ConnectMaster(dbPath string) (*MasterDatabase, error) {
 		return nil, err
 	}
 
+	// LIMITADOR DE CGO Y BLOQUEOS: Solo 1 conexión abierta para SQLite
+	conn.SetMaxOpenConns(1)
+	conn.SetMaxIdleConns(1)
+
 	mdb := &MasterDatabase{Conn: conn}
 	if err := mdb.initSchema(); err != nil {
 		return nil, err

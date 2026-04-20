@@ -704,30 +704,15 @@
       >
         <div class="nav-icon-wrap">
           <Icon name="grid" size={18} />
-          {#if $inboxCount > 0 || $rawCount > 0}
+          {#if hasPendingMusic}
             <span class="nav-notification-dot"></span>
           {/if}
         </div>
         <span>Dashboard</span>
-        {#if $inboxCount > 0 || $rawCount > 0}
+        {#if hasPendingMusic}
           <span class="nav-badge">{$inboxCount + $rawCount}</span>
         {/if}
       </button>
-
-      {#if $inboxCount > 0 || $rawCount > 0}
-        <button
-          class="nav-item nav-inbox"
-          class:active={currentView === "inbox"}
-          onclick={() => navigate("inbox")}
-          in:fade
-        >
-          <div class="nav-icon-wrap">
-            <Icon name="inbox" size={18} />
-          </div>
-          <span>Inbox</span>
-          <span class="nav-badge warning">{$inboxCount + $rawCount}</span>
-        </button>
-      {/if}
 
       <div class="nav-label">Library</div>
       <button
