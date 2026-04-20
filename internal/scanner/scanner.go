@@ -24,8 +24,9 @@ import (
 )
 
 type Scanner struct {
-	DB         *db.MasterDatabase
-	OnProgress func(path string, count int)
+	DB          *db.MasterDatabase
+	OnProgress  func(path string, count int)
+	OnDiscovery func(count int)
 
 	// Canales de prioridad
 	PriorityJobs chan string
@@ -308,6 +309,9 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 		discoveryCount += len(buffer)
 		slog.Info("➜ Discovered", "total", discoveryCount)
+		if s.OnDiscovery != nil {
+			s.OnDiscovery(discoveryCount)
+		}
 		buffer = nil
 	}
 
@@ -318,7 +322,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			if !exists {
 				tId := GenerateID(path) 
 				buffer = append(buffer, rawInfo{tId, path})
-				if len(buffer) >= 200 { flushDisc() }
+				if len(buffer) >= 50 { flushDisc() }
 			}
 		}
 		return nil

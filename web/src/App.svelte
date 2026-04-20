@@ -711,6 +711,21 @@
         {/if}
       </button>
 
+      {#if $inboxCount > 0 || $rawCount > 0}
+        <button
+          class="nav-item nav-inbox"
+          class:active={currentView === "inbox"}
+          onclick={() => navigate("inbox")}
+          in:fade
+        >
+          <div class="nav-icon-wrap">
+            <Icon name="inbox" size={18} />
+          </div>
+          <span>Inbox</span>
+          <span class="nav-badge warning">{$inboxCount + $rawCount}</span>
+        </button>
+      {/if}
+
       <div class="nav-label">Library</div>
       <button
         class="nav-item"

@@ -620,9 +620,14 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		sc := scanner.NewScanner(s.MasterDB)
 		s.activeScanner = sc // Guardar referencia activa
 
+		sc.OnDiscovery = func(count int) {
+			// Cuando se descubren archivos (raw), actualizamos el contador para que aparezca el Inbox
+			s.updateInboxCount()
+		}
+
 		sc.OnProgress = func(path string, count int) {
 			// Throttling: Solo actualizamos el estado cada 10 archivos para no saturar
-			if count % 10 == 0 {
+			if count%10 == 0 {
 				status.Processed = count
 				s.scanStatuses.Store("global", status)
 				// Actualizar caché de inbox cada vez que avanzamos para que el UI lo vea
@@ -1559,6 +1564,7 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(fmt.Sprintf(`{"status":"success", "approved":%d, "total":%d}`, approvedCount, totalActive)))
+	s.updateInboxCount()
 }
 
 func (s *Server) handleRejectTracks(w http.ResponseWriter, r *http.Request) {
@@ -3084,6 +3090,7 @@ func (s *Server) HandleFileEvent(path string) {
 	if err := sc.ParseAndSaveFile(path); err != nil {
 		slog.Error("Watcher: Failed to process file", "path", path, "error", err)
 	}
+	s.updateInboxCount()
 }
 
 func (s *Server) HandleFileDelete(path string) {
@@ -3092,6 +3099,7 @@ func (s *Server) HandleFileDelete(path string) {
 	if err != nil {
 		slog.Error("Watcher: Failed to remove deleted track from DB", "path", path, "error", err)
 	}
+	s.updateInboxCount()
 }
 
 func (s *Server) TriggerGlobalScan() {
