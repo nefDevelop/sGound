@@ -19,6 +19,11 @@ import (
 	"sync"
 	"time"
 
+	"bytes"
+	image
+	_ "image/jpeg"
+	_ "image/png"
+
 	"sgound/internal/db"
 	"sgound/internal/tags"
 )
@@ -95,10 +100,14 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 	tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", res.artistId, res.dbAlbumArtist)
 	tx.Exec(`
-		INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)
+		INSERT INTO albums (id, artist_id, title, year, cover_width, cover_height, cover_size, cover_format) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET 
-			year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END
-	`, res.albumId, res.artistId, res.albumName, res.year)
+			year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END,
+			cover_width = CASE WHEN (cover_width IS NULL OR cover_width = 0) THEN excluded.cover_width ELSE cover_width END,
+			cover_height = CASE WHEN (cover_height IS NULL OR cover_height = 0) THEN excluded.cover_height ELSE cover_height END,
+			cover_size = CASE WHEN (cover_size IS NULL OR cover_size = 0) THEN excluded.cover_size ELSE cover_size END,
+			cover_format = CASE WHEN (cover_format IS NULL OR cover_format = '') THEN excluded.cover_format ELSE cover_format END
+	`, res.albumId, res.artistId, res.albumName, res.year, res.coverWidth, res.coverHeight, res.coverSize, res.coverFormat)
 
 	_, err = tx.Exec(
 		`INSERT OR REPLACE INTO tracks 
@@ -459,6 +468,8 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 
 	var artistName, albumName, title, genre, composer, comment, albumArtistTag string
 	var trackNum, year, discNum int
+	var coverWidth, coverHeight, coverSize int
+	var coverFormat string
 
 	if err != nil {
 		slog.Warn("Could not read tags, using file info", "path", path, "err", err)
@@ -491,6 +502,17 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 		year = meta.Year()
 		trackNum, _ = meta.Track()
 		discNum, _ = meta.Disc()
+
+		// Carátula: Obtener dimensiones y tamaño
+		if pic := meta.Picture(); pic != nil {
+			coverSize = len(pic.Data)
+			coverFormat = pic.MIME
+			if img, _, err := image.Decode(bytes.NewReader(pic.Data)); err == nil {
+				bounds := img.Bounds()
+				coverWidth = bounds.Dx()
+				coverHeight = bounds.Dy()
+			}
+		}
 	}
 
 	trackId := tags.ReadPersistentID(path)
@@ -537,6 +559,10 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 		bitRate: bitRate, sampleRate: sampleRate, size: fileStat.Size(),
 		fileMtime:    fileStat.ModTime().Unix(),
 		MetadataSize: mSize,
+		coverWidth:   coverWidth,
+		coverHeight:  coverHeight,
+		coverSize:    coverSize,
+		coverFormat:  coverFormat,
 	}, nil
 }
 
@@ -738,4 +764,6 @@ type trackResult struct {
 	size, fileMtime                                                                                                               int64
 	MetadataSize                                                                                                                  int
 	instrumental                                                                                                                  bool
+	coverWidth, coverHeight, coverSize                                                                                            int
+	coverFormat                                                                                                                   string
 }

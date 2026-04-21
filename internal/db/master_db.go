@@ -84,6 +84,11 @@ func (db *MasterDatabase) initSchema() error {
 		artist_id TEXT NOT NULL,
 		title TEXT NOT NULL,
 		year INTEGER,
+		cover_id TEXT,
+		cover_width INTEGER,
+		cover_height INTEGER,
+		cover_size INTEGER,
+		cover_format TEXT,
 		FOREIGN KEY (artist_id) REFERENCES artists(id) ON DELETE CASCADE
 	);
 
@@ -214,6 +219,11 @@ func (db *MasterDatabase) initSchema() error {
 	db.Conn.Exec("ALTER TABLE artists ADD COLUMN bio TEXT")
 	db.Conn.Exec("ALTER TABLE artists ADD COLUMN tags TEXT")
 	db.Conn.Exec("ALTER TABLE artists ADD COLUMN similar TEXT")
+	db.Conn.Exec("ALTER TABLE albums ADD COLUMN cover_id TEXT")
+	db.Conn.Exec("ALTER TABLE albums ADD COLUMN cover_width INTEGER")
+	db.Conn.Exec("ALTER TABLE albums ADD COLUMN cover_height INTEGER")
+	db.Conn.Exec("ALTER TABLE albums ADD COLUMN cover_size INTEGER")
+	db.Conn.Exec("ALTER TABLE albums ADD COLUMN cover_format TEXT")
 	
 	// Índices para optimización de rendimiento
 	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(path)")

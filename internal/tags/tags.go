@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+// Picture representa una carátula embebida
+type Picture struct {
+	MIME        string
+	Data        []byte
+	Description string
+}
+
 // Metadata define la interfaz universal para leer y escribir metadatos
 type Metadata interface {
 	// Lectura
@@ -19,6 +26,7 @@ type Metadata interface {
 	Genre() string
 	Composer() string
 	Comment() string
+	Picture() *Picture
 	
 	// Escritura
 	SetTitle(string)
@@ -47,6 +55,8 @@ func Open(path string) (Metadata, error) {
 		return OpenFLAC(path)
 	case ".m4a", ".mp4":
 		return OpenMP4(path)
+	case ".ogg", ".opus":
+		return OpenOGG(path)
 	default:
 		return nil, fmt.Errorf("formato no soportado: %s", ext)
 	}

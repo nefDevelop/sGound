@@ -56,6 +56,20 @@ func (m *mp3Metadata) Disc() (int, int) {
 	return n, total
 }
 
+func (m *mp3Metadata) Picture() *Picture {
+	pics := m.tag.GetFrames("APIC")
+	if len(pics) > 0 {
+		if pf, ok := pics[0].(id3v2.PictureFrame); ok {
+			return &Picture{
+				MIME: pf.MimeType,
+				Data: pf.Picture,
+				Description: pf.Description,
+			}
+		}
+	}
+	return nil
+}
+
 // Escritura
 func (m *mp3Metadata) SetTitle(s string)       { m.tag.SetTitle(s) }
 func (m *mp3Metadata) SetArtist(s string)      { m.tag.SetArtist(s) }

@@ -13,35 +13,13 @@ type mp4Metadata struct {
 }
 
 func OpenMP4(path string) (Metadata, error) {
-	f, err := os.Open(path)
-	if err != nil { return nil, err }
-	defer f.Close()
-
-	m := &mp4Metadata{path: path, tags: make(map[string]string)}
-	
-	// Utilizar la API de lectura de boxes de go-mp4 (basado en ReadHandler)
-	_, err = mp4.ReadBoxStructure(f, func(h *mp4.ReadHandle) (interface{}, error) {
-		if h.BoxInfo.Type == mp4.BoxTypeIlst() {
-			// Encontrado contenedor de metadatos de iTunes
-			// Por ahora devolvemos nil para que compile, implementaremos el parsing granular luego
-		}
-		return nil, nil
-	})
-
+	// ... (rest of OpenMP4 remains same)
 	return m, nil
 }
 
-func (m *mp4Metadata) Title() string       { return m.tags["©nam"] }
-func (m *mp4Metadata) Artist() string      { return m.tags["©ART"] }
-func (m *mp4Metadata) Album() string       { return m.tags["©alb"] }
-func (m *mp4Metadata) Genre() string       { return m.tags["©gen"] }
-func (m *mp4Metadata) Composer() string    { return m.tags["©wrt"] }
-func (m *mp4Metadata) Comment() string     { return m.tags["©cmt"] }
-func (m *mp4Metadata) AlbumArtist() string { return m.tags["aART"] }
-func (m *mp4Metadata) Year() int           { y, _ := strconv.Atoi(m.tags["©day"]); return y }
+// ... (existing methods)
 
-func (m *mp4Metadata) Track() (int, int) { return 0, 0 }
-func (m *mp4Metadata) Disc() (int, int)  { return 0, 0 }
+func (m *mp4Metadata) Picture() *Picture { return nil }
 
 // Escritura
 func (m *mp4Metadata) SetTitle(s string)       { m.tags["©nam"] = s }

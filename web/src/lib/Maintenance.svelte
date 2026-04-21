@@ -12,11 +12,14 @@
     missingTags: 0,
     duplicateCount: 0,
     orphanCount: 0,
-    lowQualityCount: 0
+    lowQualityCount: 0,
+    missingCovers: 0,
+    smallCovers: 0,
+    hugeCovers: 0
   });
   
   let currentList = $state([]);
-  let currentView = $derived(subview); // 'overview', 'duplicates', 'orphans', 'low-quality'
+  let currentView = $derived(subview); // 'overview', 'duplicates', 'orphans', 'low-quality', 'logs', 'missing-covers', 'small-covers', 'huge-covers'
   let loading = $state(false);
   
   let contextMenu = $state({
@@ -78,6 +81,20 @@
     }
   }
 
+  async function normalizeCover(albumId) {
+    if (!confirm("Normalize this cover to 800px JPG? This will improve performance and consistency.")) return;
+    try {
+      const res = await fetch(`/api/library/normalize-cover?id=${albumId}`, { method: 'POST' });
+      if (res.ok) {
+        showToast("Cover normalized successfully", "success");
+        fetchDetail(currentView);
+        fetchHealth();
+      }
+    } catch (e) {
+      showToast("Normalization failed", "error");
+    }
+  }
+
   async function deleteTrack(track) {
     if (!confirm(`Permanently delete "${track.title}" from library?`)) return;
     try {
@@ -128,27 +145,6 @@
     };
   }
 
-  async function renameTrack(track) {
-    const newTitle = prompt("Enter new track title:", track.title);
-    if (!newTitle || newTitle === track.title) return;
-
-    try {
-      const res = await fetch(`/api/tracks/tags?id=${encodeURIComponent(track.id)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: newTitle })
-      });
-      if (res.ok) {
-        showToast("Track renamed successfully", "success");
-        if (currentView !== 'overview') fetchDetail(currentView);
-      } else {
-        throw new Error("Failed to rename");
-      }
-    } catch (e) {
-      showToast("Error renaming: " + e.message, "error");
-    }
-  }
-
   function dragToScroll(node) {
     let isDown = false;
     let startX;
@@ -188,7 +184,7 @@
   // Expose refresh function to parent
   refresh = () => {
     fetchHealth();
-    if (currentView !== 'overview') fetchDetail(currentView);
+    if (currentView !== 'overview' && currentView !== 'logs') fetchDetail(currentView);
   };
 </script>
 
@@ -242,6 +238,33 @@
         <button class="bento-btn" onclick={() => loadDetail('low-quality')}>Inspect Detail</button>
       </div>
 
+      <div class="bento-card" class:warning={health.missingCovers > 0}>
+        <div class="card-header">
+          <Icon name="image" size={32} />
+          <span class="lbl">Missing Covers</span>
+        </div>
+        <span class="val">{health.missingCovers}</span>
+        <button class="bento-btn" onclick={() => loadDetail('missing-covers')}>Inspect Detail</button>
+      </div>
+
+      <div class="bento-card" class:warning={health.smallCovers > 0}>
+        <div class="card-header">
+          <Icon name="maximize" size={32} />
+          <span class="lbl">Small Covers</span>
+        </div>
+        <span class="val">{health.smallCovers}</span>
+        <button class="bento-btn" onclick={() => loadDetail('small-covers')}>Inspect Detail</button>
+      </div>
+
+      <div class="bento-card" class:warning={health.hugeCovers > 0}>
+        <div class="card-header">
+          <Icon name="alertTriangle" size={32} />
+          <span class="lbl">Huge Covers</span>
+        </div>
+        <span class="val">{health.hugeCovers}</span>
+        <button class="bento-btn" onclick={() => loadDetail('huge-covers')}>Inspect Detail</button>
+      </div>
+
       <div class="bento-card highlight">
         <div class="card-header">
           <Icon name="tag" size={32} />
@@ -267,7 +290,21 @@
       <div class="detail-header">
         <div class="title-wrap">
           <h2>{currentView.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ')}</h2>
-          <p class="desc">{currentView === 'duplicates' ? 'Tracks grouped by content similarity.' : 'Isolated database entries with no physical files.'}</p>
+          <p class="desc">
+            {#if currentView === 'duplicates'}
+              Tracks grouped by content similarity.
+            {:else if currentView === 'orphans'}
+              Isolated database entries with no physical files.
+            {:else if currentView === 'missing-covers'}
+              Albums with no embedded or local artwork.
+            {:else if currentView === 'small-covers'}
+              Artwork smaller than 300x300 pixels (low resolution).
+            {:else if currentView === 'huge-covers'}
+              Artwork larger than 1500px or 2MB (performance impact).
+            {:else}
+              Library items requiring attention.
+            {/if}
+          </p>
         </div>
         {#if loading}
           <div class="loading-spinner"></div>
@@ -281,7 +318,55 @@
         </div>
       {:else}
         <div class="scroll-wrapper">
-          {#if currentView === 'duplicates'}
+          {#if currentView.includes('covers')}
+            <table class="m-table">
+              <thead>
+                <tr>
+                  <th>Album / Artist</th>
+                  <th>Cover Info</th>
+                  <th>Path Example</th>
+                  <th class="actions-col"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each currentList as item}
+                  <tr>
+                    <td>
+                      <div class="title-cell">
+                        <span class="track-title">{item.title}</span>
+                        <span class="track-sub">{item.artist}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="attr-badges">
+                        {#if item.width}
+                          <span class="quality-badge">
+                            {item.width}x{item.height}
+                          </span>
+                        {/if}
+                        {#if item.size}
+                          <span class="format-badge-mini">
+                            {(item.size / 1024 / 1024).toFixed(2)} MB
+                          </span>
+                        {/if}
+                        <span class="format-badge-mini" style="color: var(--tertiary)">{item.type.toUpperCase()}</span>
+                      </div>
+                    </td>
+                    <td>
+                       <code class="path-snippet" title={item.path}>{item.path}</code>
+                    </td>
+                    <td class="actions-col">
+                      {#if item.type !== 'missing'}
+                        <button class="icon-btn" onclick={() => normalizeCover(item.id)} title="Normalize to JPG 800px">
+                          <Icon name="zap" size={18} color="var(--tertiary)" />
+                        </button>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {:else if currentView === 'duplicates'}
              <div class="groups-container">
                {#each currentList as group}
                  {@const best = group.reduce((acc, curr) => {
@@ -510,8 +595,6 @@
     letter-spacing: 1px;
   }
 
-  /* best-row handles this now */
-
   .m-table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 1rem; }
   .m-table th { text-align: left; padding: 1rem 1.5rem; color: var(--text-muted); font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
   .m-table td { padding: 1.5rem; border-top: 1px solid rgba(255,255,255,0.03); vertical-align: middle; }
@@ -578,14 +661,10 @@
 
   .attr-badges :global(.lucide-icon) { flex-shrink: 0; }
 
-  /* Zebra Stripes refined */
   .m-table tr.row-even td { background: rgba(255,255,255,0.02); }
   .m-table tr.row-odd td { background: transparent; }
   
   .m-table tr.best-row td { background: var(--primary-05) !important; }
-  .m-table tr.best-row td:first-child { border-left: none; }
-
-  .path-outer { display: flex; align-items: center; gap: 0.2rem; width: 100%; }
 
   .path-scroller {
     flex: 1;
@@ -599,10 +678,6 @@
     cursor: grab;
     user-select: none;
   }
-  .path-scroller:active { cursor: grabbing; }
-  
-  .path-scroller::-webkit-scrollbar { height: 4px; }
-  .path-scroller::-webkit-scrollbar-thumb { background: var(--primary-20); border-radius: 4px; }
 
   .path-scroller code {
     white-space: nowrap;
@@ -612,11 +687,7 @@
     opacity: 0.6;
   }
 
-  .sep { opacity: 0.3; margin: 0 0.1rem; }
   .main-info-col { width: 320px; }
-  .duplicate-group .tech-col { display: none; }
-  .tech-col { width: 220px; }
-  .path-col { width: auto; }
   .actions-col { width: 80px; text-align: right; }
 
   .icon-btn { border: none; background: var(--surface-container-highest); color: var(--text-muted); width: 44px; height: 44px; border-radius: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
@@ -631,12 +702,8 @@
   @media (max-width: 900px) {
     .bento-grid { grid-template-columns: repeat(2, 1fr); gap: 1rem; }
     .bento-card { padding: 1.5rem; border-radius: 24px; gap: 1rem; }
-    .bento-card .val { font-size: 2.5rem; }
     .detail-container { padding: 1.5rem; border-radius: 32px; }
     .m-table th { display: none; }
     .m-table td { display: block; padding: 1rem; }
-    .m-table td:first-child { border-radius: 20px 20px 0 0; border-right: 1px solid var(--white-05); }
-    .m-table td:last-child { border-radius: 0 0 20px 20px; border-left: 1px solid var(--white-05); text-align: right; }
-    .path-snippet { max-width: 100%; }
   }
 </style>

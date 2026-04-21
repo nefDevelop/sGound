@@ -86,6 +86,23 @@ func (f *flacMetadata) Disc() (int, int) {
 	return n, t
 }
 
+func (f *flacMetadata) Picture() *Picture {
+	for _, block := range f.file.Meta {
+		if block.Type == flac.Picture {
+			pb, err := flac.ParseMetadataBlockPicture(block.Data)
+			if err != nil {
+				continue
+			}
+			return &Picture{
+				MIME:        pb.MIME,
+				Data:        pb.ImageData,
+				Description: pb.Description,
+			}
+		}
+	}
+	return nil
+}
+
 // Escritura (Placeholder funcional)
 func (f *flacMetadata) SetTitle(s string)       { f.comments["TITLE"] = s }
 func (f *flacMetadata) SetArtist(s string)      { f.comments["ARTIST"] = s }
