@@ -1,7 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
-  import { showToast } from './stores.js';
+  import { showToast, coverRefreshTrigger } from './stores.js';
   import { fade } from 'svelte/transition';
   
   let { 
@@ -317,7 +317,8 @@
             );
             await Promise.all(promises);
             showToast("New cover applied to all tracks", "success");
-            // Forzar refresco de imágenes
+            // Forzar refresco global de imágenes
+            coverRefreshTrigger.set(Date.now());
             selectedTracks = [...selectedTracks];
         } catch (e) {
             showToast("Failed to apply cover", "error");

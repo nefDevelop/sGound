@@ -33,7 +33,7 @@ func (e *ExternalMetadata) GetArtistInfo(artistName string) (*ArtistInfo, error)
 	artistName = strings.TrimSpace(artistName)
 	artistName = strings.TrimSuffix(artistName, ".")
 
-	slog.Debug("🔍", "search", artistName)
+	slog.Info("🌐 Fetching external metadata for artist", "artist", artistName)
 
 	// 1. Wikipedia para Bio e Imagen (Prioridad absoluta)
 	wikiTitle := strings.ReplaceAll(artistName, " ", "_")
@@ -46,6 +46,14 @@ func (e *ExternalMetadata) GetArtistInfo(artistName string) (*ArtistInfo, error)
 	}
 
 	info, _ := e.fetchSummary(wikiTitle, primaryLang)
+	if info == nil || info.Image == "" {
+		// Intentar buscar el título exacto en Wikipedia si el directo falló
+		bestTitle := e.searchBestTitle(artistName)
+		if bestTitle != "" && bestTitle != wikiTitle {
+			info, _ = e.fetchSummary(bestTitle, primaryLang)
+		}
+	}
+
 	if info == nil || info.Image == "" {
 		wInfo2, _ := e.fetchSummary(wikiTitle, secondaryLang)
 		if wInfo2 != nil {

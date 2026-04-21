@@ -852,10 +852,26 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Obtener URL externa de la DB
 	var imageURL string
-	err := s.getDB(r).Conn.QueryRow("SELECT image_url FROM artists WHERE id = ?", artistID).Scan(&imageURL)
-	if err != nil || imageURL == "" {
+	var name string
+	err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ?", artistID).Scan(&imageURL, &name)
+	if err != nil {
 		http.NotFound(w, r)
 		return
+	}
+
+	if imageURL == "" {
+		// Intentar enriquecer bajo demanda
+		ext, _ := s.externalMeta.GetArtistInfo(name)
+		if ext != nil && ext.Image != "" {
+			imageURL = ext.Image
+			tagsStr := strings.Join(ext.Tags, ",")
+			similarStr := strings.Join(ext.Similar, ",")
+			_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?",
+				ext.Image, ext.Biography, tagsStr, similarStr, artistID)
+		} else {
+			http.NotFound(w, r)
+			return
+		}
 	}
 
 	// 3. Descargar y Procesar

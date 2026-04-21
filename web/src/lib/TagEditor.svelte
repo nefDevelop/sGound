@@ -2,7 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import { fade } from 'svelte/transition';
   import Icon from './Icon.svelte';
-  import { showToast } from './stores.js';
+  import { showToast, coverRefreshTrigger } from './stores.js';
   
   let { 
     isOpen = $bindable(false), 
@@ -52,6 +52,7 @@
       }
       
       saveSuccess = true;
+      coverRefreshTrigger.set(Date.now());
       setTimeout(() => {
         saveSuccess = false;
         closeModal();

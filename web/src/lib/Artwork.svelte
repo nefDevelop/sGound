@@ -1,9 +1,17 @@
 <script>
+  import { coverRefreshTrigger } from './stores.js';
   /** @type {{ src: string, alt?: string, size?: string, borderRadius?: string, onclick?: (e: MouseEvent) => void }} */
   let { src, alt = "Cover", size = "100%", borderRadius = "24px", onclick } = $props();
   
   let loaded = $state(false);
   let error = $state(false);
+
+  // Generar URL con timestamp para evitar cache si se dispara el trigger
+  let displaySrc = $derived(() => {
+    if (!src) return '';
+    const connector = src.includes('?') ? '&' : '?';
+    return `${src}${connector}t=${$coverRefreshTrigger}`;
+  });
 
   function handleLoad() {
     loaded = true;
@@ -28,7 +36,7 @@
   {/if}
 
   <img 
-    {src} 
+    src={displaySrc()} 
     {alt}
     class:loaded
     loading="lazy"
