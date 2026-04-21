@@ -1070,8 +1070,10 @@ func (s *Server) handleGetAlbumTracks(albumID string, w http.ResponseWriter, r *
 	var tracks []map[string]interface{}
 	for rows.Next() {
 		var id, title, genre, artist string
-		var trackNum, duration int
+		var trackNum int
+		var duration float64
 		if err := rows.Scan(&id, &title, &trackNum, &duration, &genre, &artist); err != nil {
+			slog.Error("Scan failed in handleGetAlbumTracks", "error", err)
 			continue
 		}
 		tracks = append(tracks, map[string]interface{}{
