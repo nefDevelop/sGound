@@ -134,25 +134,33 @@
   }
 
   let initialized = $state(false);
-  // Pre-poblar campos si son comunes a todos los tracks (solo al abrir)
+  // Pre-poblar campos con el valor más frecuente (Moda)
   $effect(() => {
     if (isOpen && selectedTracks.length > 0 && !initialized) {
-      const getBase = (field) => {
-        if (selectedTracks.length === 0) return '';
-        const firstVal = selectedTracks[0][field];
-        if (selectedTracks.every(t => t[field] === firstVal)) return firstVal;
-        // Si no son todos iguales, devolvemos el primero como sugerencia para la búsqueda
-        return firstVal || '';
+      const getMostFrequent = (field) => {
+        const counts = {};
+        let maxCount = 0;
+        let winner = '';
+        selectedTracks.forEach(t => {
+          const val = (t[field] || '').toString();
+          if (!val || val === '0' || val === 'Unknown') return;
+          counts[val] = (counts[val] || 0) + 1;
+          if (counts[val] > maxCount) {
+            maxCount = counts[val];
+            winner = val;
+          }
+        });
+        return winner || selectedTracks[0][field] || '';
       };
       
       bulkData = {
-        artist: getBase('artist'),
-        albumArtist: getBase('albumArtist'),
-        album: getBase('album'),
-        genre: getBase('genre'),
-        year: getBase('year') || '',
-        composer: getBase('composer'),
-        trackTotal: getBase('trackTotal') || ''
+        artist: getMostFrequent('artist'),
+        albumArtist: getMostFrequent('albumArtist'),
+        album: getMostFrequent('album'),
+        genre: getMostFrequent('genre'),
+        year: getMostFrequent('year') || '',
+        composer: getMostFrequent('composer'),
+        trackTotal: getMostFrequent('trackTotal') || ''
       };
 
       // Normalizar trackNums si faltan (sin disparar el effect infinitamente)
@@ -689,23 +697,26 @@
     padding: 2.5rem;
     background: rgba(0,0,0,0.15);
     border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+    max-height: 100%;
   }
 
   .bulk-sidebar h3 { margin: 0; font-size: 1rem; color: white; font-weight: 800; }
-  .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: -1rem; font-weight: 600; }
+  .hint { font-size: 0.75rem; color: var(--text-muted); margin-top: -1rem; font-weight: 600; line-height: 1.4; }
 
-  .tag-form { display: flex; flex-direction: column; gap: 1.5rem; }
+  .tag-form { display: flex; flex-direction: column; gap: 1rem; }
 
-  .tag-form label { display: flex; flex-direction: column; gap: 0.5rem; color: var(--text-muted); font-size: 0.85rem; font-weight: 700; }
+  .tag-form label { display: flex; flex-direction: column; gap: 0.4rem; color: var(--text-muted); font-size: 0.8rem; font-weight: 700; }
 
   .tag-form input {
     background: var(--surface-container); 
     border: 1px solid var(--border-color);
     color: white; 
-    padding: 0.8rem 1.2rem; 
-    border-radius: 14px; 
+    padding: 0.6rem 1rem; 
+    border-radius: 12px; 
     outline: none;
     transition: all 0.2s;
+    font-size: 0.9rem;
   }
   .tag-form input:focus { border-color: var(--primary); background: var(--surface); }
 
