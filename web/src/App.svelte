@@ -412,7 +412,7 @@
       if (res.ok) {
         showToast("Library scan started!", "success");
         // Reiniciar status local para activar el polling
-        scanStatus = { scanning: true, processed: 0, inboxCount: 0 };
+        scanStatus = { scanning: true, processed: 0, inboxCount: 0, rawCount: 0 };
         startPolling();
         checkScanStatus();
       }
@@ -703,7 +703,7 @@
         onclick={() => navigate("dashboard")}
       >
         <div class="nav-icon-wrap">
-          <Icon name="grid" size={18} />
+          <Icon name={hasPendingMusic ? "inbox" : "grid"} size={18} />
           {#if hasPendingMusic}
             <span class="nav-notification-dot"></span>
           {/if}
@@ -713,6 +713,20 @@
           <span class="nav-badge">{$inboxCount + $rawCount}</span>
         {/if}
       </button>
+
+      {#if hasPendingMusic}
+        <button
+          class="nav-item inbox-nav"
+          class:active={currentView === "inbox"}
+          onclick={() => navigate("inbox")}
+        >
+          <div class="nav-icon-wrap">
+            <Icon name="inbox" size={18} />
+          </div>
+          <span>Inbox</span>
+          <span class="nav-badge">{$inboxCount + $rawCount}</span>
+        </button>
+      {/if}
 
       <div class="nav-label">Library</div>
       <button
@@ -1171,7 +1185,7 @@
   }
 
   .nav-notification-dot {
-    display: none;
+    display: block;
     position: absolute;
     top: -2px;
     right: -2px;
@@ -1181,6 +1195,7 @@
     border-radius: 50%;
     border: 2px solid var(--surface);
     z-index: 20;
+    box-shadow: 0 0 10px var(--tertiary-40);
   }
 
   .playlists-scroll {
@@ -1382,42 +1397,6 @@
     transform: translateY(0);
   }
 
-  .scan-status-item {
-    margin: 0.5rem 0 1.5rem 0;
-    padding: 0.8rem 1rem;
-    background: var(--primary-10);
-    border-radius: 14px;
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    border: 1px solid var(--primary-20);
-  }
-
-  .scan-status-item .spinner {
-    width: 22px;
-    height: 22px;
-    border: 3px solid var(--primary-20);
-    border-top-color: var(--primary);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-  .scan-status-item .info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-  }
-  .scan-status-item .label {
-    font-size: 0.8rem;
-    font-weight: 800;
-    color: var(--primary);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
-  .scan-status-item .count {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    font-weight: 600;
-  }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -1430,7 +1409,7 @@
 
   @media (max-width: 1100px) {
     .app-layout { grid-template-columns: 80px minmax(0, 1fr); }
-    .nav-label, .brand h2, .nav-item span, .nav-badge, .scan-status-item .info { display: none; }
+    .nav-label, .brand h2, .nav-item span, .nav-badge { display: none; }
     .brand { justify-content: center; padding: 1rem 0; width: 100%; }
     .sidebar { align-items: center; padding: 1.5rem 0; width: 80px; }
     .nav-item { 

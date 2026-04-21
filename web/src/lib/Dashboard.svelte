@@ -95,7 +95,7 @@
         <h1>Welcome back, <span>User</span></h1>
         {#if $inboxCount > 0 || $rawCount > 0}
           <button class="inbox-notification-badge" onclick={onselectInbox} title="View pending tracks">
-            <Icon name="inbox" size={18} />
+            <Icon name="inbox" size={24} />
             <span class="badge-number">{$inboxCount + $rawCount}</span>
           </button>
         {/if}
@@ -117,6 +117,16 @@
           <Icon name="list" size={14} /> {stats.totalPlaylists}
         </button>
       </div>
+
+      {#if stats.totalTracks === 0 && ($inboxCount > 0 || $rawCount > 0)}
+        <div class="welcome-inbox-prompt">
+          <p>Your library is empty, but you have <b>{$inboxCount + $rawCount}</b> tracks waiting in the Inbox.</p>
+          <button class="primary-btn" onclick={onselectInbox}>
+            <Icon name="inbox" size={18} />
+            Review Inbox
+          </button>
+        </div>
+      {/if}
 
       {#if scanStatus?.scanning}
         <div class="welcome-scan-status">
@@ -348,38 +358,45 @@
 
   .inbox-notification-badge { 
     background: var(--surface-container-highest); 
-    color: var(--text-main); 
-    border: 1px solid var(--border-color); 
-    width: 42px;
-    height: 42px;
-    border-radius: 12px; 
+    color: var(--primary); 
+    border: 1px solid var(--primary-40); 
+    width: 52px;
+    height: 52px;
+    border-radius: 16px; 
     display: flex; 
     align-items: center; 
     justify-content: center; 
     cursor: pointer; 
     transition: all 0.2s; 
     position: relative; 
-    box-shadow: none;
+    box-shadow: 0 4px 15px var(--primary-10);
   }
-  .inbox-notification-badge:hover { background: var(--surface-container-high); transform: scale(1.05); border-color: var(--primary); }
+  .inbox-notification-badge:hover { background: var(--primary-10); transform: scale(1.1); border-color: var(--primary); }
   
   .badge-number { 
     position: absolute; 
-    top: -8px; 
-    right: -8px; 
+    top: -10px; 
+    right: -10px; 
     background: #ff4d4f; 
     color: white;
-    font-size: 0.65rem;
+    font-size: 0.75rem;
     font-weight: 950;
-    min-width: 20px;
-    height: 20px;
-    padding: 0 4px;
-    border-radius: 10px;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 6px;
+    border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
     border: 2px solid var(--surface-container-high);
-    box-shadow: none;
+    box-shadow: 0 4px 10px rgba(255, 77, 79, 0.4);
+    animation: pulse-red 2s infinite;
+  }
+
+  @keyframes pulse-red {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
   }
 
   /* Top Plays Tile */
@@ -556,6 +573,42 @@
     font-size: 0.85rem;
     font-weight: 700;
     color: var(--text-main);
+  }
+
+  .welcome-inbox-prompt {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: var(--primary-10);
+    border: 1px dashed var(--primary-40);
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+    z-index: 1;
+    position: relative;
+    max-width: 400px;
+    animation: fadeIn 0.4s ease;
+  }
+  .welcome-inbox-prompt p { margin: 0; font-size: 1rem; color: var(--text-main); font-weight: 500; }
+  .welcome-inbox-prompt .primary-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    padding: 0.8rem 1.5rem;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 4px 15px var(--primary-20);
+  }
+  .welcome-inbox-prompt .primary-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px var(--primary-30);
+    background: #4f46e5; /* Un poco más oscuro */
   }
 
   .genre-bars { display: flex; flex-direction: column; gap: 0.8rem; }
