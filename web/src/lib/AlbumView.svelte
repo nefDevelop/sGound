@@ -16,17 +16,30 @@
   });
 
   async function fetchAlbumDetails() {
+    console.log("💿 Fetching details for albumId:", albumId);
     loading = true;
     try {
       // Get album metadata
       const resAlbum = await fetch(`/api/albums/${albumId}`);
-      if (resAlbum.ok) album = await resAlbum.json();
+      console.log("📡 Album metadata response status:", resAlbum.status);
+      if (resAlbum.ok) {
+        album = await resAlbum.json();
+        console.log("✅ Album metadata loaded:", album);
+      } else {
+        console.error("❌ Failed to load album metadata:", resAlbum.statusText);
+      }
       
       // Get tracks
       const resTracks = await fetch(`/api/albums/${albumId}/tracks`);
-      if (resTracks.ok) tracks = await resTracks.json();
+      console.log("📡 Album tracks response status:", resTracks.status);
+      if (resTracks.ok) {
+        tracks = await resTracks.json();
+        console.log("✅ Album tracks loaded:", tracks.length, "tracks");
+      } else {
+        console.error("❌ Failed to load album tracks:", resTracks.statusText);
+      }
     } catch (e) {
-      console.error(e);
+      console.error("💥 Error in fetchAlbumDetails:", e);
     } finally {
       loading = false;
     }
