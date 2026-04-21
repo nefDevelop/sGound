@@ -34,6 +34,7 @@ export const repeatMode = writable('none'); // 'none', 'all', 'one'
 export const isShuffle = writable(false);
 export const inboxCount = writable(0);
 export const rawCount = writable(0);
+export const coverRefreshTrigger = writable(Date.now());
 export const volume = writable(parseFloat(localStorage.getItem('volume')) || 1.0);
 
 volume.subscribe(v => {

@@ -1,7 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
-  import { showToast } from './stores.js';
+  import { showToast, coverRefreshTrigger } from './stores.js';
   import { fade } from 'svelte/transition';
   
   let { 
@@ -18,6 +18,7 @@
   let activeSuggestionField = $state("");
   let albumSearchResults = $state([]);
   let showAlbumResults = $state(false);
+  let searchingOnlyCover = $state(false);
 
   let isSingleAlbum = $derived(
     selectedTracks.length > 0 && 
@@ -27,7 +28,11 @@
     title: selectedTracks[0].album,
     artist: selectedTracks[0].artist,
     coverTrackId: selectedTracks[0].id
-  } : null);
+  } : (selectedTracks.length > 0 ? {
+    title: 'Multiple Selection',
+    artist: `${selectedTracks.length} tracks`,
+    coverTrackId: selectedTracks[0].id
+  } : null));
 
   // Datos globales que se aplicarán a todos
   let bulkData = $state({
@@ -134,25 +139,33 @@
   }
 
   let initialized = $state(false);
-  // Pre-poblar campos si son comunes a todos los tracks (solo al abrir)
+  // Pre-poblar campos con el valor más frecuente (Moda)
   $effect(() => {
     if (isOpen && selectedTracks.length > 0 && !initialized) {
-      const getBase = (field) => {
-        if (selectedTracks.length === 0) return '';
-        const firstVal = selectedTracks[0][field];
-        if (selectedTracks.every(t => t[field] === firstVal)) return firstVal;
-        // Si no son todos iguales, devolvemos el primero como sugerencia para la búsqueda
-        return firstVal || '';
+      const getMostFrequent = (field) => {
+        const counts = {};
+        let maxCount = 0;
+        let winner = '';
+        selectedTracks.forEach(t => {
+          const val = (t[field] || '').toString();
+          if (!val || val === '0' || val === 'Unknown') return;
+          counts[val] = (counts[val] || 0) + 1;
+          if (counts[val] > maxCount) {
+            maxCount = counts[val];
+            winner = val;
+          }
+        });
+        return winner || selectedTracks[0][field] || '';
       };
       
       bulkData = {
-        artist: getBase('artist'),
-        albumArtist: getBase('albumArtist'),
-        album: getBase('album'),
-        genre: getBase('genre'),
-        year: getBase('year') || '',
-        composer: getBase('composer'),
-        trackTotal: getBase('trackTotal') || ''
+        artist: getMostFrequent('artist'),
+        albumArtist: getMostFrequent('albumArtist'),
+        album: getMostFrequent('album'),
+        genre: getMostFrequent('genre'),
+        year: getMostFrequent('year') || '',
+        composer: getMostFrequent('composer'),
+        trackTotal: getMostFrequent('trackTotal') || ''
       };
 
       // Normalizar trackNums si faltan (sin disparar el effect infinitamente)
@@ -260,7 +273,8 @@
     }
   }
 
-  async function searchAlbumMetadata() {
+  async function searchAlbumMetadata(onlyCover = false) {
+    searchingOnlyCover = onlyCover;
     const artist = bulkData.artist || (selectedTracks.length > 0 ? selectedTracks[0].artist : "");
     const album = bulkData.album || (selectedTracks.length > 0 ? selectedTracks[0].album : "");
     
@@ -270,7 +284,7 @@
     }
 
     loading = true;
-    processingStatus = "Searching album metadata...";
+    processingStatus = onlyCover ? "Searching for covers..." : "Searching album metadata...";
     try {
       const res = await fetch(`/api/metadata/search-album?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`);
       if (res.ok) {
@@ -287,6 +301,34 @@
 
   async function selectAlbumRelease(release) {
     loading = true;
+    const coverUrl = `https://coverartarchive.org/release/${release.id}/front-500`;
+    
+    if (searchingOnlyCover) {
+        processingStatus = "Applying new cover to all tracks...";
+        showAlbumResults = false;
+        try {
+            // Aplicar carátula a cada track
+            const promises = selectedTracks.map(t => 
+                fetch(`/api/tracks/${t.id}/cover-url`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: coverUrl })
+                })
+            );
+            await Promise.all(promises);
+            showToast("New cover applied to all tracks", "success");
+            // Forzar refresco global de imágenes
+            coverRefreshTrigger.set(Date.now());
+            selectedTracks = [...selectedTracks];
+        } catch (e) {
+            showToast("Failed to apply cover", "error");
+        } finally {
+            loading = false;
+            processingStatus = "";
+        }
+        return;
+    }
+
     processingStatus = "Fetching tracklist details...";
     showAlbumResults = false;
     try {
@@ -394,9 +436,12 @@
       <div class="modal-header">
         <div class="header-info-wrap">
           {#if albumInfo}
-            <div class="header-cover">
+            <button class="header-cover clickable" onclick={() => searchAlbumMetadata(true)} title="Click to search only cover">
               <img src="/api/cover/{albumInfo.coverTrackId}" alt="" />
-            </div>
+              <div class="cover-edit-hint">
+                <Icon name="image" size={20} />
+              </div>
+            </button>
           {/if}
           <div class="header-info">
             <h2>{albumInfo ? 'Album Editor' : 'Bulk Edit Tags'}</h2>
@@ -471,11 +516,11 @@
           <label><span>Tracks (Total)</span><input type="number" bind:value={bulkData.trackTotal} placeholder="e.g. 12" /></label>
           
           <div class="bulk-actions">
-            <button class="tool-btn highlight" onclick={searchAlbumMetadata} disabled={loading} title="Search full album metadata">
+            <button class="tool-btn highlight" onclick={() => searchAlbumMetadata(false)} title="Search full album metadata">
               <Icon name="search" size={14} /> Search Album
             </button>
-            <button class="tool-btn" onclick={sortTracksByTitle} disabled={loading} title="Sort local tracks by title A-Z">
-              <Icon name="shuffle" size={14} /> Sort A-Z
+            <button class="tool-btn" onclick={() => searchAlbumMetadata(true)} title="Search only for album cover">
+              <Icon name="image" size={14} /> Search Cover
             </button>
             <button class="tool-btn" onclick={autoSearchAll} disabled={loading}><Icon name="zap" size={14} /> Auto-Tag</button>
             <button class="tool-btn" onclick={downloadAllLyrics} disabled={loading}><Icon name="cloud" size={14} /> Lyrics</button>
@@ -493,9 +538,14 @@
               </div>
               <div class="results-list">
                 {#each albumSearchResults as rel}
-                  <button class="result-item" onclick={() => selectAlbumRelease(rel)}>
-                    <span class="rel-title">{rel.title}</span>
-                    <span class="rel-date">{rel.date || 'Unknown year'}</span>
+                  <button class="result-item with-cover" onclick={() => selectAlbumRelease(rel)}>
+                    <div class="res-cover">
+                      <img src="https://coverartarchive.org/release/{rel.id}/front-250" alt="" onerror={(e) => e.target.src='/api/cover/placeholder'} />
+                    </div>
+                    <div class="res-details">
+                      <span class="rel-title">{rel.title}</span>
+                      <span class="rel-date">{rel.date || 'Unknown year'}</span>
+                    </div>
                   </button>
                 {/each}
               </div>
@@ -649,6 +699,16 @@
   .header-cover { width: 60px; height: 60px; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.3); border: 1px solid var(--white-05); }
   .header-cover img { width: 100%; height: 100%; object-fit: cover; }
   
+  .header-cover.clickable { cursor: pointer; position: relative; padding: 0; background: none; transition: transform 0.2s; }
+  .header-cover.clickable:hover { transform: scale(1.05); }
+  .cover-edit-hint { position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
+  .header-cover.clickable:hover .cover-edit-hint { opacity: 1; }
+
+  .result-item.with-cover { flex-direction: row; align-items: center; gap: 1rem; }
+  .res-cover { width: 50px; height: 50px; border-radius: 6px; overflow: hidden; background: var(--surface-container-high); flex-shrink: 0; border: 1px solid var(--border-color); }
+  .res-cover img { width: 100%; height: 100%; object-fit: cover; }
+  .res-details { display: flex; flex-direction: column; gap: 0.1rem; }
+
   .album-meta { display: flex; flex-direction: column; gap: 0.1rem; }
   .album-title { font-size: 1.1rem; font-weight: 800; color: white; letter-spacing: -0.5px; }
   .album-artist { font-size: 0.85rem; font-weight: 600; color: var(--primary); }
@@ -689,23 +749,26 @@
     padding: 2.5rem;
     background: rgba(0,0,0,0.15);
     border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+    max-height: 100%;
   }
 
   .bulk-sidebar h3 { margin: 0; font-size: 1rem; color: white; font-weight: 800; }
-  .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: -1rem; font-weight: 600; }
+  .hint { font-size: 0.75rem; color: var(--text-muted); margin-top: -1rem; font-weight: 600; line-height: 1.4; }
 
-  .tag-form { display: flex; flex-direction: column; gap: 1.5rem; }
+  .tag-form { display: flex; flex-direction: column; gap: 1rem; }
 
-  .tag-form label { display: flex; flex-direction: column; gap: 0.5rem; color: var(--text-muted); font-size: 0.85rem; font-weight: 700; }
+  .tag-form label { display: flex; flex-direction: column; gap: 0.4rem; color: var(--text-muted); font-size: 0.8rem; font-weight: 700; }
 
   .tag-form input {
     background: var(--surface-container); 
     border: 1px solid var(--border-color);
     color: white; 
-    padding: 0.8rem 1.2rem; 
-    border-radius: 14px; 
+    padding: 0.6rem 1rem; 
+    border-radius: 12px; 
     outline: none;
     transition: all 0.2s;
+    font-size: 0.9rem;
   }
   .tag-form input:focus { border-color: var(--primary); background: var(--surface); }
 
