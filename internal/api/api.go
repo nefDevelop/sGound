@@ -3149,7 +3149,7 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 				// Fallback si falla el decode: guardar original
 				os.WriteFile(cachePath, pic.Data, 0644)
 				w.Header().Set("Cache-Control", "public, max-age=604800")
-				w.Header().Set("Content-Type", pic.MIMEType)
+				w.Header().Set("Content-Type", pic.MIME)
 				w.Write(pic.Data)
 				return
 			}

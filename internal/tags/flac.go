@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-flac/go-flac"
+	"github.com/go-flac/flacpicture"
 )
 
 type flacMetadata struct {
@@ -89,7 +90,7 @@ func (f *flacMetadata) Disc() (int, int) {
 func (f *flacMetadata) Picture() *Picture {
 	for _, block := range f.file.Meta {
 		if block.Type == flac.Picture {
-			pb, err := flac.ParseMetadataBlockPicture(block.Data)
+			pb, err := flacpicture.ParseFromMetaDataBlock(*block)
 			if err != nil {
 				continue
 			}

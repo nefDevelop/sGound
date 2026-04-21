@@ -26,7 +26,7 @@ func OpenOGG(path string) (Metadata, error) {
 	}
 
 	m := &oggMetadata{path: path, comments: make(map[string]string)}
-	for _, comment := range r.CommentList() {
+	for _, comment := range r.CommentHeader().Comments {
 		parts := strings.SplitN(comment, "=", 2)
 		if len(parts) == 2 {
 			m.comments[strings.ToUpper(parts[0])] = parts[1]

@@ -5,13 +5,13 @@ go 1.25.0
 require (
 	github.com/abema/go-mp4 v1.5.0
 	github.com/bogem/id3v2/v2 v2.1.4
-	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/disintegration/imaging v1.6.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-flac/flacpicture v0.3.0
 	github.com/go-flac/flacvorbis v0.2.0
 	github.com/go-flac/go-flac v1.0.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/jfreymuth/oggvorbis v1.0.5
 	golang.org/x/crypto v0.49.0
 	modernc.org/sqlite v1.48.1
 )
@@ -19,6 +19,7 @@ require (
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/jfreymuth/vorbis v1.0.2 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

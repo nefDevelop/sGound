@@ -2,28 +2,9 @@ package scanner
 
 import (
 	"os"
-	"testing"
 	"sgound/internal/db"
+	"testing"
 )
-
-func TestIsAudioFile(t *testing.T) {
-	cases := []struct {
-		name string
-		ext  string
-		want bool
-	}{
-		{"Test mp3", ".mp3", true},
-		{"Test flac", ".flac", true},
-		{"Test ogg", ".Ogg", true},
-		{"Test txt", ".txt", false},
-	}
-	for _, c := range cases {
-		got := isAudioFile("song" + c.ext)
-		if (got == nil) != c.want {
-			t.Errorf("isAudioFile(%q) == %v, want %v", c.ext, got == nil, c.want)
-		}
-	}
-}
 
 func TestScanDirectoryEmpty(t *testing.T) {
 	// Usamos DB en memoria

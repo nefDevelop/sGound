@@ -1,10 +1,7 @@
 package tags
 
 import (
-	"os"
 	"strconv"
-
-	"github.com/abema/go-mp4"
 )
 
 type mp4Metadata struct {
@@ -13,11 +10,25 @@ type mp4Metadata struct {
 }
 
 func OpenMP4(path string) (Metadata, error) {
-	// ... (rest of OpenMP4 remains same)
+	// TODO: Implementar lectura real de MP4/M4A usando github.com/abema/go-mp4
+	m := &mp4Metadata{
+		path: path,
+		tags: make(map[string]string),
+	}
 	return m, nil
 }
 
-// ... (existing methods)
+func (m *mp4Metadata) Title() string       { return m.tags["©nam"] }
+func (m *mp4Metadata) Artist() string      { return m.tags["©ART"] }
+func (m *mp4Metadata) Album() string       { return m.tags["©alb"] }
+func (m *mp4Metadata) Genre() string       { return m.tags["©gen"] }
+func (m *mp4Metadata) Composer() string    { return m.tags["©wrt"] }
+func (m *mp4Metadata) Comment() string     { return m.tags["©cmt"] }
+func (m *mp4Metadata) AlbumArtist() string { return m.tags["aART"] }
+func (m *mp4Metadata) Year() int           { y, _ := strconv.Atoi(m.tags["©day"]); return y }
+
+func (m *mp4Metadata) Track() (int, int) { return 0, 0 }
+func (m *mp4Metadata) Disc() (int, int)  { return 0, 0 }
 
 func (m *mp4Metadata) Picture() *Picture { return nil }
 

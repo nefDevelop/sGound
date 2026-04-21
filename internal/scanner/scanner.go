@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"bytes"
-	image
+	"image"
 	_ "image/jpeg"
 	_ "image/png"
 
