@@ -16,6 +16,8 @@
   
   let suggestions = $state([]);
   let activeSuggestionField = $state("");
+  let albumSearchResults = $state([]);
+  let showAlbumResults = $state(false);
 
   let isSingleAlbum = $derived(
     selectedTracks.length > 0 && 
@@ -256,9 +258,89 @@
     }
   }
 
+  async function searchAlbumMetadata() {
+    const artist = bulkData.artist || (selectedTracks.length > 0 ? selectedTracks[0].artist : "");
+    const album = bulkData.album || (selectedTracks.length > 0 ? selectedTracks[0].album : "");
+    
+    if (!artist || !album) {
+      showToast("Artist and Album are required for search", "warning");
+      return;
+    }
+
+    loading = true;
+    processingStatus = "Searching album metadata...";
+    try {
+      const res = await fetch(`/api/metadata/search-album?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`);
+      if (res.ok) {
+        albumSearchResults = await res.json();
+        showAlbumResults = true;
+      }
+    } catch (e) {
+      showToast("Search failed", "error");
+    } finally {
+      loading = false;
+      processingStatus = "";
+    }
+  }
+
+  async function selectAlbumRelease(release) {
+    loading = true;
+    processingStatus = "Fetching tracklist details...";
+    showAlbumResults = false;
+    try {
+      const res = await fetch(`/api/metadata/release-details?id=${release.id}`);
+      if (res.ok) {
+        const details = await res.json();
+        bulkData.album = details.title;
+        if (details.date) bulkData.year = details.date.split("-")[0];
+        
+        let totalTracks = 0;
+        let mbTracks = [];
+        details.media.forEach(m => {
+          m.tracks.forEach(t => {
+            mbTracks.push(t);
+            totalTracks++;
+          });
+        });
+        bulkData.trackTotal = totalTracks.toString();
+
+        // Intentar mapear tracks locales a los de MusicBrainz por título (fuzzy)
+        selectedTracks.forEach(local => {
+          const match = mbTracks.find(mb => 
+            local.title.toLowerCase().includes(mb.title.toLowerCase()) ||
+            mb.title.toLowerCase().includes(local.title.toLowerCase())
+          );
+          if (match) {
+            local.trackNum = parseInt(match.number);
+            local.title = match.title; // Opcional: actualizar al título oficial
+          }
+        });
+        
+        showToast(`Metadata applied from ${details.title}`, "success");
+      }
+    } catch (e) {
+      showToast("Failed to fetch release details", "error");
+    } finally {
+      loading = false;
+      processingStatus = "";
+    }
+  }
+
+  function sortTracksByTitle() {
+    selectedTracks = [...selectedTracks].sort((a, b) => a.title.localeCompare(b.title));
+    // Reasignar números de pista secuencialmente tras ordenar
+    selectedTracks.forEach((t, i) => t.trackNum = i + 1);
+    showToast("Tracks sorted by title", "info");
+  }
+
   async function autoSearchAll() {
     loading = true;
     let count = 0;
+    // Antes de buscar, si no tienen número, ordenarlos por título para tener una base
+    if (selectedTracks.every(t => !t.trackNum || t.trackNum === 0)) {
+        selectedTracks.sort((a, b) => a.title.localeCompare(b.title));
+    }
+
     for (let track of selectedTracks) {
       processingStatus = `Searching metadata ${++count}/${selectedTracks.length}...`;
       try {
@@ -387,6 +469,12 @@
           <label><span>Tracks (Total)</span><input type="number" bind:value={bulkData.trackTotal} placeholder="e.g. 12" /></label>
           
           <div class="bulk-actions">
+            <button class="tool-btn highlight" onclick={searchAlbumMetadata} disabled={loading} title="Search full album metadata">
+              <Icon name="search" size={14} /> Search Album
+            </button>
+            <button class="tool-btn" onclick={sortTracksByTitle} disabled={loading} title="Sort local tracks by title A-Z">
+              <Icon name="shuffle" size={14} /> Sort A-Z
+            </button>
             <button class="tool-btn" onclick={autoSearchAll} disabled={loading}><Icon name="zap" size={14} /> Auto-Tag</button>
             <button class="tool-btn" onclick={downloadAllLyrics} disabled={loading}><Icon name="cloud" size={14} /> Lyrics</button>
           </div>
@@ -394,6 +482,25 @@
       </aside>
 
       <section class="tracks-list-area">
+        {#if showAlbumResults}
+          <div class="album-results-overlay" in:fade>
+            <div class="results-modal glass">
+              <div class="results-header">
+                <h3>Select Release</h3>
+                <button class="close-btn" onclick={() => showAlbumResults = false}><Icon name="x" size={18} /></button>
+              </div>
+              <div class="results-list">
+                {#each albumSearchResults as rel}
+                  <button class="result-item" onclick={() => selectAlbumRelease(rel)}>
+                    <span class="rel-title">{rel.title}</span>
+                    <span class="rel-date">{rel.date || 'Unknown year'}</span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          </div>
+        {/if}
+
         <div class="tracks-scroll">
           <table class="mini-tracks-table">
             <thead>
@@ -600,7 +707,7 @@
   }
   .tag-form input:focus { border-color: var(--primary); background: var(--surface); }
 
-  .bulk-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.5rem; }
+  .bulk-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-top: 0.5rem; }
 
   .tool-btn {
     background: var(--surface-container-high); 
@@ -608,7 +715,7 @@
     border: 1px solid var(--border-color); 
     padding: 0.8rem;
     border-radius: 16px; 
-    font-size: 0.8rem; 
+    font-size: 0.75rem; 
     font-weight: 700; 
     cursor: pointer;
     display: flex;
@@ -618,6 +725,70 @@
     transition: all 0.2s;
   }
   .tool-btn:hover { background: var(--surface-container-highest); border-color: var(--primary-30); color: var(--primary); }
+  .tool-btn.highlight { border-color: var(--primary-50); background: var(--primary-10); color: var(--primary); }
+  .tool-btn.highlight:hover { background: var(--primary); color: white; }
+
+  .album-results-overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+
+  .results-modal {
+    background: var(--surface-container-highest);
+    border: 1px solid var(--border-color);
+    border-radius: 24px;
+    width: 100%;
+    max-width: 500px;
+    max-height: 80%;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    overflow: hidden;
+  }
+
+  .results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.2rem 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .results-header h3 { margin: 0; font-size: 1rem; font-weight: 800; }
+
+  .results-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .result-item {
+    background: var(--surface-container);
+    border: 1px solid var(--border-color);
+    padding: 1rem;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .result-item:hover {
+    background: var(--primary-10);
+    border-color: var(--primary);
+  }
+  .rel-title { font-weight: 700; color: white; }
+  .rel-date { font-size: 0.8rem; color: var(--text-muted); }
 
   .tracks-list-area {
     position: relative;

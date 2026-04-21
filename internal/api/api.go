@@ -153,6 +153,8 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/api/library/metadata", auth(s.handleLibraryMetadata))
 	mux.HandleFunc("/api/metadata/suggest", auth(s.handleMetadataSuggest))
 	mux.HandleFunc("/api/metadata/search", auth(s.handleMetadataSearch))
+	mux.HandleFunc("/api/metadata/search-album", auth(s.handleMetadataSearchAlbum))
+	mux.HandleFunc("/api/metadata/release-details", auth(s.handleGetReleaseDetails))
 	mux.HandleFunc("/api/autocomplete", auth(s.handleAutocomplete))
 	mux.HandleFunc("/api/logs", auth(s.handleGetLogs))
 	mux.HandleFunc("/api/openapi.yaml", s.handleServeOpenAPI)
@@ -2668,6 +2670,44 @@ func (s *Server) handleMetadataSuggest(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(suggestions)
+}
+
+func (s *Server) handleGetReleaseDetails(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "ID is required", http.StatusBadRequest)
+		return
+	}
+
+	mb := metadata.NewMBClient()
+	release, err := mb.GetReleaseDetails(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(release)
+}
+
+func (s *Server) handleMetadataSearchAlbum(w http.ResponseWriter, r *http.Request) {
+	artist := r.URL.Query().Get("artist")
+	album := r.URL.Query().Get("album")
+
+	if artist == "" || album == "" {
+		http.Error(w, "Artist and album are required", http.StatusBadRequest)
+		return
+	}
+
+	mb := metadata.NewMBClient()
+	releases, err := mb.SearchRelease(artist, album)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(releases)
 }
 
 func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
