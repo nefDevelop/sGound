@@ -1,5 +1,6 @@
 <script>
   import { createEventDispatcher } from 'svelte';
+  import { fade } from 'svelte/transition';
   import Icon from './Icon.svelte';
   import { showToast } from './stores.js';
   
@@ -15,13 +16,11 @@
   let lyricSearchResults = $state([]); 
   let suggestions = $state([]);
   let activeSuggestionField = $state("");
-  let manualQuery = $state("");
 
   async function handleSave() {
     loading = true;
     try {
-      // 1. Guardar Tags completos
-      const res = await fetch(`/api/tracks/tags?id=${encodeURIComponent(track.id)}`, {
+      const res = await fetch(`/api/tracks/${track.id}/tags`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -42,20 +41,8 @@
       });
 
       const result = await res.json();
-      
-      // Verificación de integridad: si el servidor reportó error de validación
-      if (!res.ok) {
-        if (result.status === "error" && result.changes) {
-          const mismatches = result.changes.filter(c => c.new !== c.actual);
-          if (mismatches.length > 0) {
-            const list = mismatches.map(m => m.field).join(", ");
-            throw new Error(`Integridad fallida en campos: ${list}. El archivo físico no coincide con lo solicitado.`);
-          }
-        }
-        throw new Error(result.message || "Failed to update tags");
-      }
+      if (!res.ok) throw new Error(result.message || "Failed to update tags");
 
-      // 2. Guardar Letras si existen
       if (track.lyrics) {
         await fetch(`/api/lyrics/${track.id}`, {
           method: 'PUT',
@@ -71,7 +58,6 @@
       }, 1500);
       
     } catch (e) {
-      console.error(e);
       showToast(e.message, "error");
     } finally {
       loading = false;
@@ -84,21 +70,16 @@
       const res = await fetch(`/api/lyrics/search?artist=${encodeURIComponent(track.artist)}&title=${encodeURIComponent(track.title)}`);
       if (!res.ok) throw new Error("Search failed");
       const results = await res.json();
-      
-      if (results && results.length > 0) {
-        lyricSearchResults = results;
-      } else {
-        showToast("No lyrics found for this track.", "info");
-      }
+      lyricSearchResults = results || [];
+      if (lyricSearchResults.length === 0) showToast("No lyrics found", "info");
     } catch (e) {
-      showToast("Error searching lyrics: " + e.message, "error");
+      showToast("Error searching lyrics", "error");
     } finally {
       loading = false;
     }
   }
 
   function selectLyric(lyricData) {
-    // Preferir sincronizada si existe
     track.lyrics = lyricData.syncedLyrics || lyricData.plainLyrics;
     lyricSearchResults = [];
   }
@@ -109,7 +90,6 @@
       const parts = value.split(/[;/]/);
       query = parts[parts.length - 1].trim();
     }
-
     if (query.length < 1) {
       suggestions = [];
       return;
@@ -124,7 +104,6 @@
   function selectSuggestion(val) {
     if (activeSuggestionField === 'genre') {
       const parts = track.genre.split(/[;/]/);
-      // Reemplazar el último segmento (lo que el usuario estaba escribiendo)
       parts[parts.length - 1] = " " + val;
       track.genre = parts.join("; ").trim();
     } else {
@@ -139,33 +118,10 @@
       const res = await fetch(`/api/metadata/search?artist=${encodeURIComponent(track.artist)}&title=${encodeURIComponent(track.title)}`);
       if (!res.ok) throw new Error("Metadata not found");
       searchResults = await res.json();
-      
-      if (searchResults.length === 1) {
-        applyMetadata(searchResults[0]);
-      }
+      if (searchResults.length === 1) applyMetadata(searchResults[0]);
+      else if (searchResults.length === 0) showToast("No metadata found", "info");
     } catch (e) {
-      showToast("Auto search failed: " + e.message, "error");
-    } finally {
-      loading = false;
-    }
-  }
-
-  async function searchByField(fieldName, value) {
-    if (!value) return;
-    loading = true;
-    
-    let artist = fieldName === 'artist' ? value : "";
-    let title = fieldName === 'title' ? value : "";
-    let album = fieldName === 'album' ? value : "";
-
-    try {
-      const url = `/api/metadata/search?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(title)}&album=${encodeURIComponent(album)}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("Search failed");
-      searchResults = await res.json();
-      if (searchResults.length === 0) showToast("No results found for " + fieldName, "info");
-    } catch (e) {
-      showToast("Search failed: " + e.message, "error");
+      showToast("Auto search failed", "error");
     } finally {
       loading = false;
     }
@@ -176,14 +132,9 @@
     try {
       const res = await fetch(`/api/metadata/suggest?id=${encodeURIComponent(track.id)}`);
       if (!res.ok) throw new Error("MusicBrainz suggestion failed");
-      const suggestions = await res.json();
-      if (suggestions && suggestions.length > 0) {
-        // Encontrar la mejor coincidencia por título
-        const bestMatch = suggestions.find(s => 
-          s.title.toLowerCase().includes(track.title.toLowerCase()) || 
-          track.title.toLowerCase().includes(s.title.toLowerCase())
-        ) || suggestions[0];
-        
+      const results = await res.json();
+      if (results && results.length > 0) {
+        const bestMatch = results.find(s => s.title.toLowerCase().includes(track.title.toLowerCase())) || results[0];
         applyMetadata(bestMatch);
         showToast("Tags suggested from MusicBrainz", "success");
       } else {
@@ -196,7 +147,6 @@
     }
   }
 
-
   function applyMetadata(data) {
     track.artist = data.artist || track.artist;
     track.albumArtist = data.albumArtist || data.artist || track.albumArtist;
@@ -205,7 +155,6 @@
     track.year = data.year || track.year;
     track.genre = data.genre || track.genre;
     track.trackNum = data.trackNum || track.trackNum;
-    track.discNum = data.discNum || track.discNum;
     searchResults = [];
   }
 
@@ -214,17 +163,12 @@
     if (onclose) onclose();
   }
 
-  // Cargar letras al abrir el editor
   $effect(() => {
     if (isOpen && track.id) {
       fetch(`/api/lyrics/${track.id}`)
         .then(res => res.json())
-        .then(data => {
-          if (data.lyrics) {
-            track.lyrics = data.lyrics;
-          }
-        })
-        .catch(err => console.error("Error loading lyrics in editor:", err));
+        .then(data => { if (data.lyrics) track.lyrics = data.lyrics; })
+        .catch(() => {});
     }
   });
 </script>
@@ -235,50 +179,57 @@
 <div class="modal-backdrop" onclick={closeModal}>
   <div class="modal glass" onclick={(e) => e.stopPropagation()}>
     <div class="modal-header">
-      <h2>Edit Track Tags</h2>
+      <div class="header-info-wrap">
+        <div class="header-cover">
+          <img src="/api/cover/{track.id}?t={Date.now()}" alt="" />
+        </div>
+        <div class="header-info">
+          <h2>Edit Track Tags</h2>
+          <p class="subtitle">{track.title || 'Untitled'}</p>
+        </div>
+      </div>
       <button class="close-btn" onclick={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
     </div>
 
-    <div class="editor-content-wrap">
-      <aside class="editor-sidebar">
-        <div class="editor-hero" class:compact-hero={searchResults.length > 0 || lyricSearchResults.length > 0}>
-          <div class="cover-canvas">
-              <img src="/api/cover/{track.id}?t={Date.now()}" alt="Cover" />
-              <div class="cover-overlay">
-                  <Icon name="image" size={24} color="white" />
-              </div>
-          </div>
-          <div class="hero-info">
-              <h3>{track.title || 'Untitled'}</h3>
-              <p>{track.artist || 'Unknown Artist'}</p>
-          </div>
-        </div>
-
+    <div class="bulk-layout">
+      <aside class="bulk-sidebar">
+        <h3>Magic Tools</h3>
+        <p class="hint">Auto-fill metadata from internet</p>
+        
         <div class="sidebar-actions">
-          <button type="button" class="auto-btn mb" onclick={suggestMusicBrainz}>
-            <Icon name="music" size={16} color="white" /> 
-            <span>MusicBrainz Auto-Tag</span>
+          <button type="button" class="tool-btn highlight" onclick={suggestMusicBrainz}>
+            <Icon name="music" size={16} /> <span>MusicBrainz</span>
           </button>
-          <button type="button" class="auto-btn" onclick={autoSearchTags} disabled={loading}>
-            <Icon name="zap" size={16} color="var(--primary)" /> 
-            <span>Search Metadata</span>
+          <button type="button" class="tool-btn" onclick={autoSearchTags} disabled={loading}>
+            <Icon name="zap" size={16} /> <span>Auto-Search</span>
+          </button>
+          <button type="button" class="tool-btn" onclick={searchLyrics} disabled={loading}>
+            <Icon name="cloud" size={16} /> <span>Search Lyrics</span>
           </button>
         </div>
 
         {#if searchResults.length > 0}
-          <div class="results-picker">
-            <div class="picker-header">
-               <h3>Match results</h3>
-               <p>Found {searchResults.length} matches</p>
-            </div>
+          <div class="results-picker" in:fade>
+            <div class="picker-header"><h3>Results</h3></div>
             <div class="results-list">
               {#each searchResults as res}
                 <button class="result-item" onclick={() => applyMetadata(res)}>
-                  <img src={res.artwork} alt="" />
-                  <div class="res-info">
-                    <span class="res-title">{res.title}</span>
-                    <span class="res-sub">{res.artist} • {res.album} ({res.year})</span>
-                  </div>
+                  <span class="res-title">{res.title}</span>
+                  <span class="res-sub">{res.artist} • {res.album}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        {#if lyricSearchResults.length > 0}
+          <div class="results-picker" in:fade>
+            <div class="picker-header"><h3>Lyrics Found</h3></div>
+            <div class="results-list">
+              {#each lyricSearchResults as res}
+                <button class="result-item" onclick={() => selectLyric(res)}>
+                  <span class="res-title">{res.syncedLyrics ? '⚡ SYNCED' : 'Plain Text'}</span>
+                  <span class="res-sub">{res.artist} - {res.title}</span>
                 </button>
               {/each}
             </div>
@@ -286,29 +237,19 @@
         {/if}
       </aside>
 
-      <div class="main-editor-area">
+      <div class="tracks-list-area">
         <form class="tag-form" onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
-          <div class="form-scroll">
+          <div class="tracks-scroll">
             <div class="form-grid">
               <label class="col-span-2">
                 <span>Title</span>
-                <div class="field-input-wrapper">
-                  <input type="text" bind:value={track.title} required />
-                  <button type="button" class="field-search-btn" onclick={() => searchByField('title', track.title)} title="Search by title">
-                    <Icon name="search" size={14} />
-                  </button>
-                </div>
+                <input type="text" bind:value={track.title} required />
               </label>
 
-              <label class="relative col-span-2">
+              <label class="relative">
                 <span>Artist</span>
-                <div class="field-input-wrapper">
-                  <input type="text" bind:value={track.artist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} />
-                  <button type="button" class="field-search-btn" onclick={() => searchByField('artist', track.artist)} title="Search by artist">
-                    <Icon name="search" size={14} />
-                  </button>
-                </div>
-                {#if (suggestions?.length || 0) > 0 && activeSuggestionField === 'artist'}
+                <input type="text" bind:value={track.artist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} />
+                {#if suggestions.length > 0 && activeSuggestionField === 'artist'}
                   <div class="suggestions">
                     {#each suggestions as s}
                       <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
@@ -317,29 +258,10 @@
                 {/if}
               </label>
 
-              <label class="relative col-span-2">
-                <span>Album Artist</span>
-                <div class="field-input-wrapper">
-                  <input type="text" bind:value={track.albumArtist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} />
-                </div>
-                {#if (suggestions?.length || 0) > 0 && activeSuggestionField === 'albumArtist'}
-                  <div class="suggestions">
-                    {#each suggestions as s}
-                      <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
-                    {/each}
-                  </div>
-                {/if}
-              </label>
-
-              <label class="relative col-span-2">
+              <label class="relative">
                 <span>Album</span>
-                <div class="field-input-wrapper">
-                  <input type="text" bind:value={track.album} oninput={(e) => fetchSuggestions('album', e.currentTarget.value)} />
-                  <button type="button" class="field-search-btn" onclick={() => searchByField('album', track.album)} title="Search by album">
-                    <Icon name="search" size={14} />
-                  </button>
-                </div>
-                {#if (suggestions?.length || 0) > 0 && activeSuggestionField === 'album'}
+                <input type="text" bind:value={track.album} oninput={(e) => fetchSuggestions('album', e.currentTarget.value)} />
+                {#if suggestions.length > 0 && activeSuggestionField === 'album'}
                   <div class="suggestions">
                     {#each suggestions as s}
                       <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
@@ -348,15 +270,11 @@
                 {/if}
               </label>
 
-              <label>
-                <span>Year</span>
-                <input type="number" bind:value={track.year} />
-              </label>
+              <label><span>Year</span><input type="number" bind:value={track.year} /></label>
               <label class="relative">
                 <span>Genre</span>
                 <input type="text" bind:value={track.genre} oninput={(e) => fetchSuggestions('genre', e.currentTarget.value)} />
-                <span class="field-hint">Separa múltiples géneros con punto y coma (ej: Rock; Pop)</span>
-                {#if (suggestions?.length || 0) > 0 && activeSuggestionField === 'genre'}
+                {#if suggestions.length > 0 && activeSuggestionField === 'genre'}
                   <div class="suggestions">
                     {#each suggestions as s}
                       <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
@@ -365,56 +283,20 @@
                 {/if}
               </label>
 
-              <label>
-                <span>Track #</span>
-                <input type="number" bind:value={track.trackNum} placeholder="1" />
-              </label>
-              <label>
-                <span>Disc #</span>
-                <input type="number" bind:value={track.discNum} placeholder="1" />
-              </label>
+              <label><span>Track #</span><input type="number" bind:value={track.trackNum} /></label>
+              <label><span>Disc #</span><input type="number" bind:value={track.discNum} /></label>
 
-              <label class="col-span-2">
-                <span>Composer</span>
-                <input type="text" bind:value={track.composer} placeholder="Composer name..." />
-              </label>
-
-              <label class="checkbox-row col-span-2">
-                <input type="checkbox" bind:checked={track.instrumental} />
-                <span>Instrumental Track</span>
-              </label>
-
-              <label class="lyrics-label col-span-2">
-                <div class="label-header">
-                  <span>Lyrics</span>
-                  <button type="button" class="mini-btn" onclick={searchLyrics}><Icon name="search" size={14} /> Search Online</button>
-                </div>
-                
-                {#if lyricSearchResults.length > 0}
-                  <div class="lyric-chips">
-                    {#each lyricSearchResults as res}
-                      <button type="button" class="lyric-chip {res.syncedLyrics ? 'sync' : ''}" onclick={() => selectLyric(res)}>
-                         <Icon name={res.syncedLyrics ? "zap" : "fileText"} size={12} color={res.syncedLyrics ? "#1e293b" : "#94a3b8"} />
-                         <span>{res.syncedLyrics ? 'SYNC' : 'Plain'}</span>
-                      </button>
-                    {/each}
-                  </div>
-                {/if}
-
-                <textarea bind:value={track.lyrics} placeholder="Paste lyrics or search online..."></textarea>
-              </label>
-
-              <label class="col-span-2">
-                <span>Comment</span>
-                <input type="text" bind:value={track.comment} placeholder="Your notes..." />
+              <label class="col-span-2 lyrics-label">
+                <span>Lyrics</span>
+                <textarea bind:value={track.lyrics} placeholder="Paste lyrics here..."></textarea>
               </label>
             </div>
           </div>
 
-          <div class="actions">
+          <div class="footer-actions">
             <button type="button" class="cancel-btn" onclick={closeModal}>Cancel</button>
             <button type="submit" class="save-btn" disabled={loading}>
-              {loading ? 'Saving...' : saveSuccess ? 'Saved ✓' : 'Save Track Details'}
+              {loading ? 'Saving...' : saveSuccess ? 'Saved ✓' : 'Apply Changes'}
             </button>
           </div>
         </form>
@@ -428,8 +310,8 @@
   .modal-backdrop {
     position: fixed;
     top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.6);
-    backdrop-filter: blur(8px);
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(12px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -441,423 +323,96 @@
     padding: 0;
     border-radius: 40px;
     width: 95%;
-    max-width: 900px;
-    height: 85vh;
+    max-width: 1000px;
+    height: 80vh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 40px 120px rgba(0,0,0,0.6);
     border: 1px solid var(--border-color);
     overflow: hidden;
-    box-sizing: border-box;
   }
 
-  .editor-content-wrap {
-    display: flex;
-    flex: 1;
-    overflow: hidden;
-  }
-
-  .editor-sidebar {
-    width: 320px;
-    background: rgba(0,0,0,0.2);
-    border-right: 1px solid var(--border-color);
-    padding: 2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 2rem;
-    overflow-y: auto;
-  }
-
-  .main-editor-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    padding: 2.5rem;
-    overflow: hidden;
-  }
-
-  .form-scroll {
-    overflow-y: auto;
-    padding-right: 1rem;
-    margin-bottom: 2rem;
-    flex: 1;
-    min-height: 0;
-  }
-
-  .form-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1.5rem;
-  }
-
-  .col-span-2 {
-    grid-column: span 2;
-  }
-
-  .modal-header {
-    display: flex;
-    justify-content: space-between;
+  .modal-header { 
+    display: flex; 
+    justify-content: space-between; 
     align-items: center;
-    padding: 1.5rem 2rem;
+    padding: 1.5rem 2.5rem;
     border-bottom: 1px solid var(--border-color);
   }
+  .header-info-wrap { display: flex; align-items: center; gap: 1.5rem; }
+  .header-cover { width: 50px; height: 50px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border-color); }
+  .header-cover img { width: 100%; height: 100%; object-fit: cover; }
+  .header-info h2 { margin: 0; font-size: 0.85rem; font-weight: 900; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1.5px; }
+  .header-info .subtitle { margin: 0; font-size: 1.1rem; color: white; font-weight: 800; }
 
-  .sidebar-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 0.8rem;
-    margin-bottom: 0.5rem;
+  .bulk-layout { display: grid; grid-template-columns: 280px 1fr; gap: 0; flex: 1; overflow: hidden; }
+  .bulk-sidebar { 
+    display: flex; flex-direction: column; gap: 1.5rem; padding: 2.5rem;
+    background: rgba(0,0,0,0.15); border-right: 1px solid var(--border-color);
+    overflow-y: auto;
   }
+  .bulk-sidebar h3 { margin: 0; font-size: 1rem; color: white; font-weight: 800; }
+  .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: -1rem; }
 
-  .field-input-wrapper {
-    position: relative;
-    display: flex;
-    align-items: center;
+  .sidebar-actions { display: flex; flex-direction: column; gap: 0.8rem; }
+  .tool-btn {
+    background: var(--surface-container-high); color: var(--text-main);
+    border: 1px solid var(--border-color); padding: 0.8rem; border-radius: 14px;
+    font-size: 0.8rem; font-weight: 700; cursor: pointer;
+    display: flex; align-items: center; gap: 0.8rem; transition: all 0.2s;
   }
+  .tool-btn:hover { background: var(--surface-container-highest); border-color: var(--primary-30); }
+  .tool-btn.highlight { background: var(--primary); color: white; border: none; }
 
-  .field-search-btn {
-    position: absolute;
-    right: 12px;
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    opacity: 0.4;
-    cursor: pointer;
-    padding: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
+  .results-picker { margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem; }
+  .results-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
+  .result-item {
+    background: var(--surface-container); border: 1px solid var(--border-color);
+    padding: 0.8rem; border-radius: 10px; display: flex; flex-direction: column;
+    text-align: left; cursor: pointer; transition: all 0.2s;
   }
+  .result-item:hover { border-color: var(--primary); background: var(--primary-10); }
+  .res-title { font-weight: 700; color: white; font-size: 0.85rem; }
+  .res-sub { font-size: 0.75rem; color: var(--text-muted); }
 
-  .field-search-btn:hover {
-    opacity: 1;
-    color: var(--primary);
-    transform: scale(1.1);
+  .tracks-list-area { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .tracks-scroll { flex: 1; overflow-y: auto; padding: 2.5rem; }
+
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  .col-span-2 { grid-column: span 2; }
+
+  .tag-form label { display: flex; flex-direction: column; gap: 0.5rem; color: var(--text-muted); font-size: 0.85rem; font-weight: 700; }
+  .tag-form input, .tag-form textarea {
+    background: var(--surface-container); border: 1px solid var(--border-color);
+    color: white; padding: 0.8rem 1.2rem; border-radius: 14px; outline: none; transition: all 0.2s;
   }
-
-  .field-input-wrapper input {
-    padding-right: 40px !important;
-  }
-
-  .auto-btn {
-    background: var(--surface-container-high);
-    color: var(--text-main);
-    border: 1px solid var(--border-color);
-    padding: 0.8rem 1.2rem;
-    border-radius: 16px;
-    font-size: 0.85rem;
-    font-weight: 700;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    transition: all 0.2s;
-  }
-
-  .auto-btn span { white-space: nowrap; }
-
-  .auto-btn.mb {
-    background: var(--primary);
-    color: white;
-    border: none;
-    box-shadow: 0 4px 15px var(--primary-20);
-  }
-
-  .auto-btn:hover {
-    transform: translateY(-2px);
-    filter: brightness(1.1);
-  }
-
-  .modal-header h2 { margin: 0; color: white; font-size: 1.2rem; }
+  .tag-form input:focus, .tag-form textarea:focus { border-color: var(--primary); background: var(--surface); }
+  .tag-form textarea { height: 120px; font-family: inherit; }
 
   .relative { position: relative; }
-
   .suggestions {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    width: 100%;
-    background: #1e293b;
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 12px;
-    z-index: 10;
-    margin-top: 4px;
-    max-height: 200px;
-    overflow-y: auto;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    position: absolute; top: 100%; left: 0; width: 100%;
+    background: var(--surface-container-highest); border: 1px solid var(--border-color);
+    border-radius: 12px; z-index: 10; margin-top: 4px; max-height: 150px; overflow-y: auto;
   }
-
   .suggestions button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 0.8rem 1rem;
-    background: transparent;
-    border: none;
-    color: white;
-    cursor: pointer;
+    display: block; width: 100%; text-align: left; padding: 0.8rem 1rem;
+    background: transparent; border: none; color: var(--text-main); cursor: pointer;
   }
-
   .suggestions button:hover { background: var(--primary-10); color: var(--primary); }
 
-  .results-picker {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    overflow-y: auto;
+  .footer-actions {
+    display: flex; justify-content: flex-end; gap: 1.5rem;
+    padding: 2rem 2.5rem; border-top: 1px solid var(--border-color); background: rgba(0,0,0,0.1);
   }
-
-  .results-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.8rem;
-  }
-
-  .result-item {
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.05);
-    padding: 0.6rem;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    cursor: pointer;
-    text-align: left;
-    color: white;
-    width: 100%;
-    transition: all 0.2s;
-  }
-
-  .result-item:hover { border-color: #ff3366; background: rgba(255, 51, 102, 0.1); }
-
-  .result-item img { width: 42px; height: 42px; border-radius: 6px; object-fit: cover; }
-
-  .res-info { display: flex; flex-direction: column; overflow: hidden; }
-  .res-title { font-weight: 700; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .res-sub { font-size: 0.75rem; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.7; }
-
-  .tag-form {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
-  }
-
-  .checkbox-row {
-    flex-direction: row !important;
-    align-items: center;
-    gap: 0.8rem !important;
-    cursor: pointer;
-    background: var(--surface-container);
-    padding: 0.8rem 1.2rem;
-    border-radius: 12px;
-    border: 1px solid var(--border-color);
-  }
-
-  .checkbox-row input {
-    margin: 0;
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
-    accent-color: var(--primary);
-    cursor: pointer;
-  }
-
-  .checkbox-row span {
-    margin-top: 0 !important;
-    color: var(--text-main) !important;
-    font-weight: 600;
-  }
-
-  .tag-form label {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    color: #94a3b8;
-  }
-
-  .label-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .mini-btn {
-    background: var(--primary-10);
-    color: var(--primary);
-    border: none;
-    padding: 0.3rem 0.6rem;
-    border-radius: 8px;
-    font-size: 0.8rem;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .tag-form input:not([type="checkbox"]), .tag-form textarea {
-    background: var(--surface-container);
-    border: 1px solid var(--border-color);
-    color: var(--text-main);
-    padding: 0.8rem 1.2rem;
-    border-radius: 12px;
-    font-size: 1rem;
-    outline: none;
-    width: 100%;
-    box-sizing: border-box;
-    transition: border-color 0.2s, background 0.2s;
-  }
-
-  .tag-form textarea {
-    height: 150px;
-    resize: vertical;
-    font-family: inherit;
-    line-height: 1.5;
-  }
-
-  .tag-form input:focus, .tag-form textarea:focus {
-    border-color: var(--primary);
-    background: var(--surface);
-  }
-
-  /* Hide number input spinners */
-  input::-webkit-outer-spin-button,
-  input::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    appearance: none;
-    margin: 0;
-  }
-  input[type=number] {
-    -moz-appearance: textfield;
-  }
-
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 1rem;
-  }
-
   .save-btn {
-    background: var(--primary);
-    color: white;
-    padding: 1rem 2.5rem;
-    border-radius: 14px;
-    font-weight: 700;
-    border: none;
-    cursor: pointer;
-    box-shadow: 0 8px 20px var(--primary-10);
-    transition: all 0.2s;
+    background: var(--primary); color: white; padding: 1rem 3rem;
+    border-radius: 100px; font-weight: 800; border: none; cursor: pointer;
+    box-shadow: 0 10px 30px var(--primary-20); transition: all 0.2s;
   }
-  .save-btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
-  .save-btn:disabled { opacity: 0.5; filter: grayscale(1); }
+  .save-btn:hover { transform: translateY(-3px); }
+  .cancel-btn { background: transparent; border: none; color: #64748b; font-weight: 600; cursor: pointer; }
 
-  .editor-hero {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  /* Compact Mode for Hero when results appear */
-  .compact-hero {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-  }
-
-  .compact-hero .cover-canvas {
-    width: 64px !important;
-    height: 64px !important;
-    margin-bottom: 0 !important;
-    border-radius: 12px !important;
-  }
-
-  .compact-hero .hero-info h3 { font-size: 1rem; }
-  .compact-hero .hero-info p { font-size: 0.8rem; }
-
-  .cancel-btn {
-    background: transparent;
-    border: none;
-    color: #94a3b8;
-    cursor: pointer;
-    font-weight: 600;
-    padding: 0.8rem;
-  }
-
-  .cover-canvas {
-      position: relative;
-      width: 100%;
-      aspect-ratio: 1;
-      border-radius: 24px;
-      overflow: hidden;
-      flex-shrink: 0;
-      box-shadow: 0 12px 40px rgba(0,0,0,0.4);
-      margin-bottom: 1rem;
-  }
-
-  .cover-canvas img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-  }
-
-  .cover-overlay {
-      position: absolute;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.4);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      opacity: 0;
-      transition: opacity 0.2s;
-  }
-
-  .hero-info h3 { margin: 0; font-size: 1.2rem; color: white; font-weight: 900; }
-  .hero-info p { margin: 0.3rem 0 0; font-size: 1rem; color: #94a3b8; font-weight: 600; }
-
-  .picker-header { margin-bottom: 1rem; }
-  .picker-header h3 { margin: 0; color: white; font-size: 1.2rem; }
-  .picker-header p { margin: 0.3rem 0; font-size: 0.85rem; color: #94a3b8; }
-
-
-  .lyric-chips {
-      display: flex;
-      gap: 0.5rem;
-      overflow-x: auto;
-      padding-bottom: 0.5rem;
-      scrollbar-width: none;
-  }
-  .lyric-chips::-webkit-scrollbar { display: none; }
-
-  .lyric-chip {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      padding: 0.4rem 0.8rem;
-      border-radius: 20px;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      color: #94a3b8;
-      font-size: 0.75rem;
-      font-weight: 600;
-      white-space: nowrap;
-      cursor: pointer;
-      transition: all 0.2s;
-  }
-
-  .lyric-chip:hover {
-      background: rgba(255,255,255,0.1);
-      border-color: #ff3366;
-  }
-
-  .lyric-chip.sync {
-      background: #ffcc00;
-      color: #1e293b;
-      border: none;
-  }
-  .field-hint {
-    font-size: 0.65rem;
-    color: var(--text-muted);
-    opacity: 0.7;
-    margin-top: 4px;
-    font-weight: 600;
-    display: block;
-  }
+  input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; }
 </style>
