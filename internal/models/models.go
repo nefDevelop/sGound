@@ -24,6 +24,7 @@ type Track struct {
 	Title      string `json:"title"`
 	Artist     string `json:"artist"`
 	Album      string `json:"album"`
+	Year       int    `json:"year"`
 	TrackNum   int    `json:"trackNum"`
 	TrackTotal int    `json:"trackTotal,omitempty"`
 	DiscNum    int    `json:"discNum,omitempty"`

@@ -972,7 +972,20 @@
         <Maintenance 
           subview={selectedMaintenanceView} 
           onviewchange={(v) => navigate('maintenance', { subview: v })}
-          onfixTags={() => { /* logic to open tag editor */ }} 
+          onfixTags={async () => {
+            try {
+              const res = await fetch('/api/library/missing-tags');
+              const tracks = await res.json();
+              if (tracks && tracks.length > 0) {
+                selectedTracks = tracks;
+                isMassiveEditorOpen = true;
+              } else {
+                showToast("No tracks with missing metadata found", "info");
+              }
+            } catch (e) {
+              showToast("Failed to fetch missing tracks", "error");
+            }
+          }} 
           onedit={(track) => openEditor(track)}
           bind:refresh={maintenanceRefresh}
         />

@@ -132,6 +132,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/api/library/missing-covers", auth(s.handleLibraryMissingCovers))
 	mux.HandleFunc("/api/library/small-covers", auth(s.handleLibrarySmallCovers))
 	mux.HandleFunc("/api/library/huge-covers", auth(s.handleLibraryHugeCovers))
+	mux.HandleFunc("/api/library/missing-tags", auth(s.handleLibraryMissingTags))
 	mux.HandleFunc("/api/library/normalize-cover", auth(s.handleNormalizeCover))
 	mux.HandleFunc("/api/library/cleanup", auth(s.handleLibraryCleanup))
 	mux.HandleFunc("/api/library/organize", auth(s.handleOrganizeLibrary))
@@ -2305,7 +2306,15 @@ func (s *Server) handleLibraryHealth(w http.ResponseWriter, r *http.Request) {
 	health := make(map[string]interface{})
 
 	var incomplete int
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE (genre IS NULL OR genre = '') AND status = 'active'").Scan(&incomplete)
+	s.getDB(r).Conn.QueryRow(`
+		SELECT COUNT(*) FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists ar ON al.artist_id = ar.id
+		WHERE status = 'active' AND (
+			(t.genre IS NULL OR t.genre = '' OR t.genre = 'Unknown') OR
+			(ar.name = 'Unknown Artist') OR
+			(al.title = 'Unknown Album')
+		)`).Scan(&incomplete)
 	health["missingTags"] = incomplete
 
 	// Duplicados
@@ -2332,6 +2341,37 @@ func (s *Server) handleLibraryHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health)
+}
+
+func (s *Server) handleLibraryMissingTags(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.getDB(r).Conn.Query(`
+		SELECT t.id, t.title, COALESCE(t.genre, ''), ar.name as artist, al.title as album, al.year
+		FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists ar ON al.artist_id = ar.id
+		WHERE t.status = 'active' AND (
+			(t.genre IS NULL OR t.genre = '' OR t.genre = 'Unknown') OR
+			(ar.name = 'Unknown Artist') OR
+			(al.title = 'Unknown Album')
+		)
+		LIMIT 500
+	`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var tracks []models.Track
+	for rows.Next() {
+		var t models.Track
+		if err := rows.Scan(&t.ID, &t.Title, &t.Genre, &t.Artist, &t.Album, &t.Year); err == nil {
+			tracks = append(tracks, t)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tracks)
 }
 
 func (s *Server) handleLibraryDuplicates(w http.ResponseWriter, r *http.Request) {

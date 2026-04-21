@@ -19,7 +19,7 @@
   });
   
   let currentList = $state([]);
-  let currentView = $derived(subview); // 'overview', 'duplicates', 'orphans', 'low-quality', 'logs', 'missing-covers', 'small-covers', 'huge-covers'
+  let currentView = $derived(subview); // 'overview', 'duplicates', 'orphans', 'low-quality', 'logs', 'missing-covers', 'small-covers', 'huge-covers', 'missing-tags'
   let loading = $state(false);
   
   let contextMenu = $state({
@@ -271,7 +271,10 @@
           <span class="lbl">Missing Metadata</span>
         </div>
         <span class="val">{health.missingTags}</span>
-        <button class="bento-btn primary" onclick={() => onfixTags?.()}>Batch Fix</button>
+        <div class="card-actions-row">
+          <button class="bento-btn" onclick={() => loadDetail('missing-tags')}>Inspect</button>
+          <button class="bento-btn primary" onclick={() => onfixTags?.()}>Batch Fix</button>
+        </div>
       </div>
 
       <div class="bento-card highlight terminal">
@@ -301,6 +304,8 @@
               Artwork smaller than 300x300 pixels (low resolution).
             {:else if currentView === 'huge-covers'}
               Artwork larger than 1500px or 2MB (performance impact).
+            {:else if currentView === 'missing-tags'}
+              Tracks with incomplete or placeholder metadata.
             {:else}
               Library items requiring attention.
             {/if}
@@ -573,6 +578,7 @@
   }
 
   .title-wrap { display: flex; flex-direction: column; gap: 0.5rem; }
+  .card-actions-row { display: flex; gap: 1rem; width: 100%; }
 
   .groups-container { display: flex; flex-direction: column; gap: 3rem; }
 

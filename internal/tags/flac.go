@@ -3,6 +3,8 @@ package tags
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -16,8 +18,38 @@ type flacMetadata struct {
 	path   string
 }
 
+// ParseFLAC abre un archivo FLAC saltando posibles tags ID3v2 al inicio
+func ParseFLAC(path string) (*flac.File, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	header := make([]byte, 10)
+	if _, err := io.ReadFull(f, header); err != nil {
+		return nil, err
+	}
+
+	var offset int64
+	if string(header[:3]) == "ID3" {
+		// El tamaño en ID3v2 es un entero "synchsafe" (7 bits por byte)
+		size := int64(header[6])<<21 | int64(header[7])<<14 | int64(header[8])<<7 | int64(header[9])
+		offset = 10 + size
+		if (header[5]&0x10) != 0 { // Flag de footer
+			offset += 10
+		}
+	}
+
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	return flac.ParseBytes(f)
+}
+
 func OpenFLAC(path string) (Metadata, error) {
-	f, err := flac.ParseFile(path)
+	f, err := ParseFLAC(path)
 	if err != nil { return nil, err }
 	
 	m := &flacMetadata{file: f, comments: make(map[string]string), path: path}

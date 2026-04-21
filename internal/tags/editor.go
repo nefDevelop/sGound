@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/hex"
@@ -73,7 +74,7 @@ func ReadPersistentID(path string) string {
 			}
 		}
 	} else if ext == ".flac" {
-		f, err := flac.ParseFile(path)
+		f, err := ParseFLAC(path)
 		if err != nil { return "" }
 		for _, block := range f.Meta {
 			if block.Type == flac.VorbisComment {
@@ -106,7 +107,7 @@ func WritePersistentID(path string, id string) error {
 		// Forzar guardado completo si es necesario
 		return tag.Save()
 	} else if ext == ".flac" {
-		f, err := flac.ParseFile(path)
+		f, err := ParseFLAC(path)
 		if err != nil { return err }
 		var cm *flacvorbis.MetaDataBlockVorbisComment
 		var cmIdx = -1
@@ -195,7 +196,7 @@ func ReadTagsFromFile(path string) (map[string]string, error) {
 		}
 
 	} else if ext == ".flac" {
-		f, err := flac.ParseFile(path)
+		f, err := ParseFLAC(path)
 		if err != nil { return nil, err }
 		for _, block := range f.Meta {
 			if block.Type == flac.VorbisComment {
@@ -409,18 +410,25 @@ func (e *Editor) OrganizeFile(trackID string, musicRoot string, pattern string) 
 	)
 	if err != nil { return "", err }
 
-	clean := func(s string) string {
+	clean := func(s string, fallback string) string {
+		if s == "" || s == "0" { return fallback }
 		r := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "-", "\"", "-", "<", "-", ">", "-", "|", "-")
-		return strings.TrimSpace(r.Replace(s))
+		res := strings.TrimSpace(r.Replace(s))
+		if res == "" { return fallback }
+		return res
 	}
 
 	newRelPath := pattern
-	newRelPath = strings.ReplaceAll(newRelPath, "{artist}", clean(artist))
-	newRelPath = strings.ReplaceAll(newRelPath, "{album}", clean(album))
-	newRelPath = strings.ReplaceAll(newRelPath, "{title}", clean(title))
-	newRelPath = strings.ReplaceAll(newRelPath, "{genre}", clean(genre))
+	newRelPath = strings.ReplaceAll(newRelPath, "{artist}", clean(artist, "Unknown Artist"))
+	newRelPath = strings.ReplaceAll(newRelPath, "{album}", clean(album, "Unknown Album"))
+	newRelPath = strings.ReplaceAll(newRelPath, "{title}", clean(title, "Unknown Title"))
+	newRelPath = strings.ReplaceAll(newRelPath, "{genre}", clean(genre, "Unknown"))
 	newRelPath = strings.ReplaceAll(newRelPath, "{format}", strings.ToLower(format))
-	newRelPath = strings.ReplaceAll(newRelPath, "{year}", fmt.Sprintf("%d", year))
+	
+	yearStr := fmt.Sprintf("%d", year)
+	if year <= 0 { yearStr = "Unknown Year" }
+	newRelPath = strings.ReplaceAll(newRelPath, "{year}", yearStr)
+	
 	newRelPath = strings.ReplaceAll(newRelPath, "{track}", fmt.Sprintf("%02d", trackNum))
 	newRelPath = strings.ReplaceAll(newRelPath, "{disc}", fmt.Sprintf("%d", discNum))
 	newRelPath = strings.ReplaceAll(newRelPath, "{bitrate}", fmt.Sprintf("%dk", bitrate/1000))
@@ -442,8 +450,21 @@ func (e *Editor) OrganizeFile(trackID string, musicRoot string, pattern string) 
 
 	newDirPath := filepath.Dir(newPath)
 	if err := os.MkdirAll(newDirPath, 0755); err != nil { return "", err }
+	oldDir := filepath.Dir(oldPath)
 	moveSidecars(oldPath, newPath)
 	if err := os.Rename(oldPath, newPath); err != nil { return "", err }
+
+	// Limpiar directorios antiguos si quedan vacíos
+	go func(dirPath string) {
+		time.Sleep(50 * time.Millisecond)
+		d := dirPath
+		for d != musicRoot && d != "." && d != "/" {
+			entries, _ := os.ReadDir(d)
+			if len(entries) > 0 { break }
+			if err := os.Remove(d); err != nil { break }
+			d = filepath.Dir(d)
+		}
+	}(oldDir)
 
 	_, err = e.DB.Conn.Exec("UPDATE tracks SET path = ? WHERE id = ?", newPath, trackID)
 	return newPath, err
@@ -492,7 +513,7 @@ func (e *Editor) EmbedCover(trackID string, imgData []byte, mimeType string) err
 		})
 		return tag.Save()
 	case ".flac":
-		f, err := flac.ParseFile(path)
+		f, err := ParseFLAC(path)
 		if err != nil { return err }
 		var newMeta []*flac.MetaDataBlock
 		for _, block := range f.Meta { if block.Type != flac.Picture { newMeta = append(newMeta, block) } }
@@ -528,7 +549,7 @@ func (e *Editor) ReadLyrics(trackID string) (string, error) {
 		frames := tag.GetFrames(tag.CommonID("Unsynchronised lyrics/text transcription"))
 		for _, f := range frames { if lf, ok := f.(id3v2.UnsynchronisedLyricsFrame); ok { return lf.Lyrics, nil } }
 	case ".flac":
-		f, _ := flac.ParseFile(path)
+		f, _ := ParseFLAC(path)
 		if f == nil { return "", nil }
 		for _, block := range f.Meta {
 			if block.Type == flac.VorbisComment {
@@ -545,7 +566,7 @@ func (e *Editor) ReadLyrics(trackID string) (string, error) {
 }
 
 func updateVorbisLyrics(path string, lyrics string) error {
-	f, _ := flac.ParseFile(path)
+	f, _ := ParseFLAC(path)
 	var cm *flacvorbis.MetaDataBlockVorbisComment
 	var cmIdx = -1
 	for i, block := range f.Meta { if block.Type == flac.VorbisComment { cm, _ = flacvorbis.ParseFromMetaDataBlock(*block); cmIdx = i; break } }
@@ -607,7 +628,7 @@ func updateMP3(path string, trackID string, data map[string]interface{}) error {
 }
 
 func updateFLAC(path string, trackID string, data map[string]interface{}) error {
-	f, err := flac.ParseFile(path)
+	f, err := ParseFLAC(path)
 	if err != nil { return err }
 	var cm *flacvorbis.MetaDataBlockVorbisComment
 	var cmIdx = -1
