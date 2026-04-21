@@ -523,9 +523,10 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	var bitRate, sampleRate int
 	var duration float64
 	lowerExt := strings.ToLower(filepath.Ext(path))
-	if lowerExt == ".flac" {
+	switch lowerExt {
+	case ".flac":
 		duration, bitRate, sampleRate, _ = getFLACDurationNative(path)
-	} else if lowerExt == ".mp3" {
+	case ".mp3":
 		duration, bitRate, sampleRate, _ = getMP3DurationNative(path)
 	}
 

@@ -27,6 +27,7 @@
     totalPlaylists: 0,
     totalGenres: 0,
     inboxCount: 0,
+    rawCount: 0,
     forgottenGems: [],
     mostPlayed: [],
     discovery: [],
@@ -93,10 +94,10 @@
     <section class="bento-item welcome-tile">
       <div class="welcome-header">
         <h1>Welcome back, <span>User</span></h1>
-        {#if $inboxCount > 0 || $rawCount > 0}
+        {#if (stats.inboxCount > 0 || stats.rawCount > 0) || ($inboxCount > 0 || $rawCount > 0) || (scanStatus.inboxCount > 0 || scanStatus.rawCount > 0)}
           <button class="inbox-notification-badge" onclick={onselectInbox} title="View pending tracks">
             <Icon name="inbox" size={24} />
-            <span class="badge-number">{$inboxCount + $rawCount}</span>
+            <span class="badge-number">{Math.max(stats.inboxCount + (stats.rawCount || 0), $inboxCount + $rawCount, scanStatus.inboxCount + scanStatus.rawCount)}</span>
           </button>
         {/if}
       </div>
@@ -118,9 +119,9 @@
         </button>
       </div>
 
-      {#if stats.totalTracks === 0 && ($inboxCount > 0 || $rawCount > 0)}
+      {#if stats.totalTracks === 0 && (stats.inboxCount > 0 || $inboxCount > 0 || scanStatus.inboxCount > 0)}
         <div class="welcome-inbox-prompt">
-          <p>Your library is empty, but you have <b>{$inboxCount + $rawCount}</b> tracks waiting in the Inbox.</p>
+          <p>Your library is empty, but you have <b>{Math.max(stats.inboxCount, $inboxCount, scanStatus.inboxCount)}</b> tracks waiting in the Inbox.</p>
           <button class="primary-btn" onclick={onselectInbox}>
             <Icon name="inbox" size={18} />
             Review Inbox

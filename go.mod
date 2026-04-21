@@ -3,7 +3,6 @@ module sgound
 go 1.25.0
 
 require (
-	github.com/abema/go-mp4 v1.5.0
 	github.com/bogem/id3v2/v2 v2.1.4
 	github.com/disintegration/imaging v1.6.2
 	github.com/fsnotify/fsnotify v1.9.0

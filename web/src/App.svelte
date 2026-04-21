@@ -653,7 +653,7 @@
   });
 
   // Visibilidad del Inbox basada en los contadores globales
-  let hasPendingMusic = $derived($inboxCount > 0 || $rawCount > 0);
+  let hasPendingMusic = $derived($inboxCount > 0 || $rawCount > 0 || scanStatus.inboxCount > 0 || scanStatus.rawCount > 0);
 </script>
 
 <svelte:head>
