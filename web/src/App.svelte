@@ -885,15 +885,7 @@
               {#if scanStatus.scanning}
                 <div class="spinner"></div>
                 <p>Escaneando biblioteca... ({scanStatus.processed} procesados)</p>
-              {/if}
-              
-              {#if $inboxCount > 0 || $rawCount > 0}
-                <div class="inbox-alert">
-                  <Icon name="inbox" size={48} />
-                  <p>Tu biblioteca está vacía, pero tienes <b>{$inboxCount + $rawCount}</b> canciones en el Inbox pendientes de aprobar.</p>
-                  <button class="primary-btn" onclick={() => navigate('inbox')}>Ir al Inbox</button>
-                </div>
-              {:else if !scanStatus.scanning}
+              {:else}
                 <div class="empty-icon"><Icon name="music" size={64} /></div>
                 <p>No se han encontrado canciones. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
               {/if}

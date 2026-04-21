@@ -119,15 +119,7 @@
         </button>
       </div>
 
-      {#if stats.totalTracks === 0 && (stats.inboxCount > 0 || $inboxCount > 0 || scanStatus.inboxCount > 0)}
-        <div class="welcome-inbox-prompt">
-          <p>Your library is empty, but you have <b>{Math.max(stats.inboxCount, $inboxCount, scanStatus.inboxCount)}</b> tracks waiting in the Inbox.</p>
-          <button class="primary-btn" onclick={onselectInbox}>
-            <Icon name="inbox" size={18} />
-            Review Inbox
-          </button>
-        </div>
-      {/if}
+
 
       {#if scanStatus?.scanning}
         <div class="welcome-scan-status">
@@ -574,42 +566,6 @@
     font-size: 0.85rem;
     font-weight: 700;
     color: var(--text-main);
-  }
-
-  .welcome-inbox-prompt {
-    margin-top: 2rem;
-    padding: 1.5rem;
-    background: var(--primary-10);
-    border: 1px dashed var(--primary-40);
-    border-radius: 20px;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1rem;
-    z-index: 1;
-    position: relative;
-    max-width: 400px;
-    animation: fadeIn 0.4s ease;
-  }
-  .welcome-inbox-prompt p { margin: 0; font-size: 1rem; color: var(--text-main); font-weight: 500; }
-  .welcome-inbox-prompt .primary-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    padding: 0.8rem 1.5rem;
-    background: var(--primary);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    font-weight: 800;
-    cursor: pointer;
-    transition: all 0.2s;
-    box-shadow: 0 4px 15px var(--primary-20);
-  }
-  .welcome-inbox-prompt .primary-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px var(--primary-30);
-    background: #4f46e5; /* Un poco más oscuro */
   }
 
   .genre-bars { display: flex; flex-direction: column; gap: 0.8rem; }
