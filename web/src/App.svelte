@@ -907,7 +907,7 @@
       {:else if currentView === "albums"}
         <AlbumsGrid 
           artistId={selectedArtistId}
-          onselectAlbum={(id) => navigate("tracks", { albumId: id })}
+          onselectAlbum={(id) => navigate("album", { albumId: id })}
           onplayAlbum={handlePlayAlbum}
           onqueueAlbum={handleQueueAlbum}
           oneditAlbum={openEditor}

@@ -140,11 +140,12 @@
     onselectionChange?.(Array.from(selectedIds).map(sid => tracks.find(t => t.id === sid)));
   }
 
-  function toggleAll() {
-    if (selectedIds.size === tracks.length) {
-      selectedIds.clear();
-    } else {
+  function toggleAll(e) {
+    const checked = e.target.checked;
+    if (checked) {
       tracks.forEach(t => selectedIds.add(t.id));
+    } else {
+      selectedIds.clear();
     }
     selectedIds = new Set(selectedIds);
     onselectionChange?.(Array.from(selectedIds).map(sid => tracks.find(t => t.id === sid)));
