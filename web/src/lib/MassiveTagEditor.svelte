@@ -137,20 +137,22 @@
   // Pre-poblar campos si son comunes a todos los tracks (solo al abrir)
   $effect(() => {
     if (isOpen && selectedTracks.length > 0 && !initialized) {
-      const getCommon = (field) => {
+      const getBase = (field) => {
+        if (selectedTracks.length === 0) return '';
         const firstVal = selectedTracks[0][field];
         if (selectedTracks.every(t => t[field] === firstVal)) return firstVal;
-        return '';
+        // Si no son todos iguales, devolvemos el primero como sugerencia para la búsqueda
+        return firstVal || '';
       };
       
       bulkData = {
-        artist: getCommon('artist'),
-        albumArtist: getCommon('albumArtist'),
-        album: getCommon('album'),
-        genre: getCommon('genre'),
-        year: getCommon('year') || '',
-        composer: getCommon('composer'),
-        trackTotal: getCommon('trackTotal') || ''
+        artist: getBase('artist'),
+        albumArtist: getBase('albumArtist'),
+        album: getBase('album'),
+        genre: getBase('genre'),
+        year: getBase('year') || '',
+        composer: getBase('composer'),
+        trackTotal: getBase('trackTotal') || ''
       };
 
       // Normalizar trackNums si faltan (sin disparar el effect infinitamente)
@@ -707,7 +709,7 @@
   }
   .tag-form input:focus { border-color: var(--primary); background: var(--surface); }
 
-  .bulk-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-top: 0.5rem; }
+  .bulk-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin-top: 0.5rem; }
 
   .tool-btn {
     background: var(--surface-container-high); 
