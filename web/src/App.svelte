@@ -243,13 +243,14 @@
     selectedSmart = null;
 
     // 2. Asignación de la nueva vista y sus parámetros
-    currentView = view;
     if (params.artistId) selectedArtistId = params.artistId;
     if (params.albumId) selectedAlbumId = params.albumId;
     if (params.playlist) selectedPlaylist = params.playlist;
     if (params.smart) selectedSmart = params.smart;
     if (params.subview) selectedMaintenanceView = params.subview;
     else if (view === 'maintenance') selectedMaintenanceView = 'overview';
+    
+    currentView = view;
 
     // 3. Gestión del Historial del Navegador
     if (push || replace) {

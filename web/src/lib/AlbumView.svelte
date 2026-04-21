@@ -11,7 +11,9 @@
   let tracks = $state([]);
   let loading = $state(true);
 
-  onMount(fetchAlbumDetails);
+  $effect(() => {
+    if (albumId) fetchAlbumDetails();
+  });
 
   async function fetchAlbumDetails() {
     loading = true;
@@ -91,6 +93,12 @@
         onedit={onedit}
       />
     </div>
+  {:else if !loading}
+    <div class="empty-state">
+      <Icon name="alertCircle" size={64} />
+      <p>Could not load album details.</p>
+      <button class="play-btn" onclick={onback}>Go Back</button>
+    </div>
   {/if}
 </div>
 
@@ -113,8 +121,7 @@
     border-radius: 32px;
   }
 
-  .meta { display: flex; flex-direction: column; gap: 0.5rem; }
-  .meta { display: flex; flex-direction: column; gap: 0.2rem; align-self: center; }
+  .meta { display: flex; flex-direction: column; gap: 0.8rem; align-self: flex-end; }
   .type-label { text-transform: uppercase; font-size: 0.8rem; font-weight: 950; letter-spacing: 2px; color: var(--primary); opacity: 0.8; }
   
   .title-row { display: flex; align-items: center; gap: 1.2rem; }
