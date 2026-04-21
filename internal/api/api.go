@@ -121,6 +121,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/api/cover/", auth(s.handleGetCover))
 	mux.HandleFunc("/api/tracks", auth(s.handleGetTracks))
 	mux.HandleFunc("/api/tracks/", auth(s.handleTrackActions))
+	mux.HandleFunc("/api/tracks/{id}/cover-url", auth(s.handleSetCoverURL))
 	mux.HandleFunc("/api/scan", auth(s.handleScan))
 	mux.HandleFunc("/api/config", auth(s.handleConfig))
 	mux.HandleFunc("/api/search", auth(s.handleSearch))
@@ -1055,7 +1056,7 @@ func (s *Server) handleGetAlbumTracks(albumID string, w http.ResponseWriter, r *
 	}
 
 	query := fmt.Sprintf(`
-		SELECT t.id, t.title, t.track_num, t.duration, t.genre, COALESCE(t.artist, a.name) as artist
+		SELECT t.id, t.title, t.track_num, t.duration, t.genre, COALESCE(t.artist, a.name) as artist, al.title as album
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id
@@ -1071,15 +1072,15 @@ func (s *Server) handleGetAlbumTracks(albumID string, w http.ResponseWriter, r *
 
 	var tracks []map[string]interface{}
 	for rows.Next() {
-		var id, title, genre, artist string
+		var id, title, genre, artist, album string
 		var trackNum int
 		var duration float64
-		if err := rows.Scan(&id, &title, &trackNum, &duration, &genre, &artist); err != nil {
+		if err := rows.Scan(&id, &title, &trackNum, &duration, &genre, &artist, &album); err != nil {
 			slog.Error("Scan failed in handleGetAlbumTracks", "error", err)
 			continue
 		}
 		tracks = append(tracks, map[string]interface{}{
-			"id": id, "title": title, "trackNum": trackNum, "duration": duration, "genre": genre, "artist": artist,
+			"id": id, "title": title, "trackNum": trackNum, "duration": duration, "genre": genre, "artist": artist, "album": album,
 		})
 	}
 
@@ -1187,6 +1188,47 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	http.ServeFile(w, r, fpath)
 }
+func (s *Server) handleSetCoverURL(w http.ResponseWriter, r *http.Request) {
+	trackID := s.extractID(r, "/api/tracks/")
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// 1. Descargar imagen
+	resp, err := http.Get(body.URL)
+	if err != nil {
+		http.Error(w, "Failed to download image", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	imgData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		http.Error(w, "Failed to read image", http.StatusInternalServerError)
+		return
+	}
+
+	mimeType := resp.Header.Get("Content-Type")
+
+	// 2. Embeber en el archivo
+	editor := tags.NewEditor(s.getDB(r))
+	if err := editor.EmbedCover(trackID, imgData, mimeType); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Limpiar caché de carátula
+	cachePath := filepath.Join(s.Config.CachePath, "covers", trackID+".jpg")
+	os.Remove(cachePath)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success"}`))
+}
+
 func (s *Server) handleEditTags(trackID string, w http.ResponseWriter, r *http.Request) {
 	var body map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
