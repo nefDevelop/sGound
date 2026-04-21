@@ -221,8 +221,8 @@
         checkScanStatus();
       }
 
-      // 4. Mantener un chequeo periódico lento (15s) para detectar escaneos de fondo
-      setInterval(checkScanStatus, 15000);
+      // 4. Mantener un chequeo periódico (8s) para detectar escaneos o cambios de fondo
+      setInterval(checkScanStatus, 8000);
 
     } catch (e) {
       console.error("Initialization check failed:", e);
@@ -703,7 +703,7 @@
         onclick={() => navigate("dashboard")}
       >
         <div class="nav-icon-wrap">
-          <Icon name={hasPendingMusic ? "inbox" : "grid"} size={18} />
+          <Icon name="grid" size={18} />
           {#if hasPendingMusic}
             <span class="nav-notification-dot"></span>
           {/if}
@@ -713,20 +713,6 @@
           <span class="nav-badge">{$inboxCount + $rawCount}</span>
         {/if}
       </button>
-
-      {#if hasPendingMusic}
-        <button
-          class="nav-item inbox-nav"
-          class:active={currentView === "inbox"}
-          onclick={() => navigate("inbox")}
-        >
-          <div class="nav-icon-wrap">
-            <Icon name="inbox" size={18} />
-          </div>
-          <span>Inbox</span>
-          <span class="nav-badge">{$inboxCount + $rawCount}</span>
-        </button>
-      {/if}
 
       <div class="nav-label">Library</div>
       <button
