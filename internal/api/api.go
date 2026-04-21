@@ -835,7 +835,7 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 	artistID = strings.TrimSuffix(artistID, "/image")
 
 	if artistID == "" {
-		http.NotFound(w, r)
+		s.servePlaceholderArtist(w)
 		return
 	}
 
@@ -855,7 +855,7 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 	var name string
 	err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ?", artistID).Scan(&imageURL, &name)
 	if err != nil {
-		http.NotFound(w, r)
+		s.servePlaceholderArtist(w)
 		return
 	}
 
@@ -869,7 +869,7 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 			_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?",
 				ext.Image, ext.Biography, tagsStr, similarStr, artistID)
 		} else {
-			http.NotFound(w, r)
+			s.servePlaceholderArtist(w)
 			return
 		}
 	}
@@ -877,7 +877,7 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 	// 3. Descargar y Procesar
 	resp, err := http.Get(imageURL)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		http.NotFound(w, r)
+		s.servePlaceholderArtist(w)
 		return
 	}
 	defer resp.Body.Close()
@@ -911,6 +911,12 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=604800")
 	w.Header().Set("Content-Type", "image/jpeg")
 	imaging.Encode(w, resized, imaging.JPEG)
+}
+
+func (s *Server) servePlaceholderArtist(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=604800")
+	fmt.Fprint(w, `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`)
 }
 
 func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r *http.Request) {
@@ -3232,10 +3238,11 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
-
 	trackID := s.extractID(r, "/api/cover")
-	if trackID == "" {
-		http.NotFound(w, r)
+	
+	// Placeholder case
+	if trackID == "placeholder" || trackID == "" {
+		s.servePlaceholderCover(w)
 		return
 	}
 
@@ -3255,7 +3262,7 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		err = s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE album_id = ? LIMIT 1", trackID).Scan(&fpath)
 		if err != nil {
-			http.NotFound(w, r)
+			s.servePlaceholderCover(w)
 			return
 		}
 	}
@@ -3265,7 +3272,7 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 	absTrackPath, _ := filepath.Abs(fpath)
 	if !strings.HasPrefix(absTrackPath, absMusicPath) {
 		slog.Error("Unauthorized cover access attempt", "path", fpath, "user", r.Context().Value(userKey))
-		http.NotFound(w, r) // Using NotFound to not leak path existence
+		s.servePlaceholderCover(w)
 		return
 	}
 
@@ -3341,7 +3348,13 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Fallback: No hay carátula.
-	http.NotFound(w, r)
+	s.servePlaceholderCover(w)
+}
+
+func (s *Server) servePlaceholderCover(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=604800")
+	fmt.Fprint(w, `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`)
 }
 
 func (s *Server) handleServeOpenAPI(w http.ResponseWriter, r *http.Request) {
