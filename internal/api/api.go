@@ -1611,71 +1611,89 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	approvedCount := 0
+	failedCount := 0
+	db := s.getDB(r)
+
 	for _, oldID := range data.IDs {
-		db := s.getDB(r)
 		var path string
 		err := db.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", oldID).Scan(&path)
 		if err != nil {
+			failedCount++
 			continue
 		}
 
-		newID := tags.GenerateUUID()
-
-		// 1. Lo activamos PRIMERO en la DB
-		db.Conn.Exec("UPDATE tracks SET status = 'active' WHERE id = ?", oldID)
-		approvedCount++
-
-		// Silenciar el watcher para este archivo mientras escribimos tags
+		// Silenciar el watcher para este archivo mientras escribimos
 		if s.Watcher != nil {
-			s.Watcher.MutePath(path, 10*time.Second)
+			s.Watcher.MutePath(path, 15*time.Second)
 		}
 
-		// Lógica de Carátulas: Si no tiene interna, buscar local e incrustar
-		go func(p string, tid string) {
-			f, _ := os.Open(p)
-			if f != nil {
-				defer f.Close()
-				metadata, _ := tags.Open(p)
-				if metadata == nil || metadata.Picture() == nil {
-					dir := filepath.Dir(p)
-					common := []string{"cover", "folder", "front", "album"}
-					entries, _ := os.ReadDir(dir)
-					for _, ent := range entries {
-						name := strings.ToLower(ent.Name())
-						ext := filepath.Ext(name)
-						if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
-							continue
-						}
-						base := strings.TrimSuffix(name, ext)
-						for _, c := range common {
-							if base == c {
-								imgData, _ := os.ReadFile(filepath.Join(dir, ent.Name()))
-								mime := "image/jpeg"
-								if ext == ".png" {
-									mime = "image/png"
-								}
-								tags.NewEditor(s.MasterDB).EmbedCover(tid, imgData, mime)
-								return
-							}
-						}
+		newID := tags.GenerateUUID()
+		editor := tags.NewEditor(db)
+
+		// 1. Lógica de Carátulas (Síncrona ahora para garantizar integridad antes de activar)
+		func(p string, tid string) {
+			metadata, _ := tags.Open(p)
+			if metadata == nil || metadata.Picture() == nil {
+				dir := filepath.Dir(p)
+				common := []string{"cover", "folder", "front", "album", "artwork"}
+				entries, _ := os.ReadDir(dir)
+				for _, ent := range entries {
+					name := strings.ToLower(ent.Name())
+					ext := filepath.Ext(name)
+					if ext != ".jpg" && ext != ".jpeg" && ext != ".png" { continue }
+					base := strings.TrimSuffix(name, ext)
+					found := false
+					for _, c := range common {
+						if strings.HasPrefix(base, c) { found = true; break }
+					}
+					if found {
+						imgData, _ := os.ReadFile(filepath.Join(dir, ent.Name()))
+						mime := "image/jpeg"
+						if ext == ".png" { mime = "image/png" }
+						editor.EmbedCover(oldID, imgData, mime) // Usamos oldID porque aún no hemos cambiado el ID en DB
+						break
 					}
 				}
 			}
 		}(path, newID)
 
-		if err := tags.WritePersistentID(path, newID); err == nil {
-			// 2. Si se escribió correctamente el ID físico, actualizamos el ID en la DB
-			_, err = db.Conn.Exec("UPDATE tracks SET id = ? WHERE id = ?", newID, oldID)
+		// 2. Escritura física del PersistentID
+		if err := tags.WritePersistentID(path, newID); err != nil {
+			slog.Error("Failed to write persistent ID to file during approval", "path", path, "err", err)
+			failedCount++
+			continue
+		}
+
+		// 3. Actualización Atómica en DB (ID y Status)
+		// Usamos un bucle de reintento simple para el bloqueo de SQLite
+		dbSuccess := false
+		for i := 0; i < 3; i++ {
+			tx, err := db.Conn.Begin()
 			if err != nil {
-				slog.Error("Failed to update track ID in DB after physical write", "oldID", oldID, "newID", newID, "err", err)
-			} else {
-				// Si el track tenía tags en AutoRename, lo organizamos ahora que es oficial
-				if s.Config.AutoRename {
-					tags.NewEditor(db).OrganizeFile(newID, s.Config.MusicPath, s.Config.RenamePattern)
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			_, err1 := tx.Exec("UPDATE tracks SET id = ?, status = 'active' WHERE id = ?", newID, oldID)
+			if err1 == nil {
+				if err := tx.Commit(); err == nil {
+					dbSuccess = true
+					break
 				}
 			}
+			tx.Rollback()
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		if dbSuccess {
+			approvedCount++
+			// 4. Organización opcional (ahora que es oficial)
+			if s.Config.AutoRename {
+				editor.OrganizeFile(newID, s.Config.MusicPath, s.Config.RenamePattern)
+			}
 		} else {
-			slog.Error("Failed to write persistent ID to file during approval", "path", path, "err", err)
+			slog.Error("Failed to update track status in DB after physical write", "path", path)
+			failedCount++
 		}
 	}
 
@@ -2419,6 +2437,12 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 		processed = sStatus.Processed
 	}
 
+	isPaused := false
+	ramUsed := 0
+	if s.activeScanner != nil {
+		isPaused, ramUsed = s.activeScanner.GetStatus()
+	}
+
 	// Usamos el contador en caché para que sea ultra rápido
 	ic := s.inboxCount.Load()
 	rc := s.rawCount.Load()
@@ -2429,6 +2453,8 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 		"processed":  processed,
 		"rawCount":    rc,
 		"inboxCount": ic,
+		"isPaused":   isPaused,
+		"ramUsedMB":  ramUsed,
 	})
 }
 

@@ -117,7 +117,7 @@
     }
   });
 
-  let scanStatus = $state({ scanning: false, processed: 0, inboxCount: 0, rawCount: 0 });
+  let scanStatus = $state({ scanning: false, processed: 0, inboxCount: 0, rawCount: 0, isPaused: false, ramUsedMB: 0 });
   let pollingInterval = null;
   let dashRef = $state(null);
   let inboxRef = $state(null);
@@ -128,19 +128,6 @@
   let handleSkipBack = $state();
   let confirmState = $state({ isOpen: false, title: "", message: "", confirmLabel: "Confirm", type: "info", icon: null, onconfirm: null, oncancel: null });
 
-  function openConfirm(options) {
-    confirmState = {
-      isOpen: true,
-      title: options.title || "Confirmar",
-      message: options.message || "¿Estás seguro?",
-      confirmLabel: options.confirmLabel || "Confirmar",
-      type: options.type || "info",
-      icon: options.icon || null,
-      onconfirm: options.onconfirm,
-      oncancel: options.oncancel || null
-    };
-  }
-
   async function checkScanStatus() {
     if (!isLoggedIn) return;
     try {
@@ -149,12 +136,19 @@
       const data = await res.json();
       
       const wasScanning = scanStatus.scanning;
+      const wasPaused = scanStatus.isPaused;
       const prevInbox = $inboxCount;
       const prevRaw = $rawCount;
       
       scanStatus = data;
       inboxCount.set(data.inboxCount);
       rawCount.set(data.rawCount || 0);
+
+      if (data.isPaused && !wasPaused) {
+        showToast("Escáner pausado: RAM crítica", "info");
+      } else if (!data.isPaused && wasPaused) {
+        showToast("Escáner reanudado", "success");
+      }
 
       // REGLA: Solo refrescar si ha cambiado el INBOX o el estado RAW o si el escaneo ha terminado/empezado
       if (data.inboxCount !== prevInbox || data.rawCount !== prevRaw || wasScanning !== data.scanning) {
@@ -804,6 +798,12 @@
   </aside>
 
   <section class="content {currentView === 'fullplayer' ? 'full-player-view' : ''}">
+    {#if scanStatus.isPaused}
+      <div class="ram-warning-banner">
+        <Icon name="alertCircle" size={16} />
+        <span><b>Memory usage critical ({scanStatus.ramUsedMB}MB).</b> Scanner paused to prevent crash. Re-suming automatically when RAM is free...</span>
+      </div>
+    {/if}
     <header class="top-bar">
       <div class="search-box">
         <Search 
@@ -1307,6 +1307,21 @@
     top: 0;
     z-index: 100;
   }
+
+  .ram-warning-banner {
+    background: var(--primary);
+    color: white;
+    padding: 0.6rem 1.5rem;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    animation: slideDown 0.3s ease-out;
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+  }
+
+  @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+
   .search-box { width: 400px; }
 
   @media (max-width: 768px) {

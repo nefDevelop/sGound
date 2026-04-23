@@ -34,6 +34,11 @@ type Scanner struct {
 	OnProgress  func(path string, count int)
 	OnDiscovery func(count int)
 
+	// Estado para API
+	IsPaused  bool
+	RAMUsedMB int
+	muStatus  sync.Mutex
+
 	// Canales de prioridad
 	PriorityJobs chan string
 
@@ -72,6 +77,12 @@ func NewScanner(database *db.MasterDatabase) *Scanner {
 		seenAlbums:       make(map[string]struct{}),
 		dbFileCache:      make(map[string]dbFileInfo),
 	}
+}
+
+func (s *Scanner) GetStatus() (isPaused bool, ramUsedMB int) {
+	s.muStatus.Lock()
+	defer s.muStatus.Unlock()
+	return s.IsPaused, s.RAMUsedMB
 }
 
 // copyString fuerza una nueva asignación de memoria para romper vínculos con buffers grandes
@@ -153,7 +164,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	debug.SetMemoryLimit(150 * 1024 * 1024)
 	// ======================================
 
-	// ======= PERRO GUARDIÁN DE RAM (Watchdog) =======
+	// ======= PERRO GUARDIÁN DE RAM (Watchdog con Backpressure) =======
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
@@ -161,10 +172,20 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			realOSMB := (m.Sys - m.HeapReleased) / 1024 / 1024
-			if realOSMB > 250 {
-				slog.Warn("🚨 WATCHDOG: RAM crítica detectada, purgando...", "real_mb", realOSMB)
+			
+			s.muStatus.Lock()
+			s.RAMUsedMB = int(realOSMB)
+			if realOSMB > 300 {
+				if !s.IsPaused {
+					slog.Warn("🚨 WATCHDOG: RAM crítica detectada (>300MB), pausando escáner...", "real_mb", realOSMB)
+					s.IsPaused = true
+				}
 				debug.FreeOSMemory()
+			} else if realOSMB < 200 && s.IsPaused {
+				slog.Info("🟢 WATCHDOG: RAM estabilizada, reanudando escáner", "real_mb", realOSMB)
+				s.IsPaused = false
 			}
+			s.muStatus.Unlock()
 		}
 	}()
 	// ===========================================
@@ -364,6 +385,15 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		go func(wId int) {
 			defer wg.Done()
 			for {
+				// Backpressure check
+				for {
+					s.muStatus.Lock()
+					p := s.IsPaused
+					s.muStatus.Unlock()
+					if !p { break }
+					time.Sleep(1 * time.Second)
+				}
+
 				var path string
 				var ok bool
 
