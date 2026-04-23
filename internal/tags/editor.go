@@ -1,7 +1,9 @@
 package tags
 
 import (
+	"database/sql"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/hex"
+	"log/slog"
 
 	"github.com/bogem/id3v2/v2"
 	"github.com/go-flac/flacvorbis"
@@ -237,6 +240,33 @@ func NewEditor(database *db.MasterDatabase) *Editor {
 	return &Editor{DB: database}
 }
 
+func (e *Editor) executeTransaction(fn func(tx *sql.Tx) error) error {
+	var err error
+	for i := 0; i < 5; i++ {
+		tx, err := e.DB.Conn.Begin()
+		if err != nil {
+			if strings.Contains(err.Error(), "database is locked") {
+				time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+				continue
+			}
+			return err
+		}
+
+		err = fn(tx)
+		if err == nil {
+			return tx.Commit()
+		}
+
+		tx.Rollback()
+		if strings.Contains(err.Error(), "database is locked") {
+			time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("transaction failed after retries: %w", err)
+}
+
 // UpdateTags escribe metadatos en el archivo físico y sincroniza el título localmente.
 func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) ([]TagChange, error) {
 	var path string
@@ -309,55 +339,65 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) ([]TagC
 	}
 
 	// 4. Sincronizar cambios en la BD
-	newAlbumTitle := getString(data, "album")
-	newAlbumArtist := getString(data, "albumArtist")
-	
-	// Si cambió el álbum o el artista del álbum, debemos mover el track de album_id
-	if (newAlbumTitle != "" && newAlbumTitle != originalTags["album"]) || 
-	   (newAlbumArtist != "" && newAlbumArtist != originalTags["albumArtist"]) {
+	err = e.executeTransaction(func(tx *sql.Tx) error {
+		newAlbumTitle := getString(data, "album")
+		newAlbumArtist := getString(data, "albumArtist")
 		
-		if newAlbumTitle == "" { newAlbumTitle = originalTags["album"] }
-		if newAlbumArtist == "" { newAlbumArtist = originalTags["albumArtist"] }
-		if newAlbumArtist == "" { newAlbumArtist = getString(data, "artist") }
-		if newAlbumArtist == "" { newAlbumArtist = originalTags["artist"] }
-
-		// Lógica de agrupación consistente con el scanner
-		groupingKey := "AA:" + NormalizeArtist(newAlbumArtist)
-		newAlbumID := GenerateID(groupingKey + "|" + NormalizeString(newAlbumTitle))
-
-		if newAlbumID != currentAlbumID {
-			artistID := GenerateID(newAlbumArtist)
-			e.DB.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, newAlbumArtist)
+		if (newAlbumTitle != "" && newAlbumTitle != originalTags["album"]) || 
+		   (newAlbumArtist != "" && newAlbumArtist != originalTags["albumArtist"]) {
 			
-			e.DB.Conn.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", 
-				newAlbumID, artistID, newAlbumTitle, getInt(data, "year"))
-			
-			e.DB.Conn.Exec("UPDATE tracks SET album_id = ? WHERE id = ?", newAlbumID, trackID)
-			currentAlbumID = newAlbumID
+			if newAlbumTitle == "" { newAlbumTitle = originalTags["album"] }
+			if newAlbumArtist == "" { newAlbumArtist = originalTags["albumArtist"] }
+			if newAlbumArtist == "" { newAlbumArtist = getString(data, "artist") }
+			if newAlbumArtist == "" { newAlbumArtist = originalTags["artist"] }
+
+			groupingKey := "AA:" + NormalizeArtist(newAlbumArtist)
+			newAlbumID := GenerateID(groupingKey + "|" + NormalizeString(newAlbumTitle))
+
+			if newAlbumID != currentAlbumID {
+				artistID := GenerateID(newAlbumArtist)
+				if _, err := tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, newAlbumArtist); err != nil {
+					return err
+				}
+				
+				if _, err := tx.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", 
+					newAlbumID, artistID, newAlbumTitle, getInt(data, "year")); err != nil {
+					return err
+				}
+				
+				if _, err := tx.Exec("UPDATE tracks SET album_id = ? WHERE id = ?", newAlbumID, trackID); err != nil {
+					return err
+				}
+				currentAlbumID = newAlbumID
+			}
 		}
-	}
 
-	query := `UPDATE tracks SET 
-		title = ?, artist = ?, genre = ?, track_num = ?, track_total = ?, disc_num = ?, disc_total = ?,
-		composer = ?, comment = ?, rating = ?, instrumental = ?
-		WHERE id = ?`
-	
-	_, err = e.DB.Conn.Exec(query, 
-		getString(data, "title"), getString(data, "artist"), getString(data, "genre"), 
-		getInt(data, "trackNum"), getInt(data, "trackTotal"), getInt(data, "discNum"), getInt(data, "discTotal"), 
-		getString(data, "composer"), getString(data, "comment"), getInt(data, "rating"), 
-		getBoolInt(data, "instrumental"), trackID)
-	
-	if err != nil { return changes, err }
-
-	if currentAlbumID != "" {
-		year := getInt(data, "year")
-		if year > 0 {
-			e.DB.Conn.Exec("UPDATE albums SET year = ? WHERE id = ?", year, currentAlbumID)
+		query := `UPDATE tracks SET 
+			title = ?, artist = ?, genre = ?, track_num = ?, track_total = ?, disc_num = ?, disc_total = ?,
+			composer = ?, comment = ?, rating = ?, instrumental = ?
+			WHERE id = ?`
+		
+		_, err = tx.Exec(query, 
+			getString(data, "title"), getString(data, "artist"), getString(data, "genre"), 
+			getInt(data, "trackNum"), getInt(data, "trackTotal"), getInt(data, "discNum"), getInt(data, "discTotal"), 
+			getString(data, "composer"), getString(data, "comment"), getInt(data, "rating"), 
+			getBoolInt(data, "instrumental"), trackID)
+		if err != nil {
+			return err
 		}
-	}
 
-	return changes, nil
+		if currentAlbumID != "" {
+			year := getInt(data, "year")
+			if year > 0 {
+				if _, err := tx.Exec("UPDATE albums SET year = ? WHERE id = ?", year, currentAlbumID); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+
+	return changes, err
 }
 
 func getString(data map[string]interface{}, k string) string {
@@ -384,7 +424,60 @@ func isSoftMatch(field, requested, actual string) bool {
 	return false
 }
 
+func moveFile(sourcePath, destPath string) error {
+	if sourcePath == destPath {
+		return nil
+	}
+
+	slog.Info("Moving file", "from", sourcePath, "to", destPath)
+
+	// Intentar renombre directo (rápido, misma partición)
+	err := os.Rename(sourcePath, destPath)
+	if err == nil {
+		return nil
+	}
+
+	slog.Warn("Rename failed, falling back to copy+delete", "error", err)
+
+	// Si falla por ser diferentes dispositivos, copiar y borrar
+	s, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	d, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	if _, err := io.Copy(d, s); err != nil {
+		os.Remove(destPath) // Limpiar si falla la copia
+		return err
+	}
+
+	// Cerrar archivos antes de borrar el origen
+	s.Close()
+	d.Close()
+
+	if err := os.Remove(sourcePath); err != nil {
+		slog.Error("Failed to remove source file after copy", "path", sourcePath, "error", err)
+		return err
+	}
+
+	return nil
+}
+
 func (e *Editor) OrganizeFile(trackID string, musicRoot string, pattern string) (string, error) {
+	return e.organizeFileInternal(trackID, musicRoot, pattern, false)
+}
+
+func (e *Editor) OrganizeFilePreview(trackID string, musicRoot string, pattern string) (string, error) {
+	return e.organizeFileInternal(trackID, musicRoot, pattern, true)
+}
+
+func (e *Editor) organizeFileInternal(trackID string, musicRoot string, pattern string, dryRun bool) (string, error) {
 	var oldPath, title, artist, album, format, genre string
 	var trackNum, year, discNum, bitrate int
 
@@ -408,13 +501,19 @@ func (e *Editor) OrganizeFile(trackID string, musicRoot string, pattern string) 
 	err := e.DB.Conn.QueryRow(query, trackID).Scan(
 		&oldPath, &title, &artist, &album, &trackNum, &format, &genre, &year, &discNum, &bitrate,
 	)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 
 	clean := func(s string, fallback string) string {
-		if s == "" || s == "0" { return fallback }
+		if s == "" || s == "0" {
+			return fallback
+		}
 		r := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "-", "\"", "-", "<", "-", ">", "-", "|", "-")
 		res := strings.TrimSpace(r.Replace(s))
-		if res == "" { return fallback }
+		if res == "" {
+			return fallback
+		}
 		return res
 	}
 
@@ -424,11 +523,13 @@ func (e *Editor) OrganizeFile(trackID string, musicRoot string, pattern string) 
 	newRelPath = strings.ReplaceAll(newRelPath, "{title}", clean(title, "Unknown Title"))
 	newRelPath = strings.ReplaceAll(newRelPath, "{genre}", clean(genre, "Unknown"))
 	newRelPath = strings.ReplaceAll(newRelPath, "{format}", strings.ToLower(format))
-	
+
 	yearStr := fmt.Sprintf("%d", year)
-	if year <= 0 { yearStr = "Unknown Year" }
+	if year <= 0 {
+		yearStr = "Unknown Year"
+	}
 	newRelPath = strings.ReplaceAll(newRelPath, "{year}", yearStr)
-	
+
 	newRelPath = strings.ReplaceAll(newRelPath, "{track}", fmt.Sprintf("%02d", trackNum))
 	newRelPath = strings.ReplaceAll(newRelPath, "{disc}", fmt.Sprintf("%d", discNum))
 	newRelPath = strings.ReplaceAll(newRelPath, "{bitrate}", fmt.Sprintf("%dk", bitrate/1000))
@@ -448,31 +549,71 @@ func (e *Editor) OrganizeFile(trackID string, musicRoot string, pattern string) 
 		}
 	}
 
+	if dryRun {
+		return newPath, nil
+	}
+
+	if oldPath == newPath {
+		return newPath, nil
+	}
+
+	// Verificar que el archivo origen existe
+	if _, err := os.Stat(oldPath); err != nil {
+		return "", fmt.Errorf("source file does not exist: %s", oldPath)
+	}
+
 	newDirPath := filepath.Dir(newPath)
-	if err := os.MkdirAll(newDirPath, 0755); err != nil { return "", err }
+	if err := os.MkdirAll(newDirPath, 0755); err != nil {
+		return "", err
+	}
 	oldDir := filepath.Dir(oldPath)
+
+	// Mover sidecars primero
 	moveSidecars(oldPath, newPath)
-	if err := os.Rename(oldPath, newPath); err != nil { return "", err }
+
+	// Mover archivo principal
+	if err := moveFile(oldPath, newPath); err != nil {
+		return "", fmt.Errorf("failed to move file: %w", err)
+	}
+
+	// Actualizar base de datos
+	err = e.executeTransaction(func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE tracks SET path = ? WHERE id = ?", newPath, trackID)
+		return err
+	})
+
+	if err != nil {
+		// ROLLBACK: Intentar mover el archivo de vuelta
+		moveFile(newPath, oldPath)
+		return "", fmt.Errorf("database update failed, file rolled back: %w", err)
+	}
 
 	// Limpiar directorios antiguos si quedan vacíos
-	go func(dirPath string) {
-		time.Sleep(50 * time.Millisecond)
+	go func(dirPath string, root string) {
+		time.Sleep(100 * time.Millisecond)
 		d := dirPath
-		for d != musicRoot && d != "." && d != "/" {
-			entries, _ := os.ReadDir(d)
-			if len(entries) > 0 { break }
-			if err := os.Remove(d); err != nil { break }
+		for d != root && d != "." && d != "/" && d != "" {
+			entries, err := os.ReadDir(d)
+			if err != nil || len(entries) > 0 {
+				break
+			}
+			if err := os.Remove(d); err != nil {
+				break
+			}
 			d = filepath.Dir(d)
 		}
-	}(oldDir)
+	}(oldDir, musicRoot)
 
-	_, err = e.DB.Conn.Exec("UPDATE tracks SET path = ? WHERE id = ?", newPath, trackID)
-	return newPath, err
+	return newPath, nil
 }
 
 func moveSidecars(oldPath, newPath string) {
 	oldDir := filepath.Dir(oldPath)
 	newDir := filepath.Dir(newPath)
+	if oldDir == newDir {
+		return
+	}
+
 	oldBase := strings.TrimSuffix(filepath.Base(oldPath), filepath.Ext(oldPath))
 	newBase := strings.TrimSuffix(filepath.Base(newPath), filepath.Ext(newPath))
 
@@ -482,21 +623,30 @@ func moveSidecars(oldPath, newPath string) {
 	for _, e := range entries {
 		name := e.Name()
 		ext := strings.ToLower(filepath.Ext(name))
+
+		// Sidecars específicos del track
 		if strings.HasPrefix(name, oldBase+".") && name != filepath.Base(oldPath) {
-			os.Rename(filepath.Join(oldDir, name), filepath.Join(newDir, newBase+ext))
+			moveFile(filepath.Join(oldDir, name), filepath.Join(newDir, newBase+ext))
 			continue
 		}
+
+		// Sidecars de album
 		isAlbumSidecar := false
 		for _, cs := range commonSidecars {
-			if strings.HasPrefix(strings.ToLower(name), cs) { isAlbumSidecar = true; break }
+			if strings.HasPrefix(strings.ToLower(name), cs) {
+				isAlbumSidecar = true
+				break
+			}
 		}
 		if isAlbumSidecar {
-			if _, err := os.Stat(filepath.Join(newDir, name)); os.IsNotExist(err) {
-				os.Rename(filepath.Join(oldDir, name), filepath.Join(newDir, name))
+			destSidecar := filepath.Join(newDir, name)
+			if _, err := os.Stat(destSidecar); os.IsNotExist(err) {
+				moveFile(filepath.Join(oldDir, name), destSidecar)
 			}
 		}
 	}
 }
+
 
 func (e *Editor) EmbedCover(trackID string, imgData []byte, mimeType string) error {
 	var path string

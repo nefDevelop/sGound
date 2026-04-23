@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"crypto/sha1"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -81,6 +82,33 @@ func copyString(s string) string {
 	return string([]byte(s))
 }
 
+func (s *Scanner) executeTransaction(fn func(tx *sql.Tx) error) error {
+	var err error
+	for i := 0; i < 5; i++ {
+		tx, err := s.DB.Conn.Begin()
+		if err != nil {
+			if strings.Contains(err.Error(), "database is locked") {
+				time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+				continue
+			}
+			return err
+		}
+
+		err = fn(tx)
+		if err == nil {
+			return tx.Commit()
+		}
+
+		tx.Rollback()
+		if strings.Contains(err.Error(), "database is locked") {
+			time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("transaction failed after retries: %w", err)
+}
+
 func (s *Scanner) ParseAndSaveFile(path string) error {
 	res, err := s.ParseFileWithCache(path, "active")
 	if err != nil {
@@ -93,33 +121,31 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 	s.muDB.Lock()
 	defer s.muDB.Unlock()
 
-	tx, err := s.DB.Conn.Begin()
-	if err != nil {
-		return err
-	}
+	return s.executeTransaction(func(tx *sql.Tx) error {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", res.artistId, res.dbAlbumArtist); err != nil {
+			return err
+		}
 
-	tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", res.artistId, res.dbAlbumArtist)
-	tx.Exec(`
-		INSERT INTO albums (id, artist_id, title, year, cover_width, cover_height, cover_size, cover_format) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET 
-			year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END,
-			cover_width = CASE WHEN (cover_width IS NULL OR cover_width = 0) THEN excluded.cover_width ELSE cover_width END,
-			cover_height = CASE WHEN (cover_height IS NULL OR cover_height = 0) THEN excluded.cover_height ELSE cover_height END,
-			cover_size = CASE WHEN (cover_size IS NULL OR cover_size = 0) THEN excluded.cover_size ELSE cover_size END,
-			cover_format = CASE WHEN (cover_format IS NULL OR cover_format = '') THEN excluded.cover_format ELSE cover_format END
-	`, res.albumId, res.artistId, res.albumName, res.year, res.coverWidth, res.coverHeight, res.coverSize, res.coverFormat)
+		if _, err := tx.Exec(`
+			INSERT INTO albums (id, artist_id, title, year, cover_width, cover_height, cover_size, cover_format) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET 
+				year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END,
+				cover_width = CASE WHEN (cover_width IS NULL OR cover_width = 0) THEN excluded.cover_width ELSE cover_width END,
+				cover_height = CASE WHEN (cover_height IS NULL OR cover_height = 0) THEN excluded.cover_height ELSE cover_height END,
+				cover_size = CASE WHEN (cover_size IS NULL OR cover_size = 0) THEN excluded.cover_size ELSE cover_size END,
+				cover_format = CASE WHEN (cover_format IS NULL OR cover_format = '') THEN excluded.cover_format ELSE cover_format END
+		`, res.albumId, res.artistId, res.albumName, res.year, res.coverWidth, res.coverHeight, res.coverSize, res.coverFormat); err != nil {
+			return err
+		}
 
-	_, err = tx.Exec(
-		`INSERT OR REPLACE INTO tracks 
-		(id, album_id, artist, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, instrumental, replay_gain, file_mtime, file_hash) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		res.trackId, res.albumId, res.artistName, res.title, res.trackNum, res.discNum, res.path, res.duration, res.genre, res.size, res.format, res.composer, res.comment, res.bitRate, res.sampleRate, res.status, res.instrumental, res.replayGain, res.fileMtime, res.hash,
-	)
-	if err != nil {
-		tx.Rollback()
+		_, err = tx.Exec(
+			`INSERT OR REPLACE INTO tracks 
+			(id, album_id, artist, title, track_num, disc_num, path, duration, genre, size, format, composer, comment, bit_rate, sample_rate, status, instrumental, replay_gain, file_mtime, file_hash) 
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			res.trackId, res.albumId, res.artistName, res.title, res.trackNum, res.discNum, res.path, res.duration, res.genre, res.size, res.format, res.composer, res.comment, res.bitRate, res.sampleRate, res.status, res.instrumental, res.replayGain, res.fileMtime, res.hash,
+		)
 		return err
-	}
-	return tx.Commit()
+	})
 }
 
 func (s *Scanner) ScanDirectory(rootPath string) error {
@@ -249,21 +275,33 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				return
 			}
 			s.muDB.Lock()
-			tx, _ := s.DB.Conn.Begin()
-			for _, r := range batch {
-				if _, seen := s.seenArtists[r.artistId]; !seen {
-					tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", r.artistId, r.dbAlbumArtist)
-					s.seenArtists[r.artistId] = struct{}{}
+			err := s.executeTransaction(func(tx *sql.Tx) error {
+				for _, r := range batch {
+					if _, seen := s.seenArtists[r.artistId]; !seen {
+						if _, err := tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", r.artistId, r.dbAlbumArtist); err != nil {
+							return err
+						}
+						s.seenArtists[r.artistId] = struct{}{}
+					}
+					if _, seen := s.seenAlbums[r.albumId]; !seen {
+						if _, err := tx.Exec(`INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END`, r.albumId, r.artistId, r.albumName, r.year); err != nil {
+							return err
+						}
+						s.seenAlbums[r.albumId] = struct{}{}
+					}
+					if _, err := tx.Exec(`UPDATE tracks SET id=?, album_id=?, artist=?, title=?, track_num=?, disc_num=?, duration=?, genre=?, size=?, format=?, composer=?, comment=?, bit_rate=?, sample_rate=?, status=?, instrumental=?, replay_gain=?, file_mtime=?, file_hash=? WHERE path=?`,
+						r.trackId, r.albumId, r.artistName, r.title, r.trackNum, r.discNum, r.duration, r.genre, r.size, r.format, r.composer, r.comment, r.bitRate, r.sampleRate, "pending", r.instrumental, r.replayGain, r.fileMtime, r.hash, r.path); err != nil {
+						return err
+					}
 				}
-				if _, seen := s.seenAlbums[r.albumId]; !seen {
-					tx.Exec(`INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END`, r.albumId, r.artistId, r.albumName, r.year)
-					s.seenAlbums[r.albumId] = struct{}{}
-				}
-				tx.Exec(`UPDATE tracks SET id=?, album_id=?, artist=?, title=?, track_num=?, disc_num=?, duration=?, genre=?, size=?, format=?, composer=?, comment=?, bit_rate=?, sample_rate=?, status=?, instrumental=?, replay_gain=?, file_mtime=?, file_hash=? WHERE path=?`,
-					r.trackId, r.albumId, r.artistName, r.title, r.trackNum, r.discNum, r.duration, r.genre, r.size, r.format, r.composer, r.comment, r.bitRate, r.sampleRate, "pending", r.instrumental, r.replayGain, r.fileMtime, r.hash, r.path)
-			}
-			tx.Commit()
+				return nil
+			})
 			s.muDB.Unlock()
+
+			if err != nil {
+				slog.Error("Failed to flush batch to DB", "error", err, "batchSize", len(batch))
+			}
+			
 			batch = nil
 			s.seenArtists = make(map[string]struct{})
 			s.seenAlbums = make(map[string]struct{})
@@ -407,13 +445,20 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			return
 		}
 		s.muDB.Lock()
-		tx, _ := s.DB.Conn.Begin()
-		for _, info := range buffer {
-			tx.Exec(`INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-				info.id, "raw_album", "Unknown", filepath.Base(info.path), info.path, "raw", 0, 0)
-		}
-		tx.Commit()
+		err := s.executeTransaction(func(tx *sql.Tx) error {
+			for _, info := range buffer {
+				if _, err := tx.Exec(`INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+					info.id, "raw_album", "Unknown", filepath.Base(info.path), info.path, "raw", 0, 0); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 		s.muDB.Unlock()
+
+		if err != nil {
+			slog.Error("Failed to flush raw discovery to DB", "error", err, "n", len(buffer))
+		}
 		
 		slog.Debug("📂 W-Explorer: Syncing raw", "n", len(buffer))
 		for _, info := range buffer {

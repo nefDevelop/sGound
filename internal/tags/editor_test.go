@@ -153,8 +153,8 @@ func TestOrganizeFileFolderCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Esperar un momento a que la goroutine de limpieza actúe
-	time.Sleep(100 * time.Millisecond)
+	// Esperar un momento a que la goroutine de limpieza actúe (más que el sleep interno de 100ms)
+	time.Sleep(200 * time.Millisecond)
 
 	// Verificar que old_folder/sub ha desaparecido
 	if _, err := os.Stat(oldFolder); !os.IsNotExist(err) {

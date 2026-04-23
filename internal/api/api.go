@@ -58,10 +58,11 @@ type Server struct {
 }
 
 type OrganizeStatus struct {
-	IsRunning bool   `json:"isRunning"`
-	Total     int    `json:"total"`
-	Processed int    `json:"processed"`
-	Current   string `json:"current"`
+	IsRunning bool     `json:"isRunning"`
+	Total     int      `json:"total"`
+	Processed int      `json:"processed"`
+	Current   string   `json:"current"`
+	Errors    []string `json:"errors"`
 }
 
 func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
@@ -137,6 +138,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/api/library/normalize-cover", auth(s.handleNormalizeCover))
 	mux.HandleFunc("/api/library/cleanup", auth(s.handleLibraryCleanup))
 	mux.HandleFunc("/api/library/organize", auth(s.handleOrganizeLibrary))
+	mux.HandleFunc("/api/library/organize/preview", auth(s.handleOrganizeLibraryPreview))
 	mux.HandleFunc("/api/library/organize/status", auth(s.handleOrganizeStatus))
 	mux.HandleFunc("/api/library/status", auth(s.handleScanStatus))
 	mux.HandleFunc("/api/library/inbox", auth(s.handleGetInbox))
@@ -1322,25 +1324,34 @@ func (s *Server) handleOrganizeLibrary(w http.ResponseWriter, r *http.Request) {
 		IsRunning: true,
 		Total:     total,
 		Processed: 0,
-		Current:   "Counting files...",
+		Current:   "Starting...",
+		Errors:    []string{},
 	}
 	s.organizeStatuses.Store(user, status)
 
 	// Lógica en segundo plano
 	go func() {
-		rows, err := db.Conn.Query("SELECT id, title FROM tracks")
+		rows, err := db.Conn.Query("SELECT id, title, path FROM tracks")
 		if err != nil {
 			status.IsRunning = false
+			status.Errors = append(status.Errors, "Database query failed: "+err.Error())
 			return
 		}
 		defer rows.Close()
 
 		editor := tags.NewEditor(db)
 		for rows.Next() {
-			var id, title string
-			if err := rows.Scan(&id, &title); err == nil {
+			var id, title, path string
+			if err := rows.Scan(&id, &title, &path); err == nil {
 				status.Current = title
-				editor.OrganizeFile(id, s.Config.MusicPath, s.Config.RenamePattern)
+				_, err := editor.OrganizeFile(id, s.Config.MusicPath, s.Config.RenamePattern)
+				if err != nil {
+					status.Errors = append(status.Errors, fmt.Sprintf("Failed to organize %s: %v", title, err))
+					if len(status.Errors) > 100 {
+						status.Errors = append(status.Errors, "...too many errors, stopping.")
+						break
+					}
+				}
 				status.Processed++
 			}
 		}
@@ -1351,6 +1362,41 @@ func (s *Server) handleOrganizeLibrary(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+}
+
+func (s *Server) handleOrganizeLibraryPreview(w http.ResponseWriter, r *http.Request) {
+	db := s.getDB(r)
+	rows, err := db.Conn.Query("SELECT id, title, path FROM tracks LIMIT 50") // Solo previsualizar los primeros 50
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type PreviewItem struct {
+		ID      string `json:"id"`
+		Title   string `json:"title"`
+		OldPath string `json:"oldPath"`
+		NewPath string `json:"newPath"`
+	}
+	previews := []PreviewItem{}
+	editor := tags.NewEditor(db)
+
+	for rows.Next() {
+		var id, title, oldPath string
+		if err := rows.Scan(&id, &title, &oldPath); err == nil {
+			newPath, _ := editor.OrganizeFilePreview(id, s.Config.MusicPath, s.Config.RenamePattern)
+			previews = append(previews, PreviewItem{
+				ID:      id,
+				Title:   title,
+				OldPath: oldPath,
+				NewPath: newPath,
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(previews)
 }
 
 func (s *Server) handleOrganizeStatus(w http.ResponseWriter, r *http.Request) {
@@ -1873,40 +1919,56 @@ func (s *Server) handleApplyInboxSuggestions(w http.ResponseWriter, r *http.Requ
 	}
 
 	db := s.getDB(r)
-	tx, err := db.Conn.Begin()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer tx.Rollback()
-
-	for _, sug := range data.Suggestions {
-		// 1. Obtener o crear artista del álbum corregido
-		artistId := scanner.GenerateID(sug.Artist)
-		_, err = tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistId, sug.Artist)
-		if err != nil {
-			continue
+	
+	var err error
+	for i := 0; i < 5; i++ {
+		tx, errTx := db.Conn.Begin()
+		if errTx != nil {
+			if strings.Contains(errTx.Error(), "database is locked") {
+				time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+				continue
+			}
+			http.Error(w, errTx.Error(), http.StatusInternalServerError)
+			return
 		}
 
-		// 2. Obtener o crear álbum corregido (Lógica sincronizada con el scanner)
-		groupingKey := "AA:" + scanner.NormalizeArtist(sug.Artist)
-		albumId := scanner.GenerateID(groupingKey + "|" + scanner.NormalizeString(sug.Album))
+		success := true
+		for _, sug := range data.Suggestions {
+			artistId := scanner.GenerateID(sug.Artist)
+			if _, err = tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistId, sug.Artist); err != nil {
+				success = false; break
+			}
 
-		_, err = tx.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", albumId, artistId, sug.Album, sug.Year)
-		if err != nil {
-			continue
+			groupingKey := "AA:" + scanner.NormalizeArtist(sug.Artist)
+			albumId := scanner.GenerateID(groupingKey + "|" + scanner.NormalizeString(sug.Album))
+			if _, err = tx.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", albumId, artistId, sug.Album, sug.Year); err != nil {
+				success = false; break
+			}
+
+			if _, err = tx.Exec("UPDATE tracks SET album_id = ?, artist = ? WHERE id = ?", albumId, sug.Artist, sug.TrackID); err != nil {
+				success = false; break
+			}
 		}
 
-		// 3. Actualizar el track en el Inbox (manteniendo status 'pending')
-		_, err = tx.Exec("UPDATE tracks SET album_id = ?, artist = ? WHERE id = ?", albumId, sug.Artist, sug.TrackID)
-		if err != nil {
-			slog.Error("Failed to apply suggestion to track", "id", sug.TrackID, "err", err)
+		if !success {
+			tx.Rollback()
+			if strings.Contains(err.Error(), "database is locked") {
+				time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+				continue
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-	}
 
-	if err := tx.Commit(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		if err = tx.Commit(); err != nil {
+			if strings.Contains(err.Error(), "database is locked") {
+				time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+				continue
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		break
 	}
 
 	w.WriteHeader(http.StatusOK)

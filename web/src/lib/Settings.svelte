@@ -101,7 +101,10 @@
     applyTheme(palette);
   });
 
-  let organizeStatus = $state({ isRunning: false, total: 0, processed: 0, current: '' });
+  let organizeStatus = $state({ isRunning: false, total: 0, processed: 0, current: '', errors: [] });
+  let showPreviewModal = $state(false);
+  let previews = $state([]);
+  let loadingPreview = $state(false);
 
   async function pollOrganizeStatus() {
     const res = await fetch('/api/library/organize/status');
@@ -117,9 +120,21 @@
     pollOrganizeStatus();
   });
 
+  async function fetchPreview() {
+    loadingPreview = true;
+    showPreviewModal = true;
+    try {
+      const res = await fetch('/api/library/organize/preview');
+      if (res.ok) previews = await res.json();
+    } catch (e) {
+      showToast("Failed to fetch preview", "error");
+    } finally {
+      loadingPreview = false;
+    }
+  }
+
   async function startOrganize() {
-    if (!confirm("This will move ALL files in your library to match the pattern. Are you sure?")) return;
-    
+    showPreviewModal = false;
     const res = await fetch('/api/library/organize', { method: 'POST' });
     if (res.ok) {
       pollOrganizeStatus();
@@ -233,18 +248,28 @@
           </div>
           <input type="text" bind:value={config.renamePattern} placeholder={"&#123;artist&#125;/&#123;album&#125;/&#123;track&#125; - &#123;title&#125;"} />
           
-          {#if organizeStatus.isRunning}
+          {#if organizeStatus.isRunning || (organizeStatus.processed > 0 && organizeStatus.processed < organizeStatus.total)}
             <div class="organize-progress-wrap">
               <div class="progress-bar-bg">
-                 <div class="progress-bar-fill" style="width: {(organizeStatus.processed / organizeStatus.total) * 100}%"></div>
+                 <div class="progress-bar-fill" style="width: {(organizeStatus.processed / (organizeStatus.total || 1)) * 100}%"></div>
               </div>
               <div class="progress-stats">
                  <span class="p-count">{organizeStatus.processed} / {organizeStatus.total} tracks</span>
-                 <span class="p-current">Moving: {organizeStatus.current}</span>
+                 <span class="p-current">{organizeStatus.isRunning ? 'Moving: ' + organizeStatus.current : 'Done'}</span>
               </div>
+              {#if organizeStatus.errors && organizeStatus.errors.length > 0}
+                <div class="organize-errors">
+                  <h4>Errors ({organizeStatus.errors.length})</h4>
+                  <ul>
+                    {#each organizeStatus.errors.slice(-5) as err}
+                      <li>{err}</li>
+                    {/each}
+                  </ul>
+                </div>
+              {/if}
             </div>
           {:else}
-            <button class="scan-btn" onclick={startOrganize}>
+            <button class="scan-btn" onclick={fetchPreview}>
                <Icon name="folder" size={18} />
                Organize Library Now
             </button>
@@ -397,9 +422,66 @@
       <button class="btn-primary-rounded" onclick={() => showKeyModal = false}>Got it</button>
     </div>
   </Modal>
+
+  <Modal bind:isOpen={showPreviewModal} title="Organize Library Preview" width="800px">
+    <div class="preview-content">
+      <p>Here's how some of your files will be renamed. This is a <b>preview</b> of the first 50 tracks.</p>
+      
+      {#if loadingPreview}
+        <div class="loading-preview">
+          <Icon name="refresh" size={32} class="spin" />
+          <span>Calculating paths...</span>
+        </div>
+      {:else}
+        <div class="preview-list">
+          {#each previews as item}
+            <div class="preview-item">
+              <div class="p-title">{item.title}</div>
+              <div class="p-paths">
+                <div class="p-old"><Icon name="file" size={12} /> {item.oldPath.split('/').pop()}</div>
+                <div class="p-arrow"><Icon name="arrowRight" size={14} /></div>
+                <div class="p-new"><Icon name="folder" size={12} /> {item.newPath.replace(config.musicPath, '')}</div>
+              </div>
+            </div>
+          {/each}
+        </div>
+
+        <div class="preview-actions">
+          <button class="btn-secondary" onclick={() => showPreviewModal = false}>Cancel</button>
+          <button class="btn-primary-rounded" onclick={startOrganize}>Confirm & Organize All</button>
+        </div>
+      {/if}
+    </div>
+  </Modal>
 </div>
 
 <style>
+  .preview-content { display: flex; flex-direction: column; gap: 1.5rem; max-height: 70vh; }
+  .preview-list { overflow-y: auto; display: flex; flex-direction: column; gap: 0.8rem; padding-right: 0.5rem; }
+  .preview-item { background: var(--surface-container-low); padding: 1rem; border-radius: 12px; border: 1px solid var(--border-color); }
+  .p-title { font-weight: 800; margin-bottom: 0.5rem; color: var(--primary); }
+  .p-paths { display: flex; align-items: center; gap: 1rem; font-size: 0.8rem; color: var(--text-muted); }
+  .p-old, .p-new { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .p-new { color: var(--text-main); font-weight: 600; }
+  .p-arrow { flex-shrink: 0; color: var(--primary); }
+
+  .loading-preview { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 3rem; }
+  .preview-actions { display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem; }
+  .btn-secondary { background: none; border: 1px solid var(--border-color); color: var(--text-main); padding: 0.8rem 1.5rem; border-radius: 100px; font-weight: 700; cursor: pointer; }
+
+  .organize-errors {
+    margin-top: 0.5rem;
+    background: rgba(255, 0, 0, 0.05);
+    border: 1px solid rgba(255, 0, 0, 0.2);
+    border-radius: 12px;
+    padding: 0.8rem;
+  }
+  .organize-errors h4 { margin: 0 0 0.5rem 0; font-size: 0.8rem; color: #ff5555; text-transform: uppercase; }
+  .organize-errors ul { margin: 0; padding-left: 1.2rem; font-size: 0.75rem; color: var(--text-muted); }
+  .organize-errors li { margin-bottom: 0.2rem; }
+
+  .spin { animation: spin 2s linear infinite; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   .settings-view { width: 100%; padding: 0 0 4rem 0; animation: fadeIn 0.4s ease-out; }
   h1 { font-size: 2.5rem; font-weight: 900; letter-spacing: -1.5px; margin: 0 0 2.5rem 0; color: var(--text-main); }
   
