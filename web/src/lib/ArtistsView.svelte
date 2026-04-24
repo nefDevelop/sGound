@@ -29,7 +29,7 @@
   });
 
   function getAvatarUrl(artist) {
-    return `/api/artists/${artist.id}/image`; 
+    return `/api/artists/${encodeURIComponent(artist.id)}/image`; 
   }
 
   function handleImageError(e, artist) {
@@ -176,5 +176,4 @@
     .avatar-container { width: 100px; height: 100px; }
   }
 
-  .faded-icon { opacity: 0.2; }
 </style>

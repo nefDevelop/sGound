@@ -128,6 +128,20 @@
   let handleSkipBack = $state();
   let confirmState = $state({ isOpen: false, title: "", message: "", confirmLabel: "Confirm", type: "info", icon: null, onconfirm: null, oncancel: null });
 
+  function openConfirm(options) {
+    confirmState = {
+      isOpen: true,
+      title: options.title || "Confirm",
+      message: options.message || "",
+      confirmLabel: options.confirmLabel || "Confirm",
+      type: options.type || "info",
+      icon: options.icon || null,
+      onconfirm: options.onconfirm || null,
+      oncancel: options.oncancel || null
+    };
+  }
+
+
   async function checkScanStatus() {
     if (!isLoggedIn) return;
     try {
@@ -407,7 +421,7 @@
       if (res.ok) {
         showToast("Library scan started!", "success");
         // Reiniciar status local para activar el polling
-        scanStatus = { scanning: true, processed: 0, inboxCount: 0, rawCount: 0 };
+        scanStatus = { scanning: true, processed: 0, inboxCount: 0, rawCount: 0, isPaused: false, ramUsedMB: 0 };
         startPolling();
         checkScanStatus();
       }
@@ -933,7 +947,7 @@
         />
       {:else if currentView === "artists"}
         <ArtistsView
-          onselectArtist={(artist) => navigate("artists", { artistId: artist.id, artistName: artist.name })}
+          onselectArtist={(artist) => navigate("artist-detail", { artistId: artist.id, artistName: artist.name })}
           onnavinbox={() => navigate('inbox')}
         />
       {:else if currentView === "playlists"}

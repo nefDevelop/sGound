@@ -35,7 +35,7 @@
   });
 
   function getAvatarUrl(id) {
-    return `/api/artists/${id}/image`;
+    return `/api/artists/${encodeURIComponent(id)}/image`;
   }
 </script>
 
@@ -101,6 +101,7 @@
           onplayAlbum={onplayAlbum}
           onqueueAlbum={onqueueAlbum}
           oneditAlbum={oneditAlbum}
+          onnavinbox={() => {}}
         />
       </div>
 

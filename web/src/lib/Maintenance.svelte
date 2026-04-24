@@ -361,6 +361,9 @@
                        <code class="path-snippet" title={item.path}>{item.path}</code>
                     </td>
                     <td class="actions-col">
+                      <button class="icon-btn" onclick={() => onedit?.({ id: item.id, coverId: true })} title="Edit Album Tags/Cover">
+                        <Icon name="edit" size={18} />
+                      </button>
                       {#if item.type !== 'missing'}
                         <button class="icon-btn" onclick={() => normalizeCover(item.id)} title="Normalize to JPG 800px">
                           <Icon name="zap" size={18} color="var(--tertiary)" />
@@ -439,6 +442,13 @@
                             </td>
                             <td class="actions-col">
                               <button 
+                                class="icon-btn" 
+                                onclick={() => onedit?.(track)} 
+                                title="Edit Tags"
+                              >
+                                <Icon name="edit" size={18} />
+                              </button>
+                              <button 
                                 class="icon-btn danger-hover" 
                                 onclick={() => deleteTrack(track)} 
                                 title={track.id === best.id ? "Keep this one" : "Delete redundant copy"}
@@ -489,6 +499,9 @@
                        <code class="path-snippet" title={track.path}>{track.path}</code>
                     </td>
                     <td class="actions-col">
+                      <button class="icon-btn" onclick={() => onedit?.(track)} title="Edit Tags">
+                        <Icon name="edit" size={18} />
+                      </button>
                       <button class="icon-btn danger-hover" onclick={() => deleteTrack(track)} title="Delete asset">
                         <Icon name="trash" size={18} />
                       </button>

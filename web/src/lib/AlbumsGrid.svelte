@@ -6,7 +6,7 @@
   import Artwork from './Artwork.svelte';
   import Skeleton from './Skeleton.svelte';
   
-  let { artistId = null, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum, onnavinbox } = $props();
+  let { artistId = null, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum, onnavinbox = null } = $props();
   
   let albums = $state([]);
   let loading = $state(true);
@@ -156,8 +156,6 @@
 
 <style>
   .albums-container { width: 100%; padding: 0 0 3rem 0; animation: fadeIn 0.4s ease-out; }
-
-  .status { color: var(--text-muted); text-align: center; margin-top: 5rem; font-weight: 700; font-size: 1.2rem; }
 
   .albums-grid {
     display: grid;
