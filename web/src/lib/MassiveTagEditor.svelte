@@ -19,6 +19,7 @@
   let albumSearchResults = $state([]);
   let showAlbumResults = $state(false);
   let searchingOnlyCover = $state(false);
+  let fileBatchInput;
 
   let isSingleAlbum = $derived(
     selectedTracks.length > 0 && 
@@ -420,6 +421,41 @@
     loading = false;
   }
 
+  async function uploadBatchCoverFile(file) {
+    if (!file) return;
+    
+    loading = true;
+    processingStatus = "Applying cover from clipboard...";
+    
+    try {
+      const url = `/api/tracks/${selectedTracks[0].id}/cover?album=${isSingleAlbum}`;
+      const formData = new FormData();
+      formData.append('cover', file);
+      
+      const res = await fetch(url, { method: 'POST', body: formData });
+      if (res.ok) {
+          if (!isSingleAlbum) {
+              const promises = selectedTracks.slice(1).map(t => {
+                  const fd = new FormData();
+                  fd.append('cover', file);
+                  return fetch(`/api/tracks/${t.id}/cover`, { method: 'POST', body: fd });
+              });
+              await Promise.all(promises);
+          }
+          showToast("Cover updated from clipboard!", "success");
+          coverRefreshTrigger.set(Date.now());
+          selectedTracks = [...selectedTracks];
+      } else {
+        showToast("Update failed", "error");
+      }
+    } catch (e) {
+        showToast("Error updating cover", "error");
+    } finally {
+        loading = false;
+        processingStatus = "";
+    }
+  }
+
   function closeModal() {
     isOpen = false;
     processingStatus = "";
@@ -431,17 +467,27 @@
 {#if isOpen}
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="modal-backdrop" onclick={closeModal}>
+<div class="modal-backdrop" onclick={closeModal} onpaste={(e) => {
+  const items = e.clipboardData.items;
+  for (let item of items) {
+    if (item.type.indexOf('image') !== -1) {
+      uploadBatchCoverFile(item.getAsFile());
+      break;
+    }
+  }
+}}>
     <div class="modal glass" onclick={(e) => e.stopPropagation()}>
       <div class="modal-header">
         <div class="header-info-wrap">
           {#if albumInfo}
-            <button class="header-cover clickable" onclick={() => searchAlbumMetadata(true)} title="Click to search only cover">
-              <img src="/api/cover/{albumInfo.coverTrackId}" alt="" />
-              <div class="cover-edit-hint">
-                <Icon name="image" size={20} />
-              </div>
-            </button>
+            <div class="header-cover-wrapper">
+              <button class="header-cover clickable" onclick={() => searchAlbumMetadata(true)} title="Click to search only cover">
+                <img src="/api/cover/{albumInfo.coverTrackId}" alt="" />
+                <div class="cover-edit-hint">
+                  <Icon name="search" size={20} />
+                </div>
+              </button>
+            </div>
           {/if}
           <div class="header-info">
             <h2>{albumInfo ? 'Album Editor' : 'Bulk Edit Tags'}</h2>
@@ -540,7 +586,7 @@
                 {#each albumSearchResults as rel}
                   <button class="result-item with-cover" onclick={() => selectAlbumRelease(rel)}>
                     <div class="res-cover">
-                      <img src="https://coverartarchive.org/release/{rel.id}/front-250" alt="" onerror={(e) => e.target.src='/api/cover/placeholder'} />
+                      <img src="https://coverartarchive.org/release/{rel.id}/front-250" alt="" onerror={(e) => { if (e.currentTarget instanceof HTMLImageElement) e.currentTarget.src='/api/cover/placeholder'; }} />
                     </div>
                     <div class="res-details">
                       <span class="rel-title">{rel.title}</span>

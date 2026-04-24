@@ -16,6 +16,8 @@
   let lyricSearchResults = $state([]); 
   let suggestions = $state([]);
   let activeSuggestionField = $state("");
+  let applyCoverToAlbum = $state(false);
+  let fileInput;
 
   async function handleSave() {
     loading = true;
@@ -159,6 +161,32 @@
     searchResults = [];
   }
 
+  async function uploadCoverFile(file) {
+    if (!file) return;
+    
+    loading = true;
+    const formData = new FormData();
+    formData.append('cover', file);
+    
+    try {
+      const res = await fetch(`/api/tracks/${track.id}/cover?album=${applyCoverToAlbum}`, {
+        method: 'POST',
+        body: formData
+      });
+      if (res.ok) {
+        showToast("Cover updated from clipboard!", "success");
+        coverRefreshTrigger.set(Date.now());
+      } else {
+        const error = await res.text();
+        showToast("Update failed: " + error, "error");
+      }
+    } catch (e) {
+        showToast("Error updating cover", "error");
+    } finally {
+        loading = false;
+    }
+  }
+
   function closeModal() {
     isOpen = false;
     if (onclose) onclose();
@@ -177,7 +205,15 @@
 {#if isOpen}
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="modal-backdrop" onclick={closeModal}>
+<div class="modal-backdrop" onclick={closeModal} onpaste={(e) => {
+  const items = e.clipboardData.items;
+  for (let item of items) {
+    if (item.type.indexOf('image') !== -1) {
+      uploadCoverFile(item.getAsFile());
+      break;
+    }
+  }
+}}>
   <div class="modal glass" onclick={(e) => e.stopPropagation()}>
     <div class="modal-header">
       <div class="header-info-wrap">
@@ -207,6 +243,13 @@
           <button type="button" class="tool-btn" onclick={searchLyrics} disabled={loading}>
             <Icon name="cloud" size={16} /> <span>Search Lyrics</span>
           </button>
+        </div>
+
+        <div class="cover-options">
+          <label class="checkbox-label">
+            <input type="checkbox" bind:checked={applyCoverToAlbum} />
+            <span>Apply cover to whole album</span>
+          </label>
         </div>
 
         {#if searchResults.length > 0}
@@ -365,6 +408,10 @@
   .tool-btn:hover { background: var(--surface-container-highest); border-color: var(--primary-30); }
   .tool-btn.highlight { background: var(--primary); color: white; border: none; }
 
+  .cover-options { margin-top: 1rem; padding: 1rem; background: rgba(0,0,0,0.1); border-radius: 14px; border: 1px solid var(--border-color); }
+  .checkbox-label { display: flex; align-items: center; gap: 0.8rem; cursor: pointer; font-size: 0.8rem; font-weight: 700; color: var(--text-muted); }
+  .checkbox-label input { width: auto; margin: 0; cursor: pointer; }
+
   .results-picker { margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem; }
   .results-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
   .result-item {
@@ -414,6 +461,6 @@
   .save-btn:hover { transform: translateY(-3px); }
   .cancel-btn { background: transparent; border: none; color: #64748b; font-weight: 600; cursor: pointer; }
 
-  input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
   input[type=number] { -moz-appearance: textfield; }
 </style>

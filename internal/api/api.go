@@ -123,6 +123,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/api/tracks", auth(s.handleGetTracks))
 	mux.HandleFunc("/api/tracks/", auth(s.handleTrackActions))
 	mux.HandleFunc("/api/tracks/{id}/cover-url", auth(s.handleSetCoverURL))
+	mux.HandleFunc("/api/tracks/{id}/cover", auth(s.handleUploadCover))
 	mux.HandleFunc("/api/scan", auth(s.handleScan))
 	mux.HandleFunc("/api/config", auth(s.handleConfig))
 	mux.HandleFunc("/api/search", auth(s.handleSearch))
@@ -1214,6 +1215,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) handleSetCoverURL(w http.ResponseWriter, r *http.Request) {
 	trackID := s.extractID(r, "/api/tracks/")
+	applyToAlbum := r.URL.Query().Get("album") == "true"
 	var body struct {
 		URL string `json:"url"`
 	}
@@ -1239,18 +1241,67 @@ func (s *Server) handleSetCoverURL(w http.ResponseWriter, r *http.Request) {
 	mimeType := resp.Header.Get("Content-Type")
 
 	// 2. Embeber en el archivo
-	editor := tags.NewEditor(s.getDB(r))
-	if err := editor.EmbedCover(trackID, imgData, mimeType); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	s.embedCoverToTracks(r, trackID, applyToAlbum, imgData, mimeType, w)
+}
+
+func (s *Server) handleUploadCover(w http.ResponseWriter, r *http.Request) {
+	trackID := s.extractID(r, "/api/tracks/")
+	applyToAlbum := r.URL.Query().Get("album") == "true"
+
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "File too large", http.StatusBadRequest)
 		return
 	}
 
-	// 3. Limpiar caché de carátula
-	cachePath := filepath.Join(s.Config.CachePath, "covers", trackID+".jpg")
-	os.Remove(cachePath)
+	file, header, err := r.FormFile("cover")
+	if err != nil {
+		http.Error(w, "Invalid file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
 
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"success"}`))
+	imgData, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "image/jpeg"
+	}
+
+	s.embedCoverToTracks(r, trackID, applyToAlbum, imgData, mimeType, w)
+}
+
+func (s *Server) embedCoverToTracks(r *http.Request, trackID string, applyToAlbum bool, imgData []byte, mimeType string, w http.ResponseWriter) {
+	editor := tags.NewEditor(s.getDB(r))
+	
+	var trackIDs []string
+	if applyToAlbum {
+		rows, err := s.getDB(r).Conn.Query("SELECT id FROM tracks WHERE album_id = (SELECT album_id FROM tracks WHERE id = ?)", trackID)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err == nil { trackIDs = append(trackIDs, id) }
+			}
+		}
+	} else {
+		trackIDs = []string{trackID}
+	}
+
+	for _, id := range trackIDs {
+		if err := editor.EmbedCover(id, imgData, mimeType); err != nil {
+			slog.Error("Failed to embed cover", "track", id, "error", err)
+		}
+		// Limpiar caché
+		cachePath := filepath.Join(s.Config.CachePath, "covers", id+".jpg")
+		os.Remove(cachePath)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleEditTags(trackID string, w http.ResponseWriter, r *http.Request) {
