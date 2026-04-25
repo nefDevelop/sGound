@@ -16,6 +16,9 @@
   let suggestions = $state([]);
   let isAnalyzing = $state(false);
 
+  // Conteo total derivado para evitar que muestre 0 si hay tracks cargados
+  let totalTracks = $derived(Math.max($inboxCount + $rawCount, tracks.length));
+
   onMount(() => {
     fetchInbox();
     
@@ -74,9 +77,44 @@
   }
 
   async function approveAll() {
-    if (tracks.length === 0) return;
-    const ids = tracks.map(t => t.id);
+    let ids = tracks.map(t => t.id);
+    
+    if (hasMore || tracks.length < totalTracks) {
+      try {
+        // Usamos un límite alto para asegurarnos de pillar todos los IDs si el contador dice más
+        const fetchLimit = Math.max(totalTracks + 100, 1000);
+        const res = await fetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
+        if (res.ok) {
+          const data = await res.json();
+          ids = data.map(t => t.id);
+        }
+      } catch (e) {
+        console.error("Error fetching all IDs for approval:", e);
+      }
+    }
+
+    if (ids.length === 0) return;
     await approveIds(ids);
+  }
+
+  async function rejectAll() {
+    let ids = tracks.map(t => t.id);
+    
+    if (hasMore || tracks.length < totalTracks) {
+      try {
+        const fetchLimit = Math.max(totalTracks + 100, 1000);
+        const res = await fetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
+        if (res.ok) {
+          const data = await res.json();
+          ids = data.map(t => t.id);
+        }
+      } catch (e) {
+        console.error("Error fetching all IDs for rejection:", e);
+      }
+    }
+
+    if (ids.length === 0) return;
+    await rejectIds(ids);
   }
 
   async function approveSelected() {
@@ -217,11 +255,11 @@
             Approve Selected ({selectedTracks.length})
           </button>
         {:else}
-          <button class="btn ghost" onclick={() => rejectIds(tracks.map(t => t.id))} disabled={tracks.length === 0}>
-            Reject All
+          <button class="btn ghost" onclick={rejectAll} disabled={totalTracks === 0}>
+            Reject All ({totalTracks})
           </button>
-          <button class="btn ghost" onclick={approveAll} disabled={tracks.length === 0}>
-            Approve All ({tracks.length})
+          <button class="btn ghost" onclick={approveAll} disabled={totalTracks === 0}>
+            Approve All ({totalTracks})
           </button>
         {/if}
       </div>
