@@ -29,6 +29,10 @@ import (
 	"sgound/internal/tags"
 )
 
+// Semáforo global para limitar cuántos archivos se leen simultáneamente.
+// Esto previene que varios workers carguen carátulas grandes a la vez.
+var globalTagSem = make(chan struct{}, 2)
+
 type Scanner struct {
 	DB          *db.MasterDatabase
 	OnProgress  func(path string, count int)
@@ -94,7 +98,7 @@ func (s *Scanner) checkBackpressure() {
 		if !p {
 			break
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -199,7 +203,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 						s.IsPaused = true
 					}
 					debug.FreeOSMemory()
-				} else if realOSMB < 120 && s.IsPaused {
+				} else if realOSMB < 130 && s.IsPaused {
 					slog.Info("🟢 WATCHDOG: RAM estabilizada, reanudando escáner", "real_mb", realOSMB)
 					s.IsPaused = false
 				}
@@ -253,15 +257,12 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		count      int
 		scanActive = true
 		
-		// 📋 LISTA DE ARCHIVOS PESADOS (DEFERRED)
 		heavyPaths []string
 		muHeavy    sync.Mutex
 	)
 
-	// Aduana FLAC: Solo un worker a la vez puede procesar archivos pesados
 	flacSem := make(chan struct{}, 1)
 
-	// Clasificar y enviar a la cola correcta
 	queueJob := func(path string) {
 		ext := strings.ToLower(filepath.Ext(path))
 		if ext == ".flac" || ext == ".wav" {
@@ -271,7 +272,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 	}
 
-	// Helper para procesar una pista y despachar resultados
 	processTrack := func(p string, wId int, isHeavyPass bool) {
 		res, err := func() (*trackResult, error) {
 			s.ramTickets <- struct{}{}
@@ -282,11 +282,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				}
 			}()
 			
-			// Si no es la pasada de archivos pesados, limitamos el tamaño de carátula aceptable
 			r, e := s.ParseFileWithCache(p, "pending")
 			
-			if e == nil && r != nil && !isHeavyPass && r.coverSize > 8*1024*1024 {
-				// 🐘 Detectado elefante en RAM: Deferir para el final
+			// Umbral de salto subido a 12MB para evitar saltar demasiados FLACs normales
+			if e == nil && r != nil && !isHeavyPass && r.coverSize > 12*1024*1024 {
 				return &trackResult{Deferred: true}, nil
 			}
 			
@@ -302,9 +301,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			heavyPaths = append(heavyPaths, p)
 			muHeavy.Unlock()
 			slog.Info("🐘 W"+strconv.Itoa(wId)+": Heavy file deferred", "file", filepath.Base(p))
-			// Forzar limpieza tras soltar el archivo pesado
-			runtime.GC()
-			debug.FreeOSMemory()
 			return
 		}
 
@@ -328,62 +324,33 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 	}
 
-	// A. ESCRITOR DE DB
 	go func() {
-		batchSize := 50 // Restaurado a 50 como pidió el usuario
+		batchSize := 50
 		var batch []*trackResult
-		ticker := time.NewTicker(15 * time.Second)
+		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		flush := func() {
-			if len(batch) == 0 {
-				return
-			}
+			if len(batch) == 0 { return }
 			s.muDB.Lock()
-			err := s.executeTransaction(func(tx *sql.Tx) error {
+			_ = s.executeTransaction(func(tx *sql.Tx) error {
 				for _, r := range batch {
 					if _, seen := s.seenArtists[r.artistId]; !seen {
-						if _, err := tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", r.artistId, r.dbAlbumArtist); err != nil {
-							return err
-						}
+						tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", r.artistId, r.dbAlbumArtist)
 						s.seenArtists[r.artistId] = struct{}{}
 					}
 					if _, seen := s.seenAlbums[r.albumId]; !seen {
-						if _, err := tx.Exec(`INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END`, r.albumId, r.artistId, r.albumName, r.year); err != nil {
-							return err
-						}
+						tx.Exec(`INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET year = CASE WHEN (year IS NULL OR year = 0) THEN excluded.year ELSE year END`, r.albumId, r.artistId, r.albumName, r.year)
 						s.seenAlbums[r.albumId] = struct{}{}
 					}
-					if _, err := tx.Exec(`UPDATE tracks SET id=?, album_id=?, artist=?, title=?, track_num=?, disc_num=?, duration=?, genre=?, size=?, format=?, composer=?, comment=?, bit_rate=?, sample_rate=?, status=?, instrumental=?, replay_gain=?, file_mtime=?, file_hash=? WHERE path=?`,
-						r.trackId, r.albumId, r.artistName, r.title, r.trackNum, r.discNum, r.duration, r.genre, r.size, r.format, r.composer, r.comment, r.bitRate, r.sampleRate, "pending", r.instrumental, r.replayGain, r.fileMtime, r.hash, r.path); err != nil {
-						return err
-					}
+					tx.Exec(`UPDATE tracks SET id=?, album_id=?, artist=?, title=?, track_num=?, disc_num=?, duration=?, genre=?, size=?, format=?, composer=?, comment=?, bit_rate=?, sample_rate=?, status=?, instrumental=?, replay_gain=?, file_mtime=?, file_hash=? WHERE path=?`,
+						r.trackId, r.albumId, r.artistName, r.title, r.trackNum, r.discNum, r.duration, r.genre, r.size, r.format, r.composer, r.comment, r.bitRate, r.sampleRate, "pending", r.instrumental, r.replayGain, r.fileMtime, r.hash, r.path)
 				}
 				return nil
 			})
 			s.muDB.Unlock()
-
-			if err != nil {
-				slog.Error("Failed to flush batch to DB", "error", err)
-			}
-			
 			batch = nil
 			s.seenArtists = make(map[string]struct{})
 			s.seenAlbums = make(map[string]struct{})
-			s.muAlbums.Lock()
-			s.resolvedAlbums = make(map[string]string)
-			s.muAlbums.Unlock()
-
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			sysMB := m.Sys / 1024 / 1024
-			releasedMB := m.HeapReleased / 1024 / 1024
-			realOSMB := sysMB - releasedMB
-
-			slog.Info("🧠 RAM Status", 
-				"used_mb", m.Alloc/1024/1024, 
-				"sys_mb", sysMB, 
-				"real_os_mb", realOSMB,
-			)
 		}
 		for {
 			select {
@@ -394,16 +361,13 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 					return
 				}
 				batch = append(batch, r)
-				if len(batch) >= batchSize {
-					flush()
-				}
+				if len(batch) >= batchSize { flush() }
 			case <-ticker.C:
 				flush()
 			}
 		}
 	}()
 
-	// B. CARRIL LENTO (ffprobe)
 	slowWg.Add(1)
 	go func() {
 		defer slowWg.Done()
@@ -412,16 +376,13 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				res.duration = data.duration
 				res.bitRate = data.bitRate
 				res.sampleRate = data.sampleRate
-				if data.replayGain != 0 {
-					res.replayGain = data.replayGain
-				}
+				if data.replayGain != 0 { res.replayGain = data.replayGain }
 			}
 			res.status = "pending"
 			results <- res
 		}
 	}()
 
-	// C. ANALISTAS (BIBLIOTECARIOS)
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		id := i + 1
@@ -429,103 +390,54 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			defer wg.Done()
 			for {
 				s.checkBackpressure()
-
 				var path string
 				var ok bool
-
 				select {
 				case path, ok = <-s.PriorityJobs:
-					if ok {
-						processTrack(path, wId, false)
-						continue
-					}
+					if ok { processTrack(path, wId, false); continue }
 				default:
 				}
-
 				select {
 				case flacSem <- struct{}{}:
 					select {
 					case path, ok = <-jobsFLAC:
-						if ok {
-							processTrack(path, wId, false)
-						}
+						if ok { processTrack(path, wId, false) }
 					default:
 					}
 					<-flacSem
-					if path != "" {
-						continue
-					}
-					if !ok {
-						goto checkMP3
-					}
+					if path != "" { continue }
+					if !ok { goto checkMP3 }
 				default:
 				}
-
 			checkMP3:
 				select {
 				case path, ok = <-jobsMP3:
-					if ok {
-						processTrack(path, wId, false)
-						continue
-					}
+					if ok { processTrack(path, wId, false); continue }
 				default:
 				}
-
-				if !scanActive && len(jobsMP3) == 0 && len(jobsFLAC) == 0 && len(s.PriorityJobs) == 0 {
-					return
-				}
+				if !scanActive && len(jobsMP3) == 0 && len(jobsFLAC) == 0 && len(s.PriorityJobs) == 0 { return }
 				time.Sleep(10 * time.Millisecond)
 			}
 		}(id)
 	}
 
-	// D. EXPLORADOR (W-Explorer)
 	discoveryCount := 0
-	rowsRaw, err := s.DB.Conn.Query("SELECT path FROM tracks WHERE status = 'raw'")
-	if err == nil && rowsRaw != nil {
-		var rawPaths []string
-		for rowsRaw.Next() {
-			var p string
-			if err := rowsRaw.Scan(&p); err == nil {
-				rawPaths = append(rawPaths, p)
-			}
-		}
-		rowsRaw.Close()
-		go func() {
-			for _, p := range rawPaths {
-				queueJob(p)
-			}
-		}()
-	}
-
 	type rawInfo struct{ id, path string }
 	var buffer []rawInfo
 	flushDisc := func() {
-		if len(buffer) == 0 {
-			return
-		}
+		if len(buffer) == 0 { return }
 		s.muDB.Lock()
-		err := s.executeTransaction(func(tx *sql.Tx) error {
+		s.executeTransaction(func(tx *sql.Tx) error {
 			for _, info := range buffer {
-				if _, err := tx.Exec(`INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-					info.id, "raw_album", "Unknown", filepath.Base(info.path), info.path, "raw", 0, 0); err != nil {
-					return err
-				}
+				tx.Exec(`INSERT OR IGNORE INTO tracks (id, album_id, artist, title, path, status, file_mtime, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+					info.id, "raw_album", "Unknown", filepath.Base(info.path), info.path, "raw", 0, 0)
 			}
 			return nil
 		})
 		s.muDB.Unlock()
-
-		if err != nil {
-			slog.Error("Failed to flush raw discovery to DB", "error", err)
-		}
-		for _, info := range buffer {
-			queueJob(info.path)
-		}
+		for _, info := range buffer { queueJob(info.path) }
 		discoveryCount += len(buffer)
-		if s.OnDiscovery != nil {
-			s.OnDiscovery(discoveryCount)
-		}
+		if s.OnDiscovery != nil { s.OnDiscovery(discoveryCount) }
 		buffer = nil
 	}
 
@@ -534,9 +446,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		if !d.IsDir() && IsAudioFile(d.Name()) == nil {
 			if _, exists := s.dbFileCache[path]; !exists {
 				buffer = append(buffer, rawInfo{GenerateID(path), path})
-				if len(buffer) >= 25 {
+				if len(buffer) >= 20 {
 					s.checkBackpressure()
 					flushDisc()
+					time.Sleep(50 * time.Millisecond) // Respiro para la DB
 				}
 			}
 		}
@@ -547,11 +460,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	scanActive = false
 	wg.Wait()
 	
-	// 🐘 FINAL: PROCESAR ARCHIVOS PESADOS UNO A UNO
 	if len(heavyPaths) > 0 {
 		slog.Info("🏁 Processing deferred heavy files...", "count", len(heavyPaths))
 		for i, p := range heavyPaths {
-			processTrack(p, 99, true) // Worker ID especial 99 (Secuencial)
+			processTrack(p, 99, true)
 			slog.Info("🐘 Heavy file done", "progress", fmt.Sprintf("%d/%d", i+1, len(heavyPaths)))
 			runtime.GC()
 			debug.FreeOSMemory()
@@ -565,27 +477,23 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 	slog.Info("Scan completed", "total", count, "duration", time.Since(start))
 	s.muAlbums.Lock()
-	for id := range s.conflictedAlbums {
-		s.recalculateAlbumArtist(id)
-	}
+	for id := range s.conflictedAlbums { s.recalculateAlbumArtist(id) }
 	s.muAlbums.Unlock()
 
-	// Liberar memoria agresivamente al finalizar
 	s.dbFileCache = make(map[string]dbFileInfo)
 	s.seenArtists = nil
 	s.seenAlbums = nil
-	s.resolvedAlbums = nil
-	s.conflictedAlbums = nil
 	debug.FreeOSMemory()
-
 	return nil
 }
 
 func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResult, error) {
 	fileStat, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
+	if err != nil { return nil, err }
+
+	// 🛡️ CONTROL DE CONCURRENCIA PARA LECTURA DE TAGS
+	globalTagSem <- struct{}{}
+	defer func() { <-globalTagSem }()
 
 	meta, err := tags.Open(path)
 
@@ -595,7 +503,6 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	var coverFormat string
 
 	if err != nil {
-		slog.Warn("Could not read tags, using file info", "path", path, "err", err)
 		artistName = "Unknown Artist"
 		albumName = "Unknown Album"
 		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
@@ -603,22 +510,13 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	} else {
 		defer meta.Close()
 		title = copyString(meta.Title())
-		if title == "" {
-			title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-		}
+		if title == "" { title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)) }
 		artistName = copyString(meta.Artist())
-		if artistName == "" {
-			artistName = "Unknown Artist"
-		}
+		if artistName == "" { artistName = "Unknown Artist" }
 		albumName = copyString(meta.Album())
-		if albumName == "" {
-			albumName = "Unknown Album"
-		}
+		if albumName == "" { albumName = "Unknown Album" }
 		genre = copyString(meta.Genre())
-		if genre == "" {
-			genre = "Unknown"
-		}
-
+		if genre == "" { genre = "Unknown" }
 		composer = copyString(meta.Composer())
 		comment = copyString(meta.Comment())
 		albumArtistTag = copyString(meta.AlbumArtist())
@@ -626,7 +524,6 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 		trackNum, _ = meta.Track()
 		discNum, _ = meta.Disc()
 
-		// Carátula: Obtener dimensiones y tamaño de forma eficiente (solo cabecera)
 		if pic := meta.Picture(); pic != nil {
 			coverSize = len(pic.Data)
 			coverFormat = pic.MIME
@@ -639,18 +536,14 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	}
 
 	trackId := tags.ReadPersistentID(path)
-	if trackId == "" {
-		trackId = GenerateID(path)
-	}
+	if trackId == "" { trackId = GenerateID(path) }
 
 	var bitRate, sampleRate int
 	var duration float64
 	lowerExt := strings.ToLower(filepath.Ext(path))
 	switch lowerExt {
-	case ".flac":
-		duration, bitRate, sampleRate, _ = getFLACDurationNative(path)
-	case ".mp3":
-		duration, bitRate, sampleRate, _ = getMP3DurationNative(path)
+	case ".flac": duration, bitRate, sampleRate, _ = getFLACDurationNative(path)
+	case ".mp3": duration, bitRate, sampleRate, _ = getMP3DurationNative(path)
 	}
 
 	var groupingKey string
@@ -659,16 +552,12 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	} else {
 		dir := filepath.Dir(path)
 		base := strings.ToLower(filepath.Base(dir))
-		if strings.HasPrefix(base, "cd") || strings.HasPrefix(base, "disc") || strings.HasPrefix(base, "disk") {
-			dir = filepath.Dir(dir)
-		}
+		if strings.HasPrefix(base, "cd") || strings.HasPrefix(base, "disc") || strings.HasPrefix(base, "disk") { dir = filepath.Dir(dir) }
 		groupingKey = "DIR:" + dir
 	}
 	albumId := GenerateID(groupingKey + "|" + NormalizeString(albumName))
 	dbAlbumArtist := albumArtistTag
-	if dbAlbumArtist == "" {
-		dbAlbumArtist = artistName
-	}
+	if dbAlbumArtist == "" { dbAlbumArtist = artistName }
 	artistId := GenerateID(dbAlbumArtist)
 
 	return &trackResult{
@@ -688,14 +577,10 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 
 func getMP3DurationNative(path string) (float64, int, int, error) {
 	f, err := os.Open(path)
-	if err != nil {
-		return 0, 0, 0, err
-	}
+	if err != nil { return 0, 0, 0, err }
 	defer f.Close()
 	header := make([]byte, 10)
-	if _, err := f.Read(header); err != nil {
-		return 0, 0, 0, err
-	}
+	if _, err := f.Read(header); err != nil { return 0, 0, 0, err }
 	offset := int64(0)
 	if string(header[:3]) == "ID3" {
 		size := int64(header[6])<<21 | int64(header[7])<<14 | int64(header[8])<<7 | int64(header[9])
@@ -707,13 +592,10 @@ func getMP3DurationNative(path string) (float64, int, int, error) {
 	frameOffset := -1
 	for i := 0; i < n-4; i++ {
 		if buf[i] == 0xFF && (buf[i+1]&0xE0) == 0xE0 {
-			frameOffset = i
-			break
+			frameOffset = i; break
 		}
 	}
-	if frameOffset == -1 {
-		return 0, 0, 0, fmt.Errorf("no mp3")
-	}
+	if frameOffset == -1 { return 0, 0, 0, fmt.Errorf("no mp3") }
 	b2 := buf[frameOffset+2]
 	srIndex := (b2 & 0x0C) >> 2
 	brIndex := (b2 & 0xF0) >> 4
@@ -724,27 +606,19 @@ func getMP3DurationNative(path string) (float64, int, int, error) {
 	xingPos := frameOffset + 36
 	if xingPos < n-8 && (string(buf[xingPos:xingPos+4]) == "Xing" || string(buf[xingPos:xingPos+4]) == "Info") {
 		numFrames := int64(buf[xingPos+8])<<24 | int64(buf[xingPos+9])<<16 | int64(buf[xingPos+10])<<8 | int64(buf[xingPos+11])
-		if numFrames > 0 {
-			return float64(numFrames*1152) / float64(sr), br, sr, nil
-		}
+		if numFrames > 0 { return float64(numFrames*1152) / float64(sr), br, sr, nil }
 	}
 	info, _ := os.Stat(path)
-	if br > 0 {
-		return float64((info.Size()-offset)*8) / float64(br), br, sr, nil
-	}
+	if br > 0 { return float64((info.Size()-offset)*8) / float64(br), br, sr, nil }
 	return 0, 0, 0, nil
 }
 
 func getFLACDurationNative(path string) (float64, int, int, error) {
 	f, err := os.Open(path)
-	if err != nil {
-		return 0, 0, 0, err
-	}
+	if err != nil { return 0, 0, 0, err }
 	defer f.Close()
 	header := make([]byte, 10)
-	if _, err := f.Read(header); err != nil {
-		return 0, 0, 0, err
-	}
+	if _, err := f.Read(header); err != nil { return 0, 0, 0, err }
 	offset := int64(0)
 	if string(header[:3]) == "ID3" {
 		size := int64(header[6])<<21 | int64(header[7])<<14 | int64(header[8])<<7 | int64(header[9])
@@ -752,20 +626,12 @@ func getFLACDurationNative(path string) (float64, int, int, error) {
 	}
 	f.Seek(offset, 0)
 	head := make([]byte, 4)
-	if _, err := f.Read(head); err != nil || string(head) != "fLaC" {
-		return 0, 0, 0, nil
-	}
+	if _, err := f.Read(head); err != nil || string(head) != "fLaC" { return 0, 0, 0, nil }
 	blockHeader := make([]byte, 4)
-	if _, err := f.Read(blockHeader); err != nil {
-		return 0, 0, 0, err
-	}
-	if blockHeader[0]&0x7F != 0 {
-		return 0, 0, 0, nil
-	}
+	if _, err := f.Read(blockHeader); err != nil { return 0, 0, 0, err }
+	if blockHeader[0]&0x7F != 0 { return 0, 0, 0, nil }
 	data := make([]byte, 34)
-	if _, err := f.Read(data); err != nil {
-		return 0, 0, 0, err
-	}
+	if _, err := f.Read(data); err != nil { return 0, 0, 0, err }
 	sampleRate := int(data[10])<<12 | int(data[11])<<4 | int(data[12])>>4
 	totalSamples := int64(data[13]&0x0F)<<32 | int64(data[14])<<24 | int64(data[15])<<16 | int64(data[16])<<8 | int64(data[17])
 	if sampleRate > 0 {
@@ -779,9 +645,7 @@ func getFLACDurationNative(path string) (float64, int, int, error) {
 func IsAudioFile(filename string) error {
 	ext := strings.ToLower(filepath.Ext(filename))
 	supported := map[string]bool{".mp3": true, ".flac": true, ".ogg": true, ".m4a": true, ".mp4": true, ".opus": true, ".wav": true}
-	if !supported[ext] {
-		return fmt.Errorf("no")
-	}
+	if !supported[ext] { return fmt.Errorf("no") }
 	return nil
 }
 
@@ -790,12 +654,8 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,bit_rate:stream=sample_rate:format_tags=REPLAYGAIN_TRACK_GAIN,replaygain_track_gain", "-of", "json", path)
 	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return audioMetadata{}, err
-	}
-	if err := cmd.Start(); err != nil {
-		return audioMetadata{}, err
-	}
+	if err != nil { return audioMetadata{}, err }
+	if err := cmd.Start(); err != nil { return audioMetadata{}, err }
 	defer func() { _, _ = io.Copy(io.Discard, stdout); cmd.Wait() }()
 	var output struct {
 		Format struct {
@@ -807,19 +667,11 @@ func getAudioMetadataWithFFprobe(path string) (audioMetadata, error) {
 			SampleRate string `json:"sample_rate"`
 		} `json:"streams"`
 	}
-	if err := json.NewDecoder(stdout).Decode(&output); err != nil {
-		return audioMetadata{}, err
-	}
+	if err := json.NewDecoder(stdout).Decode(&output); err != nil { return audioMetadata{}, err }
 	data := audioMetadata{sampleRate: 44100}
-	if output.Format.Duration != "" {
-		data.duration, _ = strconv.ParseFloat(output.Format.Duration, 64)
-	}
-	if output.Format.BitRate != "" {
-		data.bitRate, _ = strconv.Atoi(output.Format.BitRate)
-	}
-	if len(output.Streams) > 0 && output.Streams[0].SampleRate != "" {
-		data.sampleRate, _ = strconv.Atoi(output.Streams[0].SampleRate)
-	}
+	if output.Format.Duration != "" { data.duration, _ = strconv.ParseFloat(output.Format.Duration, 64) }
+	if output.Format.BitRate != "" { data.bitRate, _ = strconv.Atoi(output.Format.BitRate) }
+	if len(output.Streams) > 0 && output.Streams[0].SampleRate != "" { data.sampleRate, _ = strconv.Atoi(output.Streams[0].SampleRate) }
 	for k, v := range output.Format.Tags {
 		lk := strings.ToLower(k)
 		if lk == "replaygain_track_gain" || lk == "REPLAYGAIN_TRACK_GAIN" {
@@ -837,18 +689,12 @@ type audioMetadata struct {
 
 func (s *Scanner) recalculateAlbumArtist(albumId string) {
 	rows, _ := s.DB.Conn.Query(`SELECT artist, COUNT(*) as freq FROM tracks WHERE album_id = ? AND artist != 'Unknown Artist' GROUP BY artist ORDER BY freq DESC, artist ASC`, albumId)
-	if rows == nil {
-		return
-	}
+	if rows == nil { return }
 	defer rows.Close()
 	var winnerName string
 	var maxFreq int
-	if rows.Next() {
-		rows.Scan(&winnerName, &maxFreq)
-	}
-	if winnerName == "" {
-		return
-	}
+	if rows.Next() { rows.Scan(&winnerName, &maxFreq) }
+	if winnerName == "" { return }
 	winnerArtistId := GenerateID(winnerName)
 	s.DB.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", winnerArtistId, winnerName)
 	s.DB.Conn.Exec("UPDATE albums SET artist_id = ? WHERE id = ?", winnerArtistId, albumId)
@@ -864,9 +710,7 @@ func NormalizeArtist(name string) string {
 	name = strings.ToLower(name)
 	separators := []string{" feat.", " ft.", " feat ", " ft ", " with "}
 	for _, sep := range separators {
-		if idx := strings.Index(name, sep); idx != -1 {
-			name = name[:idx]
-		}
+		if idx := strings.Index(name, sep); idx != -1 { name = name[:idx] }
 	}
 	return strings.TrimSpace(name)
 }
