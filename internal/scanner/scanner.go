@@ -85,6 +85,19 @@ func (s *Scanner) GetStatus() (isPaused bool, ramUsedMB int) {
 	return s.IsPaused, s.RAMUsedMB
 }
 
+// checkBackpressure bloquea la ejecución si la RAM es demasiado alta
+func (s *Scanner) checkBackpressure() {
+	for {
+		s.muStatus.Lock()
+		p := s.IsPaused
+		s.muStatus.Unlock()
+		if !p {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
 // copyString fuerza una nueva asignación de memoria para romper vínculos con buffers grandes
 func copyString(s string) string {
 	if s == "" {
@@ -161,7 +174,6 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 func (s *Scanner) ScanDirectory(rootPath string) error {
 	// ======= SALVAVIDAS PARA DOCKER =======
-	// Bajamos el límite para forzar GC mucho antes de que el contenedor muera
 	debug.SetMemoryLimit(150 * 1024 * 1024)
 	// ======================================
 
@@ -177,12 +189,11 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			case <-ticker.C:
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
-				// Calculamos la RAM "real" que el SO ve (Sys menos lo que ya marcamos como libre)
 				realOSMB := (m.Sys - m.HeapReleased) / 1024 / 1024
 				
 				s.muStatus.Lock()
 				s.RAMUsedMB = int(realOSMB)
-				if realOSMB > 220 { // Bajamos el umbral de pánico
+				if realOSMB > 220 {
 					if !s.IsPaused {
 						slog.Warn("🚨 WATCHDOG: RAM crítica detectada (>220MB), pausando escáner...", "real_mb", realOSMB)
 						s.IsPaused = true
@@ -223,7 +234,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 	}
 
-	numWorkers := 3 // Reducimos a 3 por defecto para mayor estabilidad
+	numWorkers := 3
 	if envWorkers := os.Getenv("SGOUND_SCANNER_WORKERS"); envWorkers != "" {
 		if val, err := strconv.Atoi(envWorkers); err == nil {
 			numWorkers = val
@@ -241,6 +252,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		mu         sync.Mutex
 		count      int
 		scanActive = true
+		
+		// 📋 LISTA DE ARCHIVOS PESADOS (DEFERRED)
+		heavyPaths []string
+		muHeavy    sync.Mutex
 	)
 
 	// Aduana FLAC: Solo un worker a la vez puede procesar archivos pesados
@@ -257,7 +272,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}
 
 	// Helper para procesar una pista y despachar resultados
-	processTrack := func(p string, wId int) {
+	processTrack := func(p string, wId int, isHeavyPass bool) {
 		res, err := func() (*trackResult, error) {
 			s.ramTickets <- struct{}{}
 			defer func() { <-s.ramTickets }()
@@ -267,13 +282,32 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				}
 			}()
 			
+			// Si no es la pasada de archivos pesados, limitamos el tamaño de carátula aceptable
 			r, e := s.ParseFileWithCache(p, "pending")
+			
+			if e == nil && r != nil && !isHeavyPass && r.coverSize > 8*1024*1024 {
+				// 🐘 Detectado elefante en RAM: Deferir para el final
+				return &trackResult{Deferred: true}, nil
+			}
+			
 			return r, e
 		}()
 		
 		if err != nil || res == nil {
 			return
 		}
+
+		if res.Deferred {
+			muHeavy.Lock()
+			heavyPaths = append(heavyPaths, p)
+			muHeavy.Unlock()
+			slog.Info("🐘 W"+strconv.Itoa(wId)+": Heavy file deferred", "file", filepath.Base(p))
+			// Forzar limpieza tras soltar el archivo pesado
+			runtime.GC()
+			debug.FreeOSMemory()
+			return
+		}
+
 		if res.duration == 0 {
 			slowJobs <- res
 		} else {
@@ -282,8 +316,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		mu.Lock()
 		count++
 		currentCount := count
-		// Limpieza proactiva cada 100 archivos
-		if currentCount % 100 == 0 {
+		if currentCount % 50 == 0 {
 			go func() {
 				runtime.GC()
 				debug.FreeOSMemory()
@@ -297,7 +330,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 	// A. ESCRITOR DE DB
 	go func() {
-		batchSize := 50
+		batchSize := 50 // Restaurado a 50 como pidió el usuario
 		var batch []*trackResult
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
@@ -395,36 +428,26 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		go func(wId int) {
 			defer wg.Done()
 			for {
-				// Backpressure check
-				for {
-					s.muStatus.Lock()
-					p := s.IsPaused
-					s.muStatus.Unlock()
-					if !p { break }
-					time.Sleep(1 * time.Second)
-				}
+				s.checkBackpressure()
 
 				var path string
 				var ok bool
 
-				// 1. Siempre mirar Prioridad primero
 				select {
 				case path, ok = <-s.PriorityJobs:
 					if ok {
-						slog.Info("👑 W"+strconv.Itoa(wId)+": PRIORITY", "file", filepath.Base(path))
-						processTrack(path, wId)
+						processTrack(path, wId, false)
 						continue
 					}
 				default:
 				}
 
-				// 2. Intento FLAC (Aduana) - No bloqueante
 				select {
 				case flacSem <- struct{}{}:
 					select {
 					case path, ok = <-jobsFLAC:
 						if ok {
-							processTrack(path, wId)
+							processTrack(path, wId, false)
 						}
 					default:
 					}
@@ -442,7 +465,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 				select {
 				case path, ok = <-jobsMP3:
 					if ok {
-						processTrack(path, wId)
+						processTrack(path, wId, false)
 						continue
 					}
 				default:
@@ -457,10 +480,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}
 
 	// D. EXPLORADOR (W-Explorer)
-	slog.Info("W-Explorer: Mapping disk...")
 	discoveryCount := 0
-
-	// 'raw' existentes
 	rowsRaw, err := s.DB.Conn.Query("SELECT path FROM tracks WHERE status = 'raw'")
 	if err == nil && rowsRaw != nil {
 		var rawPaths []string
@@ -497,10 +517,8 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		s.muDB.Unlock()
 
 		if err != nil {
-			slog.Error("Failed to flush raw discovery to DB", "error", err, "n", len(buffer))
+			slog.Error("Failed to flush raw discovery to DB", "error", err)
 		}
-		
-		slog.Debug("📂 W-Explorer: Syncing raw", "n", len(buffer))
 		for _, info := range buffer {
 			queueJob(info.path)
 		}
@@ -512,13 +530,12 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}
 
 	_ = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
+		if err != nil { return nil }
 		if !d.IsDir() && IsAudioFile(d.Name()) == nil {
 			if _, exists := s.dbFileCache[path]; !exists {
 				buffer = append(buffer, rawInfo{GenerateID(path), path})
-				if len(buffer) >= 50 {
+				if len(buffer) >= 25 {
+					s.checkBackpressure()
 					flushDisc()
 				}
 			}
@@ -529,6 +546,18 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 
 	scanActive = false
 	wg.Wait()
+	
+	// 🐘 FINAL: PROCESAR ARCHIVOS PESADOS UNO A UNO
+	if len(heavyPaths) > 0 {
+		slog.Info("🏁 Processing deferred heavy files...", "count", len(heavyPaths))
+		for i, p := range heavyPaths {
+			processTrack(p, 99, true) // Worker ID especial 99 (Secuencial)
+			slog.Info("🐘 Heavy file done", "progress", fmt.Sprintf("%d/%d", i+1, len(heavyPaths)))
+			runtime.GC()
+			debug.FreeOSMemory()
+		}
+	}
+
 	close(slowJobs)
 	slowWg.Wait()
 	close(results)
@@ -541,7 +570,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}
 	s.muAlbums.Unlock()
 
-	// Liberar memoria agresivamente al finalizar
 	s.dbFileCache = make(map[string]dbFileInfo)
 	s.seenArtists = nil
 	s.seenAlbums = nil
@@ -601,8 +629,6 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 		if pic := meta.Picture(); pic != nil {
 			coverSize = len(pic.Data)
 			coverFormat = pic.MIME
-			// image.DecodeConfig solo lee los metadatos de la imagen, NO los píxeles.
-			// Esto evita picos de 30-100MB por imagen en archivos con carátulas 4K.
 			cfg, _, err := image.DecodeConfig(bytes.NewReader(pic.Data))
 			if err == nil {
 				coverWidth = cfg.Width
@@ -644,9 +670,6 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	}
 	artistId := GenerateID(dbAlbumArtist)
 
-	// ESTIMAR TAMAÑO DE RAM REAL (Bytes)
-	mSize := len(artistName) + len(albumName) + len(title) + len(genre) + len(composer) + len(comment) + len(trackId) + len(path) + 1024
-
 	return &trackResult{
 		trackId: copyString(trackId), albumId: albumId, artistId: artistId,
 		artistName: artistName, dbAlbumArtist: dbAlbumArtist, albumName: albumName,
@@ -655,7 +678,6 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 		trackNum: trackNum, discNum: discNum, year: year, duration: duration,
 		bitRate: bitRate, sampleRate: sampleRate, size: fileStat.Size(),
 		fileMtime:    fileStat.ModTime().Unix(),
-		MetadataSize: mSize,
 		coverWidth:   coverWidth,
 		coverHeight:  coverHeight,
 		coverSize:    coverSize,
@@ -859,8 +881,8 @@ type trackResult struct {
 	trackNum, discNum, year, bitRate, sampleRate                                                                                  int
 	duration, replayGain                                                                                                          float64
 	size, fileMtime                                                                                                               int64
-	MetadataSize                                                                                                                  int
 	instrumental                                                                                                                  bool
 	coverWidth, coverHeight, coverSize                                                                                            int
 	coverFormat                                                                                                                   string
+	Deferred                                                                                                                      bool
 }
