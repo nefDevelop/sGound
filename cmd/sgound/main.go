@@ -4,7 +4,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strings"
+	"time"
 
 	"sgound/internal/api"
 	"sgound/internal/config"
@@ -62,6 +64,15 @@ func main() {
 
 	// Trigger initial scan at startup
 	go apiServer.TriggerGlobalScan()
+
+	// Memory Janitor: Free memory periodically to keep idle usage low
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		for range ticker.C {
+			slog.Debug("🧹 Janitor: Freeing OS memory")
+			debug.FreeOSMemory()
+		}
+	}()
 
 	slog.Info("Listening on HTTP port", "port", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, mux); err != nil {

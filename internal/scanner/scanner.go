@@ -161,31 +161,39 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 func (s *Scanner) ScanDirectory(rootPath string) error {
 	// ======= SALVAVIDAS PARA DOCKER =======
-	debug.SetMemoryLimit(150 * 1024 * 1024)
+	debug.SetMemoryLimit(180 * 1024 * 1024)
 	// ======================================
+
+	done := make(chan struct{})
+	defer close(done)
 
 	// ======= PERRO GUARDIÁN DE RAM (Watchdog con Backpressure) =======
 	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
+		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			realOSMB := (m.Sys - m.HeapReleased) / 1024 / 1024
-			
-			s.muStatus.Lock()
-			s.RAMUsedMB = int(realOSMB)
-			if realOSMB > 300 {
-				if !s.IsPaused {
-					slog.Warn("🚨 WATCHDOG: RAM crítica detectada (>300MB), pausando escáner...", "real_mb", realOSMB)
-					s.IsPaused = true
+		for {
+			select {
+			case <-ticker.C:
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				realOSMB := (m.Sys - m.HeapReleased) / 1024 / 1024
+				
+				s.muStatus.Lock()
+				s.RAMUsedMB = int(realOSMB)
+				if realOSMB > 250 {
+					if !s.IsPaused {
+						slog.Warn("🚨 WATCHDOG: RAM crítica detectada (>250MB), pausando escáner...", "real_mb", realOSMB)
+						s.IsPaused = true
+					}
+					debug.FreeOSMemory()
+				} else if realOSMB < 150 && s.IsPaused {
+					slog.Info("🟢 WATCHDOG: RAM estabilizada, reanudando escáner", "real_mb", realOSMB)
+					s.IsPaused = false
 				}
-				debug.FreeOSMemory()
-			} else if realOSMB < 200 && s.IsPaused {
-				slog.Info("🟢 WATCHDOG: RAM estabilizada, reanudando escáner", "real_mb", realOSMB)
-				s.IsPaused = false
+				s.muStatus.Unlock()
+			case <-done:
+				return
 			}
-			s.muStatus.Unlock()
 		}
 	}()
 	// ===========================================
@@ -530,6 +538,15 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		s.recalculateAlbumArtist(id)
 	}
 	s.muAlbums.Unlock()
+
+	// Liberar memoria agresivamente al finalizar
+	s.dbFileCache = make(map[string]dbFileInfo)
+	s.seenArtists = nil
+	s.seenAlbums = nil
+	s.resolvedAlbums = nil
+	s.conflictedAlbums = nil
+	debug.FreeOSMemory()
+
 	return nil
 }
 

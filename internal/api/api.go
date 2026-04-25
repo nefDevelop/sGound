@@ -43,6 +43,10 @@ type ScanStatus struct {
 	RawCount  int  `json:"rawCount"`
 }
 
+var (
+	imageProcessingSem = make(chan struct{}, 2) // Máximo 2 procesos de imagen pesados a la vez
+)
+
 type Server struct {
 	MasterDB     *db.MasterDatabase
 	Config       *config.Config
