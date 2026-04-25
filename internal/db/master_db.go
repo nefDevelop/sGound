@@ -54,9 +54,9 @@ func ConnectMaster(dbPath string) (*MasterDatabase, error) {
 		return nil, err
 	}
 
-	// Solo 1 conexión para evitar fragmentación de memoria en SQLite puro Go
-	conn.SetMaxOpenConns(1)
-	conn.SetMaxIdleConns(1)
+	// Permitir múltiples conexiones para aprovechar el modo WAL (lecturas concurrentes)
+	conn.SetMaxOpenConns(5)
+	conn.SetMaxIdleConns(2)
 
 	mdb := &MasterDatabase{Conn: conn}
 	if err := mdb.initSchema(); err != nil {

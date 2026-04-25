@@ -145,16 +145,6 @@
 
   .status { padding: 4rem; text-align: center; color: var(--text-muted); font-weight: 700; }
 
-  .empty {
-    text-align: center;
-    padding: 4rem;
-    color: var(--text-muted);
-    background: var(--surface-container-low);
-    border-radius: 32px;
-    border: 1px dashed var(--border-color);
-    display: flex; flex-direction: column; align-items: center; gap: 1rem;
-  }
-
   @media (max-width: 900px) {
     .playlist-header { 
       flex-direction: row; 

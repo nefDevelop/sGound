@@ -15,8 +15,10 @@ export const effectiveQuality = derived(audioQuality, ($quality) => {
     if ($quality !== 'auto') return $quality;
     
     // Auto-detection based on network speed (where available)
-    if (typeof navigator !== 'undefined' && navigator.connection) {
-        const type = navigator.connection.effectiveType; // '4g', '3g', '2g', 'slow-2g'
+    const nav = typeof navigator !== 'undefined' ? navigator : null;
+    if (nav && 'connection' in nav) {
+        // @ts-ignore
+        const type = nav.connection.effectiveType; // '4g', '3g', '2g', 'slow-2g'
         if (type === '4g') return 'original';
         if (type === '3g') return '192k';
         return '128k'; // Fallback for 2g or slow connections
@@ -36,6 +38,12 @@ export const inboxCount = writable(0);
 export const rawCount = writable(0);
 export const coverRefreshTrigger = writable(Date.now());
 export const volume = writable(parseFloat(localStorage.getItem('volume')) || 1.0);
+
+// Navigation & Auth
+export const currentView = writable("dashboard");
+export const viewParams = writable({});
+export const isLoggedIn = writable(!!localStorage.getItem('username'));
+export const setupRequired = writable(false);
 
 volume.subscribe(v => {
     localStorage.setItem('volume', v.toString());
