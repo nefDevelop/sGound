@@ -46,7 +46,8 @@ func ConnectMaster(dbPath string) (*MasterDatabase, error) {
 	// Aumentamos a 15 segundos el timeout para ser ultra pacientes con los bloqueos
 	// Limitamos el cache_size a 2MB (2000 * 1024 bytes aprox si el page_size es 1024)
 	// O usando valor negativo -2000 para indicar 2000 KB.
-	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=cache_size=-2000&_pragma=temp_store=MEMORY", dbPath)
+	// Desactivamos mmap_size para evitar que el proceso reserve memoria virtual excesiva en contenedores.
+	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=cache_size=-2000&_pragma=temp_store=MEMORY&_pragma=mmap_size=0", dbPath)
 	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

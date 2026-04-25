@@ -161,7 +161,8 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 func (s *Scanner) ScanDirectory(rootPath string) error {
 	// ======= SALVAVIDAS PARA DOCKER =======
-	debug.SetMemoryLimit(180 * 1024 * 1024)
+	// Bajamos el límite para forzar GC mucho antes de que el contenedor muera
+	debug.SetMemoryLimit(150 * 1024 * 1024)
 	// ======================================
 
 	done := make(chan struct{})
@@ -176,17 +177,18 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			case <-ticker.C:
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
+				// Calculamos la RAM "real" que el SO ve (Sys menos lo que ya marcamos como libre)
 				realOSMB := (m.Sys - m.HeapReleased) / 1024 / 1024
 				
 				s.muStatus.Lock()
 				s.RAMUsedMB = int(realOSMB)
-				if realOSMB > 250 {
+				if realOSMB > 220 { // Bajamos el umbral de pánico
 					if !s.IsPaused {
-						slog.Warn("🚨 WATCHDOG: RAM crítica detectada (>250MB), pausando escáner...", "real_mb", realOSMB)
+						slog.Warn("🚨 WATCHDOG: RAM crítica detectada (>220MB), pausando escáner...", "real_mb", realOSMB)
 						s.IsPaused = true
 					}
 					debug.FreeOSMemory()
-				} else if realOSMB < 150 && s.IsPaused {
+				} else if realOSMB < 120 && s.IsPaused {
 					slog.Info("🟢 WATCHDOG: RAM estabilizada, reanudando escáner", "real_mb", realOSMB)
 					s.IsPaused = false
 				}
@@ -221,7 +223,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 	}
 
-	numWorkers := 4
+	numWorkers := 3 // Reducimos a 3 por defecto para mayor estabilidad
 	if envWorkers := os.Getenv("SGOUND_SCANNER_WORKERS"); envWorkers != "" {
 		if val, err := strconv.Atoi(envWorkers); err == nil {
 			numWorkers = val
@@ -229,8 +231,8 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}
 
 	var (
-		jobsMP3    = make(chan string, 500) // Vía rápida (MP3, OGG, M4A, etc)
-		jobsFLAC   = make(chan string, 100) // Vía pesada (FLAC)
+		jobsMP3    = make(chan string, 500)
+		jobsFLAC   = make(chan string, 100)
 		results    = make(chan *trackResult, numWorkers*5)
 		slowJobs   = make(chan *trackResult, numWorkers*2)
 		wg         sync.WaitGroup
@@ -266,13 +268,6 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			}()
 			
 			r, e := s.ParseFileWithCache(p, "pending")
-			if e == nil && r != nil {
-				sizeStr := strconv.Itoa(r.MetadataSize) + "B"
-				if r.MetadataSize > 1024 {
-					sizeStr = fmt.Sprintf("%.1fKB", float64(r.MetadataSize)/1024.0)
-				}
-				slog.Info("📖 W"+strconv.Itoa(wId), "mem", sizeStr, "file", filepath.Base(p))
-			}
 			return r, e
 		}()
 		
@@ -287,6 +282,13 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		mu.Lock()
 		count++
 		currentCount := count
+		// Limpieza proactiva cada 100 archivos
+		if currentCount % 100 == 0 {
+			go func() {
+				runtime.GC()
+				debug.FreeOSMemory()
+			}()
+		}
 		mu.Unlock()
 		if s.OnProgress != nil {
 			s.OnProgress(p, currentCount)
@@ -595,14 +597,16 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 		trackNum, _ = meta.Track()
 		discNum, _ = meta.Disc()
 
-		// Carátula: Obtener dimensiones y tamaño
+		// Carátula: Obtener dimensiones y tamaño de forma eficiente (solo cabecera)
 		if pic := meta.Picture(); pic != nil {
 			coverSize = len(pic.Data)
 			coverFormat = pic.MIME
-			if img, _, err := image.Decode(bytes.NewReader(pic.Data)); err == nil {
-				bounds := img.Bounds()
-				coverWidth = bounds.Dx()
-				coverHeight = bounds.Dy()
+			// image.DecodeConfig solo lee los metadatos de la imagen, NO los píxeles.
+			// Esto evita picos de 30-100MB por imagen en archivos con carátulas 4K.
+			cfg, _, err := image.DecodeConfig(bytes.NewReader(pic.Data))
+			if err == nil {
+				coverWidth = cfg.Width
+				coverHeight = cfg.Height
 			}
 		}
 	}
