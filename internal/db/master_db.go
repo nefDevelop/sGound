@@ -43,17 +43,17 @@ type Settings struct {
 
 func ConnectMaster(dbPath string) (*MasterDatabase, error) {
 	slog.Info("Connecting to master database", "path", dbPath)
-	// Aumentamos a 15 segundos el timeout para ser ultra pacientes con los bloqueos
-	// Limitamos el cache_size a 2MB (2000 * 1024 bytes aprox si el page_size es 1024)
-	// O usando valor negativo -2000 para indicar 2000 KB.
-	// Desactivamos mmap_size para evitar que el proceso reserve memoria virtual excesiva en contenedores.
-	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=cache_size=-2000&_pragma=temp_store=MEMORY&_pragma=mmap_size=0", dbPath)
+	// busy_timeout: 15s para evitar bloqueos
+	// cache_size: -1000 (1MB) para ahorrar RAM
+	// temp_store: FILE para evitar que operaciones grandes usen RAM
+	// mmap_size: 0 para desactivar memoria virtual mapeada
+	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=cache_size=-1000&_pragma=temp_store=FILE&_pragma=mmap_size=0", dbPath)
 	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 
-	// LIMITADOR DE CGO Y BLOQUEOS: Solo 1 conexión abierta para SQLite
+	// Solo 1 conexión para evitar fragmentación de memoria en SQLite puro Go
 	conn.SetMaxOpenConns(1)
 	conn.SetMaxIdleConns(1)
 

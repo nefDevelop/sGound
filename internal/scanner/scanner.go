@@ -30,8 +30,8 @@ import (
 )
 
 // Semáforo global para limitar cuántos archivos se leen simultáneamente.
-// Esto previene que varios workers carguen carátulas grandes a la vez.
-var globalTagSem = make(chan struct{}, 2)
+// Reducido a 1 para garantizar que archivos gigantes no se sumen en RAM.
+var globalTagSem = make(chan struct{}, 1)
 
 type Scanner struct {
 	DB          *db.MasterDatabase
@@ -238,7 +238,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 	}
 
-	numWorkers := 3
+	numWorkers := 2 // Reducido a 2 para maximizar estabilidad en contenedores pequeños
 	if envWorkers := os.Getenv("SGOUND_SCANNER_WORKERS"); envWorkers != "" {
 		if val, err := strconv.Atoi(envWorkers); err == nil {
 			numWorkers = val
@@ -446,10 +446,10 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		if !d.IsDir() && IsAudioFile(d.Name()) == nil {
 			if _, exists := s.dbFileCache[path]; !exists {
 				buffer = append(buffer, rawInfo{GenerateID(path), path})
-				if len(buffer) >= 20 {
+				if len(buffer) >= 10 { // Lote de descubrimiento más pequeño
 					s.checkBackpressure()
 					flushDisc()
-					time.Sleep(50 * time.Millisecond) // Respiro para la DB
+					time.Sleep(100 * time.Millisecond) // Respiro forzado para el sistema
 				}
 			}
 		}
@@ -491,7 +491,8 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	fileStat, err := os.Stat(path)
 	if err != nil { return nil, err }
 
-	// 🛡️ CONTROL DE CONCURRENCIA PARA LECTURA DE TAGS
+	// 🛡️ CONTROL DE CONCURRENCIA PARA LECTURA DE TAGS (ESTRICTO)
+	// Solo 1 archivo cargando metadatos pesados a la vez
 	globalTagSem <- struct{}{}
 	defer func() { <-globalTagSem }()
 
