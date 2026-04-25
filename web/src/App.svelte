@@ -911,6 +911,7 @@
       {:else if currentView === "inbox"}
         <InboxView
           bind:this={inboxRef}
+          {scanStatus}
           onplay={(track) => handlePlay(track)}
           onedit={(track) => openEditor(track)}
           onapproved={() => { fetchTracks(false); checkScanStatus(); }}

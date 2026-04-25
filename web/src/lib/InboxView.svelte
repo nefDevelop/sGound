@@ -5,20 +5,42 @@
   import { fade } from 'svelte/transition';
   import { inboxCount, rawCount } from './stores.js';
 
-  let { onplay, onedit, onapproved, onrejected, onhide, onbulkReject, ondeletePhysical } = $props();
+  let { onplay, onedit, onapproved, onrejected, onhide, onbulkReject, ondeletePhysical, scanStatus } = $props();
   
   let tracks = $state([]);
   let loading = $state(true);
   let tracksOffset = $state(0);
   let hasMore = $state(true);
-  const limit = 40; // El usuario sugirió 20-40, usamos 40 para balancear.
+  const limit = 40; 
   let selectedTracks = $state([]);
   let suggestions = $state([]);
   let isAnalyzing = $state(false);
+  
+  // Conteo real sincronizado con el servidor para esta vista
+  let totalServer = $state(0);
+  let totalFromHeader = $state(0);
+  
+  // Lógica de conteo definitiva: Header > Store > Scanner > Local
+  let totalTracks = $derived(Math.max(
+    totalFromHeader,
+    totalServer, 
+    $inboxCount + $rawCount, 
+    tracks.length,
+    (scanStatus?.inboxCount || 0) + (scanStatus?.rawCount || 0)
+  ));
 
-  // Conteo total real desde las stores globales
-  let totalInStore = $derived($inboxCount + $rawCount);
-  let totalTracks = $derived(totalInStore > 0 ? totalInStore : tracks.length);
+  // LOGS DE DEPURACIÓN AMPLIADOS
+  $effect(() => {
+    console.group("🔍 DEBUG INBOX COUNTS");
+    console.log("DATO MAESTRO (X-Total-Count Header):", totalFromHeader);
+    console.log("Icono/Global Store ($inboxCount + $rawCount):", $inboxCount + $rawCount);
+    console.log("Estado Escáner Prop (scanStatus):", (scanStatus?.inboxCount || 0) + (scanStatus?.rawCount || 0));
+    console.log("Cargados físicamente (tracks.length):", tracks.length);
+    console.log("Petición Status API (totalServer):", totalServer);
+    console.log("--- RESULTADO FINAL EN BOTÓN ---");
+    console.log("Valor calculado (totalTracks):", totalTracks);
+    console.groupEnd();
+  });
 
   onMount(() => {
     fetchInbox();
@@ -48,9 +70,15 @@
     }
 
     try {
-      // Incluimos tanto 'pending' como 'raw' para que aparezcan en el Inbox
+      // 1. Obtener las pistas del lote actual
       const res = await fetch(`/api/tracks?status=pending,raw&limit=${limit}&offset=${tracksOffset}`);
       if (res.ok) {
+        // LEER HEADER MAESTRO DE CONTEO
+        const countHeader = res.headers.get("X-Total-Count");
+        if (countHeader) {
+          totalFromHeader = parseInt(countHeader, 10);
+        }
+
         const data = (await res.json()) || [];
         if (append) {
           tracks = [...tracks, ...data];
@@ -64,12 +92,22 @@
         tracksOffset += data.length;
         pendingAnalysisCount += data.length;
 
-        // REGLA: Analizar solo si tenemos un lote de 20+ o si es el aviso final
+        // 2. REGLA: Analizar solo si tenemos un lote de 20+ o si es el aviso final
         if (pendingAnalysisCount >= 20 || isFinal) {
            analyzeInbox();
            pendingAnalysisCount = 0;
         }
       }
+
+      // 3. Obtener el TOTAL real del servidor (Fallback/Sincronización)
+      const statusRes = await fetch("/api/library/status");
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        totalServer = (statusData.inboxCount || 0) + (statusData.rawCount || 0);
+        inboxCount.set(statusData.inboxCount || 0);
+        rawCount.set(statusData.rawCount || 0);
+      }
+
     } catch (e) {
       console.error(e);
     } finally {
@@ -80,10 +118,10 @@
   async function approveAll() {
     let ids = tracks.map(t => t.id);
     
-    // Si sabemos que hay más pistas (por la store o por el hasMore), las buscamos todas
-    if (hasMore || tracks.length < totalTracks) {
+    // Si sabemos que hay más pistas de las que se ven, las pedimos todas al servidor antes de aprobar
+    if (totalTracks > tracks.length || hasMore) {
       try {
-        const fetchLimit = Math.max(totalTracks + 100, 1000);
+        const fetchLimit = Math.max(totalTracks + 100, 2000);
         const res = await fetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
         if (res.ok) {
           const data = await res.json();
@@ -101,9 +139,9 @@
   async function rejectAll() {
     let ids = tracks.map(t => t.id);
     
-    if (hasMore || tracks.length < totalTracks) {
+    if (totalTracks > tracks.length || hasMore) {
       try {
-        const fetchLimit = Math.max(totalTracks + 100, 1000);
+        const fetchLimit = Math.max(totalTracks + 100, 2000);
         const res = await fetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
         if (res.ok) {
           const data = await res.json();
@@ -179,7 +217,7 @@
       });
       if (res.ok) {
         suggestions = [];
-        await fetchInbox(); // Aquí sí recargamos porque hemos cambiado datos en el servidor
+        await fetchInbox(); 
       }
     } catch (e) {
       console.error(e);
@@ -197,9 +235,7 @@
         body: JSON.stringify({ suggestions: [sug] })
       });
       if (res.ok) {
-        // Quitamos la sugerencia de la lista local y actualizamos el track
         suggestions = suggestions.filter(s => s.trackId !== track.id);
-        // En lugar de recargar todo, actualizamos solo este track localmente
         tracks = tracks.map(t => {
           if (t.id === track.id) {
             return { ...t, artist: sug.artist, year: sug.year, suggestedArtist: null, suggestedYear: null };
@@ -219,10 +255,10 @@
       <h1>Inbox</h1>
     </div>
     <div class="header-info">
-      {#if $inboxCount > 0}
+      {#if totalTracks > 0}
         <div class="chip primary" title="Total de pistas en el Inbox">
           <Icon name="inbox" size={14} />
-          {$inboxCount} pistas
+          {totalTracks} pistas
         </div>
       {/if}
       {#if $rawCount > 0}

@@ -3,6 +3,7 @@ package config
 import (
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -37,7 +38,8 @@ func LoadConfig() *Config {
 
 	musicPath := os.Getenv("SGOUND_MUSIC_PATH")
 	if musicPath == "" {
-		musicPath = "./music"
+		home, _ := os.UserHomeDir()
+		musicPath = filepath.Join(home, "Música")
 	}
 
 	port := os.Getenv("SGOUND_PORT")

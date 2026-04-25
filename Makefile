@@ -1,12 +1,12 @@
 .PHONY: build test clean dev-front dev-back dev all db-reset db-recreate dev-recreate
 
-BINARY_NAME=sgound-server
+BINARY_NAME=sgound
 
 # Puertos por defecto si no son pasados como comando (ej: make dev SGOUND_PORT=9000)
 VITE_PORT ?= 5177
 SGOUND_PORT ?= 8088
 
-SGOUND_MUSIC_PATH ?= /home/nef734/Música/
+SGOUND_MUSIC_PATH ?= $(HOME)/Música/
 SGOUND_USERS ?= user:rw
 
 export SGOUND_PORT

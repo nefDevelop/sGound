@@ -23,7 +23,7 @@ COPY web/embed.go ./web/embed.go
 COPY --from=frontend-builder /web/dist /app/web/dist
 
 # Step 4: Build binary (statically linked and stripped)
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o sgound-server ./cmd/sgound
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o sgound ./cmd/sgound
 
 # Stage 3: Runtime
 FROM alpine:3.23
@@ -33,7 +33,7 @@ RUN apk add --no-cache ca-certificates tini ffmpeg
 # Create non-root user
 RUN addgroup -S sgound && adduser -S sgound -G sgound -u 1000
 
-COPY --from=backend-builder /app/sgound-server /app/
+COPY --from=backend-builder /app/sgound /app/
 # Ensure directories exist with correct permissions
 RUN mkdir -p /app/data /music && chown -R sgound:sgound /app/data /music
 
@@ -44,4 +44,4 @@ ENV SGOUND_DB_PATH=/app/data/sgound.db
 USER sgound
 EXPOSE 8088
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["./sgound-server"]
+CMD ["./sgound"]

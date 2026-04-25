@@ -15,8 +15,8 @@ services:
       - GOMEMLIMIT=180MiB
       - GODEBUG=madvdontneed=1
     volumes:
-      - sgound_data:/app/data
-      - /media/clare/music:/music:rw
+      - sgound_data:/app/data:z
+      - ${SGOUND_MUSIC_PATH_HOST:-~/Música}:/music:rw,z
     deploy:
       resources:
         limits:

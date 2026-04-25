@@ -4,6 +4,7 @@
   import { audioQuality, showToast } from './stores.js';
   import { generatePalette, applyTheme } from './theme.js';
   import Modal from './Modal.svelte';
+  import PatternBuilder from './PatternBuilder.svelte';
   
   let config = $state({ musicPath: '', autoRename: false, renamePattern: '', themeColor: '#ff3366', replayGainEnabled: false, language: 'es' });
   let loading = $state(false);
@@ -244,9 +245,9 @@
         <section class="setting-item">
           <div class="info">
             <h3>Rename Pattern</h3>
-            <p>Use placeholders: <b>&#123;artist&#125;, &#123;album&#125;, &#123;title&#125;, &#123;year&#125;, &#123;genre&#125;, &#123;track&#125;, &#123;bitrate&#125;</b></p>
+            <p>Define how files will be structured using tags and separators.</p>
           </div>
-          <input type="text" bind:value={config.renamePattern} placeholder={"&#123;artist&#125;/&#123;album&#125;/&#123;track&#125; - &#123;title&#125;"} />
+          <PatternBuilder bind:pattern={config.renamePattern} />
           
           {#if organizeStatus.isRunning || (organizeStatus.processed > 0 && organizeStatus.processed < organizeStatus.total)}
             <div class="organize-progress-wrap">

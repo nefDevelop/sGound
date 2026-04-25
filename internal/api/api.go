@@ -100,7 +100,7 @@ func (s *Server) updateInboxCount() {
 	
 	s.inboxCount.Store(pending)
 	s.rawCount.Store(raw)
-	slog.Debug("📥 Cache updated", "pending", pending, "raw", raw)
+	slog.Info("📥 Inbox counts updated", "pending", pending, "raw", raw, "total", pending+raw)
 }
 
 type contextKey string
@@ -490,6 +490,33 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 
 func (s *Server) getDB(_ *http.Request) *db.MasterDatabase {
 	return s.MasterDB
+}
+
+func (s *Server) executeTransaction(fn func(tx *sql.Tx) error) error {
+	var err error
+	for i := 0; i < 5; i++ {
+		tx, errTx := s.MasterDB.Conn.Begin()
+		if errTx != nil {
+			if strings.Contains(errTx.Error(), "database is locked") {
+				time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+				continue
+			}
+			return errTx
+		}
+
+		err = fn(tx)
+		if err == nil {
+			return tx.Commit()
+		}
+
+		tx.Rollback()
+		if strings.Contains(err.Error(), "database is locked") {
+			time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("transaction failed after retries: %w", err)
 }
 
 func (s *Server) getPathFilter(user *db.User) (string, []interface{}) {
@@ -1536,6 +1563,16 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		args = append(args, artistId)
 	}
 
+	// 0. Count total matches (ignoring pagination) to provide truth for UI
+	var totalCount int
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM tracks t
+		LEFT JOIN albums al ON t.album_id = al.id
+		LEFT JOIN artists a ON al.artist_id = a.id
+		%s`, whereClause)
+	_ = s.getDB(r).Conn.QueryRow(countQuery, args...).Scan(&totalCount)
+
 	// Dynamic selection for memory optimization
 	selectFields := `t.id, t.title, COALESCE(t.track_num, 0), COALESCE(t.disc_num, 0), COALESCE(t.duration, 0), COALESCE(t.genre, ''), 
 		       COALESCE(t.artist, a.name, 'Artist Desconocido') as artist, COALESCE(al.title, 'Álbum Desconocido') as album, COALESCE(al.year, 0) as year,
@@ -1604,13 +1641,14 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 				"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
 				"composer": composer, "comment": comment, "status": tStatus, "rating": rating,
 				"instrumental": instrumental == 1, "trackTotal": trackTotal, "discTotal": discTotal,
-				"playCount": playCount,
+				"play_count": playCount,
 			})
 		}
 	}
-	
-	slog.Info("handleGetTracks result", "status", status, "rows_found", rowCount, "tracks_returned", len(tracks), "limit", limit, "offset", offset)
-	
+
+	slog.Info("handleGetTracks result", "status", status, "rows_found", rowCount, "total_available", totalCount, "tracks_returned", len(tracks), "limit", limit, "offset", offset)
+
+	w.Header().Set("X-Total-Count", strconv.Itoa(totalCount))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tracks)
 }
@@ -1720,29 +1758,22 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 
 		// 2. Escritura física del PersistentID
 		if err := tags.WritePersistentID(path, newID); err != nil {
-			slog.Error("Failed to write persistent ID to file during approval", "path", path, "err", err)
-			failedCount++
-			continue
+			slog.Error("⚠️ Non-fatal: Failed to write physical SGOUND_ID, but approving in DB anyway", "path", path, "err", err)
+			// Continuamos la aprobación en DB aunque falle la escritura física
+			// para no bloquear el flujo del usuario.
 		}
 
 		// 3. Actualización Atómica en DB (ID y Status)
-		// Usamos un bucle de reintento simple para el bloqueo de SQLite
 		dbSuccess := false
-		for i := 0; i < 3; i++ {
-			tx, err := db.Conn.Begin()
-			if err != nil {
-				time.Sleep(100 * time.Millisecond)
-				continue
+		for i := 0; i < 5; i++ {
+			errTx := s.executeTransaction(func(tx *sql.Tx) error {
+				_, err := tx.Exec("UPDATE tracks SET id = ?, status = 'active' WHERE id = ?", newID, oldID)
+				return err
+			})
+			if errTx == nil {
+				dbSuccess = true
+				break
 			}
-
-			_, err1 := tx.Exec("UPDATE tracks SET id = ?, status = 'active' WHERE id = ?", newID, oldID)
-			if err1 == nil {
-				if err := tx.Commit(); err == nil {
-					dbSuccess = true
-					break
-				}
-			}
-			tx.Rollback()
 			time.Sleep(100 * time.Millisecond)
 		}
 
@@ -1750,17 +1781,18 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 			approvedCount++
 			// 4. Organización opcional (ahora que es oficial)
 			if s.Config.AutoRename {
+				editor := tags.NewEditor(db)
 				editor.OrganizeFile(newID, s.Config.MusicPath, s.Config.RenamePattern)
 			}
 		} else {
-			slog.Error("Failed to update track status in DB after physical write", "path", path)
+			slog.Error("❌ Critical: Failed to update track status in DB", "path", path)
 			failedCount++
 		}
 	}
 
 	var totalActive int
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active'").Scan(&totalActive)
-	fmt.Printf("✅ %d tracks aprobadas. Total en biblioteca activa: %d\n", approvedCount, totalActive)
+	s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active'").Scan(&totalActive)
+	slog.Info("✅ Batch approval completed", "approved", approvedCount, "failed", failedCount, "total_active", totalActive)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(fmt.Sprintf(`{"status":"success", "approved":%d, "total":%d}`, approvedCount, totalActive)))

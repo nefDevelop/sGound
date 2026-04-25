@@ -95,23 +95,36 @@ func ReadPersistentID(path string) string {
 func WritePersistentID(path string, id string) error {
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext == ".mp3" {
+		// Abrimos con opciones por defecto que permiten la expansión
 		tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		defer tag.Close()
-		
-		// Limpiar si existiera uno viejo para evitar duplicados
-		tag.DeleteFrames("TXXX") 
-		
+
+		// Eliminamos TXXX (User defined text) que coincidan con nuestra descripción
+		// para no acumular basura si se llama varias veces.
+		frames := tag.GetFrames("TXXX")
+		for _, f := range frames {
+			if tf, ok := f.(id3v2.UserDefinedTextFrame); ok && tf.Description == "SGOUND_ID" {
+				tag.DeleteFrames("TXXX") // Borramos todos los TXXX por simplicidad si hay conflicto
+				break
+			}
+		}
+
 		tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
 			Encoding:    id3v2.EncodingUTF8,
 			Description: "SGOUND_ID",
 			Value:       id,
 		})
-		// Forzar guardado completo si es necesario
+
+		// Intentar guardar. id3v2 debería manejar el crecimiento del archivo si el padding es insuficiente.
 		return tag.Save()
 	} else if ext == ".flac" {
 		f, err := ParseFLAC(path)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		var cm *flacvorbis.MetaDataBlockVorbisComment
 		var cmIdx = -1
 		for i, block := range f.Meta {
@@ -121,15 +134,27 @@ func WritePersistentID(path string, id string) error {
 				break
 			}
 		}
-		if cm == nil { cm = flacvorbis.New() }
-		cm.Comments = append(cm.Comments, "SGOUND_ID="+id)
+		if cm == nil {
+			cm = flacvorbis.New()
+		}
+		// Limpiar duplicados previos de SGOUND_ID
+		newComments := []string{}
+		for _, c := range cm.Comments {
+			if !strings.HasPrefix(c, "SGOUND_ID=") {
+				newComments = append(newComments, c)
+			}
+		}
+		cm.Comments = append(newComments, "SGOUND_ID="+id)
 		block := cm.Marshal()
-		if cmIdx != -1 { f.Meta[cmIdx] = &block } else { f.Meta = append(f.Meta, &block) }
+		if cmIdx != -1 {
+			f.Meta[cmIdx] = &block
+		} else {
+			f.Meta = append(f.Meta, &block)
+		}
 		return f.Save(path)
 	}
 	return nil
 }
-
 // ReadTagsFromFile lee todos los metadatos soportados de un archivo
 func ReadTagsFromFile(path string) (map[string]string, error) {
 	tags := make(map[string]string)
