@@ -16,8 +16,9 @@
   let suggestions = $state([]);
   let isAnalyzing = $state(false);
 
-  // Conteo total derivado para evitar que muestre 0 si hay tracks cargados
-  let totalTracks = $derived(Math.max($inboxCount + $rawCount, tracks.length));
+  // Conteo total real desde las stores globales
+  let totalInStore = $derived($inboxCount + $rawCount);
+  let totalTracks = $derived(totalInStore > 0 ? totalInStore : tracks.length);
 
   onMount(() => {
     fetchInbox();
@@ -79,9 +80,9 @@
   async function approveAll() {
     let ids = tracks.map(t => t.id);
     
+    // Si sabemos que hay más pistas (por la store o por el hasMore), las buscamos todas
     if (hasMore || tracks.length < totalTracks) {
       try {
-        // Usamos un límite alto para asegurarnos de pillar todos los IDs si el contador dice más
         const fetchLimit = Math.max(totalTracks + 100, 1000);
         const res = await fetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
         if (res.ok) {
