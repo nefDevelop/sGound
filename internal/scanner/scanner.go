@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"bytes"
 	"image"
 	_ "image/jpeg"
@@ -27,6 +29,7 @@ import (
 
 	"sgound/internal/db"
 	"sgound/internal/tags"
+	"sgound/internal/utils"
 )
 
 // Semáforo global para limitar cuántos archivos se leen simultáneamente.
@@ -178,7 +181,10 @@ func (s *Scanner) ParseAndSaveFile(path string) error {
 
 func (s *Scanner) ScanDirectory(rootPath string) error {
 	// ======= SALVAVIDAS PARA DOCKER =======
+	// Forzamos un límite suave de 150MB para que el GC sea muy agresivo
 	debug.SetMemoryLimit(150 * 1024 * 1024)
+	runtime.GC()
+	debug.FreeOSMemory()
 	// ======================================
 
 	done := make(chan struct{})
@@ -238,7 +244,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		}
 	}
 
-	numWorkers := 2 // Reducido a 2 para maximizar estabilidad en contenedores pequeños
+	numWorkers := 1 // Reducido a 1 para maximizar estabilidad en contenedores pequeños
 	if envWorkers := os.Getenv("SGOUND_SCANNER_WORKERS"); envWorkers != "" {
 		if val, err := strconv.Atoi(envWorkers); err == nil {
 			numWorkers = val
@@ -276,15 +282,16 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		res, err := func() (*trackResult, error) {
 			s.ramTickets <- struct{}{}
 			defer func() { <-s.ramTickets }()
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("🔥 Panic", "worker", wId, "file", filepath.Base(p), "err", r)
-				}
-			}()
 			
+			// Envolver la apertura del archivo en un scope cerrado para liberar FD inmediatamente
 			r, e := s.ParseFileWithCache(p, "pending")
 			
-			// Umbral de salto subido a 12MB para evitar saltar demasiados FLACs normales
+			// Liberar el caché de disco para este archivo (mantiene el RSS de Docker bajo)
+			if f, err := os.Open(p); err == nil {
+				_ = unix.Fadvise(int(f.Fd()), 0, 0, unix.FADV_DONTNEED)
+				f.Close()
+			}
+
 			if e == nil && r != nil && !isHeavyPass && r.coverSize > 12*1024*1024 {
 				return &trackResult{Deferred: true}, nil
 			}
@@ -312,13 +319,11 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		mu.Lock()
 		count++
 		currentCount := count
-		if currentCount % 50 == 0 {
-			go func() {
-				runtime.GC()
-				debug.FreeOSMemory()
-			}()
-		}
 		mu.Unlock()
+
+		if currentCount%500 == 0 {
+			utils.PurgeMemory(s.DB.Conn)
+		}
 		if s.OnProgress != nil {
 			s.OnProgress(p, currentCount)
 		}
@@ -349,8 +354,9 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			})
 			s.muDB.Unlock()
 			batch = nil
-			s.seenArtists = make(map[string]struct{})
-			s.seenAlbums = make(map[string]struct{})
+			// No limpiamos aquí para evitar excesivas re-asignaciones, se limpia al final del Scan o cuando sea muy grande
+			if len(s.seenArtists) > 5000 { s.seenArtists = make(map[string]struct{}) }
+			if len(s.seenAlbums) > 5000 { s.seenAlbums = make(map[string]struct{}) }
 		}
 		for {
 			select {
@@ -478,12 +484,25 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	slog.Info("Scan completed", "total", count, "duration", time.Since(start))
 	s.muAlbums.Lock()
 	for id := range s.conflictedAlbums { s.recalculateAlbumArtist(id) }
+	
+	// Limpieza total de mapas para liberar RAM
+	s.resolvedAlbums = nil
+	s.conflictedAlbums = nil
 	s.muAlbums.Unlock()
 
-	s.dbFileCache = make(map[string]dbFileInfo)
+	s.dbFileCache = nil // Liberación total de la referencia
 	s.seenArtists = nil
 	s.seenAlbums = nil
-	debug.FreeOSMemory()
+	
+	utils.PurgeMemory(s.DB.Conn)
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	slog.Info("📊 Post-Scan Memory Report", 
+		"heap_alloc_mb", m.HeapAlloc/1024/1024, 
+		"sys_mb", m.Sys/1024/1024, 
+		"in_use_os_mb", (m.Sys-m.HeapReleased)/1024/1024)
+
 	return nil
 }
 

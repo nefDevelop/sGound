@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -11,10 +12,15 @@ import (
 	"sgound/internal/api"
 	"sgound/internal/config"
 	"sgound/internal/db"
+	"sgound/internal/utils"
 	"sgound/internal/watcher"
 )
 
 func main() {
+	// Optimización de hilos y RAM para contenedores
+	runtime.GOMAXPROCS(2)
+	debug.SetGCPercent(50)
+
 	// Initialize logger
 	level := slog.LevelDebug
 	if envLevel := os.Getenv("SGOUND_LOG_LEVEL"); envLevel != "" {
@@ -67,10 +73,36 @@ func main() {
 
 	// Memory Janitor: Free memory periodically to keep idle usage low
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(30 * time.Second)
 		for range ticker.C {
-			slog.Debug("🧹 Janitor: Freeing OS memory")
-			debug.FreeOSMemory()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			heapMB := m.HeapAlloc / 1024 / 1024
+			sysMB := m.Sys / 1024 / 1024
+			releasedMB := m.HeapReleased / 1024 / 1024
+			
+			slog.Info("🧹 Janitor: Memory Status", 
+				"heap_alloc_mb", heapMB, 
+				"sys_mb", sysMB, 
+				"released_mb", releasedMB,
+				"in_use_mb", sysMB - releasedMB)
+
+			// Leer caché del sistema para diagnóstico en Docker
+			if data, err := os.ReadFile("/proc/meminfo"); err == nil {
+				lines := strings.Split(string(data), "\n")
+				var cached, sReclaimable string
+				for _, line := range lines {
+					if strings.HasPrefix(line, "Cached:") {
+						cached = strings.TrimSpace(strings.TrimPrefix(line, "Cached:"))
+					}
+					if strings.HasPrefix(line, "SReclaimable:") {
+						sReclaimable = strings.TrimSpace(strings.TrimPrefix(line, "SReclaimable:"))
+					}
+				}
+				slog.Info("📦 OS Cache (PageCache)", "cached", cached, "reclaimable", sReclaimable)
+			}
+			
+			utils.PurgeMemory(masterDB.Conn)
 		}
 	}()
 

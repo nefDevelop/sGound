@@ -12,14 +12,15 @@ services:
       - SGOUND_USERS=user:rw
       # Uncomment and change to customize theme (default: #ff3366)
       # - SGOUND_THEME_COLOR=#ff3366
-      - GOMEMLIMIT=250MiB
+      - GOMEMLIMIT=180MiB
+      - GODEBUG=madvdontneed=1
     volumes:
       - sgound_data:/app/data
       - /media/clare/music:/music:rw
     deploy:
       resources:
         limits:
-          memory: 500M
+          memory: 256M
 #          cpus: '0.50'
     healthcheck:
       test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8088/api/auth/status" ]

@@ -19,7 +19,7 @@ type LogEntry struct {
 var (
 	logBuffer []LogEntry
 	logMu     sync.Mutex
-	maxLogs   = 500
+	maxLogs   = 100
 )
 
 type MemoryHandler struct {

@@ -31,6 +31,7 @@ import (
 	"sgound/internal/models"
 	"sgound/internal/scanner"
 	"sgound/internal/tags"
+	"sgound/internal/utils"
 	"sgound/internal/watcher"
 	"sgound/web"
 	"sync"
@@ -605,6 +606,7 @@ func (s *Server) EnrichArtists() {
 			time.Sleep(1500 * time.Millisecond)
 		}
 		slog.Info("🏁 Background enrichment finished")
+		utils.PurgeMemory(s.MasterDB.Conn)
 	}()
 }
 
@@ -896,6 +898,10 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read image", http.StatusInternalServerError)
 		return
 	}
+
+	// Proteger el procesamiento pesado de imágenes con semáforo
+	imageProcessingSem <- struct{}{}
+	defer func() { <-imageProcessingSem }()
 
 	src, _, err := image.Decode(bytes.NewReader(imgData))
 	if err != nil {
@@ -3418,6 +3424,10 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 		s.servePlaceholderCover(w)
 		return
 	}
+
+	// Proteger el procesamiento pesado de imágenes con semáforo
+	imageProcessingSem <- struct{}{}
+	defer func() { <-imageProcessingSem }()
 
 	// 1. Intentar extraer embebida ligera
 	f, err := os.Open(fpath)

@@ -44,10 +44,11 @@ type Settings struct {
 func ConnectMaster(dbPath string) (*MasterDatabase, error) {
 	slog.Info("Connecting to master database", "path", dbPath)
 	// busy_timeout: 15s para evitar bloqueos
-	// cache_size: -1000 (1MB) para ahorrar RAM
+	// cache_size: -200 (200KB aprox) para ahorrar RAM
 	// temp_store: FILE para evitar que operaciones grandes usen RAM
 	// mmap_size: 0 para desactivar memoria virtual mapeada
-	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=cache_size=-1000&_pragma=temp_store=FILE&_pragma=mmap_size=0", dbPath)
+	// auto_vacuum=INCREMENTAL para mantener el archivo y la RAM limpios
+	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=cache_size=-200&_pragma=temp_store=FILE&_pragma=mmap_size=0&_pragma=auto_vacuum=INCREMENTAL", dbPath)
 	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
