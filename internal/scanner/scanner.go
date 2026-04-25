@@ -363,7 +363,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 			s.muDB.Unlock()
 
 			if err != nil {
-				slog.Error("Failed to flush batch to DB", "error", err, "batchSize", len(batch))
+				slog.Error("Failed to flush batch to DB", "error", err)
 			}
 			
 			batch = nil
@@ -570,6 +570,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 	}
 	s.muAlbums.Unlock()
 
+	// Liberar memoria agresivamente al finalizar
 	s.dbFileCache = make(map[string]dbFileInfo)
 	s.seenArtists = nil
 	s.seenAlbums = nil
