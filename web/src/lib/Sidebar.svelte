@@ -105,7 +105,7 @@
 
     <div class="playlists-scroll">
       {#each playlists as pl}
-        {@const currentPlId = $viewParams?.playlist?.id}
+        {@const currentPlId = $viewParams && $viewParams['playlist'] ? $viewParams['playlist'].id : null}
         <button
           class="nav-item playlist-item"
           class:active={$currentView === "playlist" && currentPlId === pl.id}
