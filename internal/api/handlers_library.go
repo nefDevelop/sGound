@@ -753,25 +753,64 @@ func (s *Server) EnrichArtists() {
 				(a.tags IS NULL OR a.tags = '')
 			)`
 		rows, err := s.MasterDB.Conn.Query(query)
-		if err != nil { slog.Error("Failed to query artists for enrichment", "error", err); return }
+		if err != nil {
+			slog.Error("Failed to query artists for enrichment", "error", err)
+			return
+		}
 		defer rows.Close()
-		var artists []struct{ ID, Name string }
+
+		type artistTask struct{ ID, Name string }
+		var tasks []artistTask
 		for rows.Next() {
-			var a struct{ ID, Name string }
-			if err := rows.Scan(&a.ID, &a.Name); err == nil { artists = append(artists, a) }
-		}
-		if len(artists) == 0 { slog.Info("✨ All artists are already enriched"); return }
-		for _, a := range artists {
-			lowerName := strings.ToLower(a.Name)
-			if lowerName == "various artists" || lowerName == "unknown artist" || lowerName == "unknown" { continue }
-			ext, err := s.externalMeta.GetArtistInfo(a.Name)
-			if err == nil && ext != nil {
-				tagsStr := strings.Join(ext.Tags, ",")
-				similarStr := strings.Join(ext.Similar, ",")
-				_, _ = s.MasterDB.Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?", ext.Image, ext.Biography, tagsStr, similarStr, a.ID)
+			var a artistTask
+			if err := rows.Scan(&a.ID, &a.Name); err == nil {
+				tasks = append(tasks, a)
 			}
-			time.Sleep(1500 * time.Millisecond)
 		}
+
+		if len(tasks) == 0 {
+			slog.Info("✨ All artists are already enriched")
+			return
+		}
+
+		// Use a worker pool of 3 to speed things up
+		jobs := make(chan artistTask, len(tasks))
+		var wg sync.WaitGroup
+		numWorkers := 3
+		if len(tasks) < numWorkers {
+			numWorkers = len(tasks)
+		}
+
+		for w := 1; w <= numWorkers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for a := range jobs {
+					lowerName := strings.ToLower(a.Name)
+					if lowerName == "various artists" || lowerName == "unknown artist" || lowerName == "unknown" {
+						continue
+					}
+					
+					ext, err := s.externalMeta.GetArtistInfo(a.Name)
+					if err == nil && ext != nil {
+						tagsStr := strings.Join(ext.Tags, ",")
+						similarStr := strings.Join(ext.Similar, ",")
+						_, _ = s.MasterDB.Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?", 
+							ext.Image, ext.Biography, tagsStr, similarStr, a.ID)
+					}
+					// Still sleep a bit to avoid aggressive rate-limiting
+					time.Sleep(1000 * time.Millisecond)
+				}
+			}()
+		}
+
+		for _, task := range tasks {
+			jobs <- task
+		}
+		close(jobs)
+		wg.Wait()
+
+		slog.Info("✅ Background artist enrichment completed")
 		utils.PurgeMemory(s.MasterDB.Conn)
 	}()
 }

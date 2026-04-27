@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"sgound/internal/auth"
 	"sgound/internal/config"
 	"sgound/internal/db"
@@ -44,6 +45,7 @@ type Server struct {
 	inboxCount       atomic.Int64
 	rawCount         atomic.Int64
 	activeScanner    *scanner.Scanner // Referencia al escáner en curso
+	sf               singleflight.Group
 }
 
 type OrganizeStatus struct {

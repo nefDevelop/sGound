@@ -55,8 +55,9 @@ func ConnectMaster(dbPath string) (*MasterDatabase, error) {
 	}
 
 	// Permitir múltiples conexiones para aprovechar el modo WAL (lecturas concurrentes)
-	conn.SetMaxOpenConns(5)
-	conn.SetMaxIdleConns(2)
+	conn.SetMaxOpenConns(20)
+	conn.SetMaxIdleConns(5)
+	conn.SetConnMaxLifetime(time.Hour)
 
 	mdb := &MasterDatabase{Conn: conn}
 	if err := mdb.initSchema(); err != nil {
@@ -213,27 +214,28 @@ func (db *MasterDatabase) initSchema() error {
 		return err
 	}
 
-	// Migraciones básicas y nuevas columnas
-	db.Conn.Exec("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT 'r'")
-	db.Conn.Exec("ALTER TABLE users ADD COLUMN allowed_paths TEXT DEFAULT '*'")
-	db.Conn.Exec("ALTER TABLE tracks ADD COLUMN replay_gain REAL DEFAULT 0.0")
-	db.Conn.Exec("ALTER TABLE tracks ADD COLUMN instrumental INTEGER DEFAULT 0")
-	db.Conn.Exec("ALTER TABLE tracks ADD COLUMN rating INTEGER DEFAULT 0")
-	db.Conn.Exec("ALTER TABLE artists ADD COLUMN image_url TEXT")
-	db.Conn.Exec("ALTER TABLE artists ADD COLUMN bio TEXT")
-	db.Conn.Exec("ALTER TABLE artists ADD COLUMN tags TEXT")
-	db.Conn.Exec("ALTER TABLE artists ADD COLUMN similar TEXT")
-	db.Conn.Exec("ALTER TABLE albums ADD COLUMN cover_id TEXT")
-	db.Conn.Exec("ALTER TABLE albums ADD COLUMN cover_width INTEGER")
-	db.Conn.Exec("ALTER TABLE albums ADD COLUMN cover_height INTEGER")
-	db.Conn.Exec("ALTER TABLE albums ADD COLUMN cover_size INTEGER")
-	db.Conn.Exec("ALTER TABLE albums ADD COLUMN cover_format TEXT")
+	// Migraciones seguras: añadir columnas solo si no existen
+	db.addColumnIfNotExists("users", "permissions", "TEXT DEFAULT 'r'")
+	db.addColumnIfNotExists("users", "allowed_paths", "TEXT DEFAULT '*'")
+	db.addColumnIfNotExists("tracks", "replay_gain", "REAL DEFAULT 0.0")
+	db.addColumnIfNotExists("tracks", "instrumental", "INTEGER DEFAULT 0")
+	db.addColumnIfNotExists("tracks", "rating", "INTEGER DEFAULT 0")
+	db.addColumnIfNotExists("artists", "image_url", "TEXT")
+	db.addColumnIfNotExists("artists", "bio", "TEXT")
+	db.addColumnIfNotExists("artists", "tags", "TEXT")
+	db.addColumnIfNotExists("artists", "similar", "TEXT")
+	db.addColumnIfNotExists("albums", "cover_id", "TEXT")
+	db.addColumnIfNotExists("albums", "cover_width", "INTEGER")
+	db.addColumnIfNotExists("albums", "cover_height", "INTEGER")
+	db.addColumnIfNotExists("albums", "cover_size", "INTEGER")
+	db.addColumnIfNotExists("albums", "cover_format", "TEXT")
 	
 	// Índices para optimización de rendimiento
 	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(path)")
 	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks(album_id)")
 	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_status ON tracks(status)")
 	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre)")
+	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_hash ON tracks(file_hash)")
 	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums(artist_id)")
 	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_albums_title ON albums(title)")
 	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name)")
@@ -336,6 +338,16 @@ func (db *MasterDatabase) GetUserByUsername(username string) (*User, error) {
 
 func (db *MasterDatabase) GetDuplicates() ([]models.Track, error) {
 	query := `
+	WITH DuplicatedHashes AS (
+		SELECT file_hash FROM tracks 
+		WHERE status = 'active' AND file_hash IS NOT NULL AND file_hash != ''
+		GROUP BY file_hash HAVING COUNT(*) > 1
+	),
+	DuplicatedTags AS (
+		SELECT title, duration FROM tracks 
+		WHERE status = 'active'
+		GROUP BY title, duration HAVING COUNT(*) > 1
+	)
 	SELECT t.id, t.title, a.title as album, art.name as artist, t.path, 
 	       COALESCE(t.bit_rate, 0), COALESCE(t.duration, 0), 
 	       COALESCE(t.format, 'unknown'), COALESCE(t.file_hash, '')
@@ -343,18 +355,9 @@ func (db *MasterDatabase) GetDuplicates() ([]models.Track, error) {
 	JOIN albums a ON t.album_id = a.id
 	JOIN artists art ON a.artist_id = art.id
 	WHERE t.status = 'active' AND (
-		(t.file_hash IS NOT NULL AND t.file_hash IN (SELECT t2.file_hash FROM tracks t2 WHERE t2.status = 'active' AND t2.file_hash IS NOT NULL GROUP BY t2.file_hash HAVING COUNT(*) > 1))
+		t.file_hash IN (SELECT file_hash FROM DuplicatedHashes)
 		OR
-		(t.title, t.duration) IN (SELECT t3.title, t3.duration FROM tracks t3 WHERE t3.status = 'active' GROUP BY t3.title, t3.duration HAVING COUNT(*) > 1)
-		OR
-		(art.id, a.id, t.title) IN (
-			SELECT a2.artist_id, t2.album_id, t2.title
-			FROM tracks t2
-			JOIN albums a2 ON t2.album_id = a2.id
-			WHERE t2.status = 'active'
-			GROUP BY a2.artist_id, t2.album_id, t2.title
-			HAVING COUNT(*) > 1
-		)
+		(t.title, t.duration) IN (SELECT title, duration FROM DuplicatedTags)
 	)
 	ORDER BY art.name, a.title, t.title`
 
@@ -457,6 +460,13 @@ func (db *MasterDatabase) DeleteTracks(ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
+
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	placeholders := make([]string, len(ids))
 	args := make([]any, len(ids))
 	for i, id := range ids {
@@ -464,8 +474,12 @@ func (db *MasterDatabase) DeleteTracks(ids []string) error {
 		args[i] = id
 	}
 	query := fmt.Sprintf("DELETE FROM tracks WHERE id IN (%s)", strings.Join(placeholders, ","))
-	_, err := db.Conn.Exec(query, args...)
-	return err
+	_, err = tx.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (db *MasterDatabase) GetTrackUserData(username, trackID string) (rating, playCount int, lastPlayed string) {
@@ -527,4 +541,19 @@ func (db *MasterDatabase) SetJWTSecret(secret string) error {
 func (db *MasterDatabase) DeletePlaylist(id, username string) error {
 	_, err := db.Conn.Exec("DELETE FROM playlists WHERE id = ? AND username = ?", id, username)
 	return err
+}
+
+func (db *MasterDatabase) addColumnIfNotExists(table, column, definition string) {
+	query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name='%s'", table, column)
+	var count int
+	err := db.Conn.QueryRow(query).Scan(&count)
+	if err == nil && count == 0 {
+		alterQuery := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition)
+		_, err := db.Conn.Exec(alterQuery)
+		if err != nil {
+			slog.Error("Migration: Failed to add column", "table", table, "column", column, "error", err)
+		} else {
+			slog.Info("Migration: Added missing column", "table", table, "column", column)
+		}
+	}
 }

@@ -89,8 +89,8 @@
         bind:progress
         bind:duration
         bind:currentTime
-        bind:skipNext={handlers.handleSkipNext}
-        bind:skipBack={handlers.handleSkipBack}
+        skipNext={handlers.handleSkipNext}
+        skipBack={handlers.handleSkipBack}
         onopenFull={() => {
           currentView.set("fullplayer");
           history.pushState({ view: "fullplayer", params: {} }, "");

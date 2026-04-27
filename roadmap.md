@@ -1,10 +1,19 @@
-# sgound Roadmap
+# 🎵 Sgound Roadmap
 
-## Audio & Core
-*All planned features completed.*
+## ✅ Completado (Hitos Recientes)
+- [x] **Arquitectura Core:** Migración a SQLite puro (sin CGO) y optimización de concurrencia (WAL mode).
+- [x] **Robustez:** Sistema de migraciones automáticas y seguras para la base de datos.
+- [x] **Despliegue:** Dockerfile optimizado con Healthchecks y usuario no-root.
+- [x] **PWA:** Soporte para instalación en dispositivos móviles (Manifest & Theme Color).
+- [x] **Metadatos:** Auto-guardado (cache) de letras sincronizadas en archivos físicos tras descarga.
+- [x] **Rendimiento:** Validado benchmark de API (>500 RPS) y Transcodificación (<500ms TTFB).
 
-## User Experience & Aesthetics
-*All planned features completed.*
+## 🚀 Próximamente (En Desarrollo)
+- [ ] **Folder Browsing:** Vista de navegación por estructura de carpetas real para bibliotecas desorganizadas.
+- [ ] **Optimización de UI:** Transiciones fluidas entre vistas y mejora del scroll de letras.
+- [ ] **Internacionalización (i18n):** Soporte multi-idioma (ES/EN inicialmente).
 
-## Mobile & Integration
-*All planned features completed.*
+## 🔮 Futuro (Backlog)
+- [ ] **Multi-usuario:** Gestión avanzada de permisos y bibliotecas compartidas.
+- [ ] **Scrobbling:** Integración con Last.fm / ListenBrainz.
+- [ ] **Ecualizador:** DSP en el frontend para personalización del audio.

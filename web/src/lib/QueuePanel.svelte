@@ -28,7 +28,12 @@
 </script>
 
 {#if isOpen}
-<div class="queue-backdrop" onclick={() => isOpen = false}></div>
+<div 
+  class="queue-backdrop" 
+  onclick={() => isOpen = false}
+  onkeydown={(e) => e.key === 'Escape' && (isOpen = false)}
+  role="presentation"
+></div>
 <aside class="queue-panel" transition:fly={{ x: 400, duration: 300 }}>
   <header class="queue-header">
     <div class="header-main">
@@ -45,12 +50,16 @@
     </div>
   </header>
 
-  <div class="queue-list">
+  <div class="queue-list" role="listbox">
     {#each $queue as track, i}
       <div 
         class="queue-item" 
         class:active={$currentIndex === i}
         onclick={() => playAt(i)}
+        onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && playAt(i)}
+        role="option"
+        aria-selected={$currentIndex === i}
+        tabindex="0"
       >
         <div class="item-index">{i + 1}</div>
         <Artwork src={`/api/cover/${track.id}`} size="40px" borderRadius="8px" />

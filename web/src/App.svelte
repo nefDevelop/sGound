@@ -132,8 +132,23 @@
         if ($currentView === 'library') fetchTracks(true);
       }
     },
-    openEditor: (item) => {
-      trackToEdit = { ...item };
+    openEditor: async (item) => {
+      // Fetch full track data (not minimal) before opening editor
+      try {
+        const res = await fetch(`/api/tracks?id=${item.id}&limit=1`);
+        if (res.ok) {
+          const fullData = await res.json();
+          if (fullData && fullData.length > 0) {
+            trackToEdit = { ...fullData[0] };
+          } else {
+            trackToEdit = { ...item };
+          }
+        } else {
+          trackToEdit = { ...item };
+        }
+      } catch (e) {
+        trackToEdit = { ...item };
+      }
       isTagEditorOpen = true;
     },
     handleSelectionChange: (s) => (selectedTracks = s),
@@ -168,11 +183,22 @@
     checkScanStatus
   };
 
+  async function checkAuthStatus() {
+    try {
+      const res = await fetch("/api/auth/status");
+      if (res.status === 401) {
+        isLoggedIn.set(false);
+        localStorage.removeItem('username');
+      }
+    } catch (e) { console.error(e); }
+  }
+
   onMount(() => {
+    checkAuthStatus();
     loadTheme();
-    if ($isLoggedIn) { fetchTracks(); fetchPlaylists(); checkScanStatus(); }
+    if (get(isLoggedIn)) { fetchTracks(); fetchPlaylists(); checkScanStatus(); }
     setInterval(checkScanStatus, 8000);
-    
+
     window.addEventListener('popstate', (e) => {
       if (e.state?.view) { currentView.set(e.state.view); viewParams.set(e.state.params || {}); }
     });
@@ -191,7 +217,10 @@
     on:complete={() => { setupRequired.set(false); isLoggedIn.set(true); fetchTracks(); }} 
   />
 {:else if !$isLoggedIn}
-  <Login on:login={() => { isLoggedIn.set(true); loadTheme(); fetchTracks(); fetchPlaylists(); }} />
+  <Login 
+    on:login={() => { isLoggedIn.set(true); loadTheme(); fetchTracks(); fetchPlaylists(); }} 
+    on:setup={(e) => { setupUsername = e.detail.username; setupRequired.set(true); }}
+  />
 {:else}
   <AppShell 
     isLoggedIn={$isLoggedIn}

@@ -65,21 +65,23 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var artists []models.Artist
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte("["))
+	enc := json.NewEncoder(w)
+	first := true
+
 	for rows.Next() {
+		if !first {
+			w.Write([]byte(","))
+		}
+		first = false
 		var a models.Artist
 		if err := rows.Scan(&a.ID, &a.Name, &a.AlbumCount, &a.ImageURL); err != nil {
 			continue
 		}
-		artists = append(artists, a)
+		enc.Encode(a)
 	}
-
-	if len(artists) == 0 {
-		artists = []models.Artist{}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(artists)
+	w.Write([]byte("]"))
 }
 
 func (s *Server) handleArtistActions(w http.ResponseWriter, r *http.Request) {
@@ -400,6 +402,12 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 		args = append(args, artistId)
 	}
 
+	trackId := r.URL.Query().Get("id")
+	if trackId != "" {
+		whereClause += " AND t.id = ?"
+		args = append(args, trackId)
+	}
+
 	var totalCount int
 	countQuery := fmt.Sprintf(`
 		SELECT COUNT(*)
@@ -444,8 +452,21 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	tracks := make([]interface{}, 0)
+	w.Header().Set("X-Total-Count", strconv.Itoa(totalCount))
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Start JSON array
+	w.Write([]byte("["))
+	
+	enc := json.NewEncoder(w)
+	first := true
+
 	for rows.Next() {
+		if !first {
+			w.Write([]byte(","))
+		}
+		first = false
+
 		if minimal {
 			var id, title, genre, artist, album, format string
 			var trackNum, year, rating, instrumental int
@@ -453,7 +474,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 			if err := rows.Scan(&id, &title, &trackNum, &duration, &genre, &artist, &album, &year, &format, &rating, &instrumental); err != nil {
 				continue
 			}
-			tracks = append(tracks, map[string]interface{}{
+			enc.Encode(map[string]interface{}{
 				"id": id, "title": title, "trackNum": trackNum, "duration": duration, "genre": genre,
 				"artist": artist, "album": album, "year": year, "format": format, "rating": rating, "instrumental": instrumental == 1,
 			})
@@ -465,7 +486,7 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 			if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &tStatus, &rating, &instrumental, &trackTotal, &discTotal, &playCount); err != nil {
 				continue
 			}
-			tracks = append(tracks, map[string]interface{}{
+			enc.Encode(map[string]interface{}{
 				"id": id, "title": title, "trackNum": trackNum, "discNum": discNum,
 				"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
 				"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
@@ -475,10 +496,9 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-
-	w.Header().Set("X-Total-Count", strconv.Itoa(totalCount))
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tracks)
+	
+	// Close JSON array
+	w.Write([]byte("]"))
 }
 
 func (s *Server) handleLibraryMetadata(w http.ResponseWriter, r *http.Request) {

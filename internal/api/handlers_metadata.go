@@ -182,6 +182,15 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 				lyricsText = lrcData.PlainLyrics
 			}
 			if lyricsText != "" {
+				// Auto-save to file
+				go func() {
+					if err := editor.UpdateLyrics(trackID, lyricsText); err != nil {
+						slog.Error("Failed to auto-save lyrics", "trackID", trackID, "error", err)
+					} else {
+						slog.Info("Lyrics auto-saved to file", "trackID", trackID)
+					}
+				}()
+
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(map[string]string{"lyrics": lyricsText})
 				return

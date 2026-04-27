@@ -210,59 +210,67 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var imageURL string
-	var name string
-	err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ?", artistID).Scan(&imageURL, &name)
-	if err != nil {
-		s.servePlaceholderArtist(w)
-		return
-	}
-
-	if imageURL == "" {
-		ext, _ := s.externalMeta.GetArtistInfo(name)
-		if ext != nil && ext.Image != "" {
-			imageURL = ext.Image
-			tagsStr := strings.Join(ext.Tags, ",")
-			similarStr := strings.Join(ext.Similar, ",")
-			_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?",
-				ext.Image, ext.Biography, tagsStr, similarStr, artistID)
-		} else {
-			s.servePlaceholderArtist(w)
-			return
+	// Use singleflight to prevent redundant processing/fetching
+	_, _, _ = s.sf.Do("artist_img_"+artistID, func() (interface{}, error) {
+		// Re-check cache inside singleflight to ensure we don't process if another request finished
+		if _, err := os.Stat(cachePath); err == nil {
+			return nil, nil
 		}
-	}
 
-	resp, err := http.Get(imageURL)
-	if err != nil || resp.StatusCode != http.StatusOK {
+		var imageURL string
+		var name string
+		err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ?", artistID).Scan(&imageURL, &name)
+		if err != nil {
+			return nil, err
+		}
+
+		if imageURL == "" {
+			ext, _ := s.externalMeta.GetArtistInfo(name)
+			if ext != nil && ext.Image != "" {
+				imageURL = ext.Image
+				tagsStr := strings.Join(ext.Tags, ",")
+				similarStr := strings.Join(ext.Similar, ",")
+				_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?",
+					ext.Image, ext.Biography, tagsStr, similarStr, artistID)
+			} else {
+				return nil, fmt.Errorf("no image url")
+			}
+		}
+
+		resp, err := http.Get(imageURL)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("fetch failed")
+		}
+		defer resp.Body.Close()
+
+		limit := int64(10 * 1024 * 1024)
+		imgData, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+		if err != nil {
+			return nil, err
+		}
+
+		imageProcessingSem <- struct{}{}
+		defer func() { <-imageProcessingSem }()
+
+		src, _, err := image.Decode(bytes.NewReader(imgData))
+		if err != nil {
+			os.WriteFile(cachePath, imgData, 0644)
+			return nil, nil
+		}
+
+		resized := imaging.Resize(src, 800, 0, imaging.Lanczos)
+		_ = imaging.Save(resized, cachePath)
+		return nil, nil
+	})
+
+	// Final check: if we have it in cache (either from before or just processed), serve it
+	if _, err := os.Stat(cachePath); err == nil {
+		w.Header().Set("Cache-Control", "public, max-age=604800")
+		w.Header().Set("Content-Type", "image/jpeg")
+		http.ServeFile(w, r, cachePath)
+	} else {
 		s.servePlaceholderArtist(w)
-		return
 	}
-	defer resp.Body.Close()
-
-	limit := int64(10 * 1024 * 1024)
-	imgData, err := io.ReadAll(io.LimitReader(resp.Body, limit))
-	if err != nil {
-		http.Error(w, "Failed to read image", http.StatusInternalServerError)
-		return
-	}
-
-	imageProcessingSem <- struct{}{}
-	defer func() { <-imageProcessingSem }()
-
-	src, _, err := image.Decode(bytes.NewReader(imgData))
-	if err != nil {
-		os.WriteFile(cachePath, imgData, 0644)
-		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-		w.Write(imgData)
-		return
-	}
-
-	resized := imaging.Resize(src, 800, 0, imaging.Lanczos)
-	_ = imaging.Save(resized, cachePath)
-
-	w.Header().Set("Cache-Control", "public, max-age=604800")
-	w.Header().Set("Content-Type", "image/jpeg")
-	imaging.Encode(w, resized, imaging.JPEG)
 }
 
 func (s *Server) servePlaceholderArtist(w http.ResponseWriter) {
