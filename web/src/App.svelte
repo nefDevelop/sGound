@@ -57,12 +57,24 @@
 
   // --- Core Handlers ---
 
+  // --- Auth & Interceptor ---
+  async function apiFetch(url, options = {}) {
+    const res = await window.fetch(url, options);
+    if (res.status === 401) {
+      isLoggedIn.set(false);
+      localStorage.removeItem('username');
+      setupRequired.set(false);
+      return res;
+    }
+    return res;
+  }
+
   async function fetchTracks(append = false, silent = false) {
     if (loadingTracks || (!hasMoreTracks && append)) return;
     try {
       if (!silent) loadingTracks = true;
       if (!append) { tracksOffset = 0; hasMoreTracks = true; if (!silent) tracks = []; }
-      const res = await fetch(`/api/tracks?limit=${tracksLimit}&offset=${tracksOffset}&minimal=true`);
+      const res = await apiFetch(`/api/tracks?limit=${tracksLimit}&offset=${tracksOffset}&minimal=true`);
       if (!res.ok) throw new Error("Failed to fetch tracks");
       const newTracks = (await res.json()) || [];
       tracks = append ? [...tracks, ...newTracks] : newTracks;
@@ -75,7 +87,7 @@
   async function checkScanStatus() {
     if (!$isLoggedIn) return;
     try {
-      const res = await fetch("/api/library/status");
+      const res = await apiFetch("/api/library/status");
       if (!res.ok) return;
       const data = await res.json();
       const wasScanning = scanStatus.scanning;
@@ -97,13 +109,13 @@
   function stopPolling() { clearInterval(pollingInterval); pollingInterval = null; }
 
   async function loadTheme() {
-    const res = await fetch("/api/config").catch(() => null);
+    const res = await apiFetch("/api/config").catch(() => null);
     const config = res?.ok ? await res.json() : { themeColor: '#ff3366' };
     applyTheme(generatePalette(config.themeColor || '#ff3366'));
   }
 
   async function fetchPlaylists() {
-    const res = await fetch("/api/playlists");
+    const res = await apiFetch("/api/playlists");
     if (res.ok) playlists = await res.json();
   }
 
@@ -135,7 +147,7 @@
     openEditor: async (item) => {
       // Fetch full track data (not minimal) before opening editor
       try {
-        const res = await fetch(`/api/tracks?id=${item.id}&limit=1`);
+        const res = await apiFetch(`/api/tracks?id=${item.id}&limit=1`);
         if (res.ok) {
           const fullData = await res.json();
           if (fullData && fullData.length > 0) {
@@ -154,11 +166,11 @@
     handleSelectionChange: (s) => (selectedTracks = s),
     handleSearch: async (query) => {
       if (!query) { fetchTracks(); return; }
-      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      const res = await apiFetch(`/api/search?q=${encodeURIComponent(query)}`);
       if (res.ok) { tracks = (await res.json()).tracks || []; currentView.set("library"); }
     },
     triggerScan: async () => {
-      const res = await fetch("/api/scan", { method: "POST" });
+      const res = await apiFetch("/api/scan", { method: "POST" });
       if (res.ok) { showToast("Scan started", "success"); checkScanStatus(); }
     },
     handleDeletePhysical: async (track, callback) => {
@@ -166,14 +178,14 @@
         isOpen: true, title: "Delete File", message: `Permanently delete ${track.title}?`, 
         type: "danger", confirmLabel: "Delete", icon: 'trash',
         onconfirm: async () => {
-          const res = await fetch(`/api/tracks/${track.id}`, { method: 'DELETE' });
+          const res = await apiFetch(`/api/tracks/${track.id}`, { method: 'DELETE' });
           if (res.ok) { showToast("Deleted", "success"); fetchTracks(); callback?.(); }
         },
         oncancel: () => { confirmState.isOpen = false; }
       };
     },
     handleReject: async (track, callback) => {
-      const res = await fetch(`/api/tracks/reject`, {
+      const res = await apiFetch(`/api/tracks/reject`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: [track.id] })
       });
@@ -185,7 +197,7 @@
 
   async function checkAuthStatus() {
     try {
-      const res = await fetch("/api/auth/status");
+      const res = await apiFetch("/api/auth/status");
       if (res.status === 401) {
         isLoggedIn.set(false);
         localStorage.removeItem('username');
