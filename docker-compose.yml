@@ -4,7 +4,7 @@ services:
     container_name: sgound
     restart: unless-stopped
     ports:
-      - "8288:8088"
+      - "8088:8088"
     environment:
       - SGOUND_PORT=8088
       - SGOUND_MUSIC_PATH=/music

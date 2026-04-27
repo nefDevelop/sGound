@@ -44,7 +44,7 @@ func LoadConfig() *Config {
 
 	port := os.Getenv("SGOUND_PORT")
 	if port == "" {
-		port = "8080"
+		port = "8088"
 	}
 
 	autoRename := os.Getenv("SGOUND_AUTO_RENAME") == "true"
