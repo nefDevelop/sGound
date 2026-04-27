@@ -4,12 +4,12 @@ services:
     container_name: sgound
     restart: unless-stopped
     ports:
-      - "8088:8088"
+      - "${SGOUND_PORT_HOST:-8088}:8088"
     environment:
       - SGOUND_PORT=8088
       - SGOUND_MUSIC_PATH=/music
       - SGOUND_DB_PATH=/app/data/sgound.db
-      - SGOUND_USERS=user:rw
+      - SGOUND_USERS=${SGOUND_USERS:-user:rw}
       # Uncomment and change to customize theme (default: #ff3366)
       # - SGOUND_THEME_COLOR=#ff3366
       - GOMEMLIMIT=180MiB
