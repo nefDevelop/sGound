@@ -677,7 +677,13 @@ func moveSidecars(oldPath, newPath string) {
 
 func (e *Editor) EmbedCover(trackID string, imgData []byte, mimeType string) error {
 	var path string
-	e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+	err := e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+	if err != nil || path == "" {
+		return fmt.Errorf("track not found or has no path: %s", trackID)
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("physical file not found: %s", path)
+	}
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".mp3":
@@ -700,12 +706,18 @@ func (e *Editor) EmbedCover(trackID string, imgData []byte, mimeType string) err
 		f.Meta = append(f.Meta, &pictureMeta)
 		return f.Save(path)
 	}
-	return nil
+	return fmt.Errorf("unsupported format for cover embedding: %s", ext)
 }
 
 func (e *Editor) UpdateLyrics(trackID string, lyrics string) error {
 	var path string
-	e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+	err := e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+	if err != nil || path == "" {
+		return fmt.Errorf("track not found or has no path: %s", trackID)
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("physical file not found: %s", path)
+	}
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".mp3": return updateMP3Lyrics(path, lyrics)

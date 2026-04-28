@@ -141,6 +141,10 @@ func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		var path string
+		s.MasterDB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+		slog.Info("📝 Lyrics updated successfully", "trackID", trackID, "path", path)
+		
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"lyrics saved to file"}`))
 		return
@@ -189,7 +193,9 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 					if err := editor.UpdateLyrics(trackID, lyricsText); err != nil {
 						slog.Error("Failed to auto-save lyrics", "trackID", trackID, "error", err)
 					} else {
-						slog.Info("Lyrics auto-saved to file", "trackID", trackID)
+						var path string
+						s.MasterDB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+						slog.Info("📝 Lyrics auto-saved to file", "trackID", trackID, "path", path)
 					}
 				}()
 
@@ -463,7 +469,10 @@ func (s *Server) embedCoverToTracks(r *http.Request, trackID string, applyToAlbu
 		if err := editor.EmbedCover(id, imgData, mimeType); err != nil {
 			slog.Error("Failed to embed cover", "track", id, "error", err)
 		} else {
-			slog.Info("🖼️ Cover embedded successfully", "trackID", id)
+			// Get track path for logging via direct query
+			var path string
+			s.MasterDB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", id).Scan(&path)
+			slog.Info("🖼️ Cover embedded successfully", "trackID", id, "path", path)
 		}
 		cachePath := filepath.Join(s.Config.CachePath, "covers", id+".jpg")
 		os.Remove(cachePath)
