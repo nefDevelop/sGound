@@ -3,7 +3,7 @@
   import Icon from './Icon.svelte';
   import TracksView from './TracksView.svelte';
   import { fade } from 'svelte/transition';
-  import { inboxCount, rawCount } from './stores.js';
+  import { inboxCount, rawCount, apiFetch } from './stores.js';
 
   let { onplay, onedit, onapproved, onrejected, onhide, onbulkReject, ondeletePhysical, scanStatus } = $props();
   
@@ -36,19 +36,6 @@
     (scanStatus?.inboxCount || 0) + (scanStatus?.rawCount || 0)
   ));
 
-  // LOGS DE DEPURACIÓN AMPLIADOS
-  $effect(() => {
-    console.group("🔍 DEBUG INBOX COUNTS");
-    console.log("DATO MAESTRO (X-Total-Count Header):", totalFromHeader);
-    console.log("Icono/Global Store ($inboxCount + $rawCount):", $inboxCount + $rawCount);
-    console.log("Estado Escáner Prop (scanStatus):", (scanStatus?.inboxCount || 0) + (scanStatus?.rawCount || 0));
-    console.log("Cargados físicamente (tracks.length):", tracks.length);
-    console.log("Petición Status API (totalServer):", totalServer);
-    console.log("--- RESULTADO FINAL EN BOTÓN ---");
-    console.log("Valor calculado (totalTracks):", totalTracks);
-    console.groupEnd();
-  });
-
   onMount(() => {
     fetchInbox();
     
@@ -71,6 +58,7 @@
   export async function fetchInbox(append = false, silent = false, isFinal = false) {
     if (!silent) loading = true;
     if (!append) {
+      tracks = []; // Clear immediately to show loading state and avoid stale data
       tracksOffset = 0;
       hasMore = true;
       pendingAnalysisCount = 0;
@@ -78,7 +66,7 @@
 
     try {
       // 1. Obtener las pistas del lote actual
-      const res = await fetch(`/api/tracks?status=pending,raw&limit=${limit}&offset=${tracksOffset}`);
+      const res = await apiFetch(`/api/tracks?status=pending,raw&limit=${limit}&offset=${tracksOffset}`);
       if (res.ok) {
         // LEER HEADER MAESTRO DE CONTEO
         const countHeader = res.headers.get("X-Total-Count");
@@ -107,7 +95,7 @@
       }
 
       // 3. Obtener el TOTAL real del servidor (Fallback/Sincronización)
-      const statusRes = await fetch("/api/library/status");
+      const statusRes = await apiFetch("/api/library/status");
       if (statusRes.ok) {
         const statusData = await statusRes.json();
         totalServer = (statusData.inboxCount || 0) + (statusData.rawCount || 0);
@@ -116,7 +104,7 @@
       }
 
     } catch (e) {
-      console.error(e);
+      console.error("Inbox fetch failed:", e);
     } finally {
       loading = false;
     }
@@ -132,7 +120,7 @@
       if (totalTracks > tracks.length || hasMore) {
         try {
           const fetchLimit = Math.max(totalTracks + 100, 2000);
-          const res = await fetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
+          const res = await apiFetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
           if (res.ok) {
             const data = await res.json();
             ids = data.map(t => t.id);
@@ -170,7 +158,7 @@
       if (totalTracks > tracks.length || hasMore) {
         try {
           const fetchLimit = Math.max(totalTracks + 100, 2000);
-          const res = await fetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
+          const res = await apiFetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
           if (res.ok) {
             const data = await res.json();
             ids = data.map(t => t.id);
@@ -212,7 +200,7 @@
 
   async function approveIds(ids, refresh = true) {
     try {
-      const res = await fetch('/api/tracks/approve', {
+      const res = await apiFetch('/api/tracks/approve', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids })
@@ -237,7 +225,7 @@
     if (isAnalyzing) return;
     isAnalyzing = true;
     try {
-      const res = await fetch('/api/library/inbox/analyze');
+      const res = await apiFetch('/api/library/inbox/analyze');
       if (res.ok) {
         const data = await res.json();
         suggestions = data.suggestions || [];
@@ -261,7 +249,7 @@
     if (suggestions.length === 0) return;
     isApplyingSuggestions = true;
     try {
-      const res = await fetch('/api/library/inbox/apply-suggestions', {
+      const res = await apiFetch('/api/library/inbox/apply-suggestions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ suggestions })
@@ -282,7 +270,7 @@
     if (!sug) return;
     
     try {
-      const res = await fetch('/api/library/inbox/apply-suggestions', {
+      const res = await apiFetch('/api/library/inbox/apply-suggestions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ suggestions: [sug] })

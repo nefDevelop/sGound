@@ -45,6 +45,17 @@ export const viewParams = writable({});
 export const isLoggedIn = writable(!!localStorage.getItem('username'));
 export const setupRequired = writable(false);
 
+export async function apiFetch(url, options = {}) {
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+        isLoggedIn.set(false);
+        localStorage.removeItem('username');
+        window.location.reload();
+        return res;
+    }
+    return res;
+}
+
 volume.subscribe(v => {
     localStorage.setItem('volume', v.toString());
 });

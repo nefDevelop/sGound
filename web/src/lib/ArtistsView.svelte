@@ -1,5 +1,5 @@
 <script>
-  import { inboxCount, rawCount } from './stores.js';
+  import { inboxCount, rawCount, apiFetch } from './stores.js';
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade } from 'svelte/transition';
@@ -17,7 +17,7 @@
   onMount(async () => {
     loading = true;
     try {
-      const res = await fetch('/api/artists');
+      const res = await apiFetch('/api/artists');
       if (res.ok) {
         artists = (await res.json()) || [];
       }

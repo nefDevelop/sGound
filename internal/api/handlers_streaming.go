@@ -270,24 +270,40 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 			return nil, err
 		}
 
+		// Validar que no sea un error HTML o algo pequeño
+		if len(imgData) < 500 {
+			return nil, fmt.Errorf("image data too small (%d bytes), likely invalid", len(imgData))
+		}
+
 		imageProcessingSem <- struct{}{}
 		defer func() { <-imageProcessingSem }()
 
-		src, _, err := image.Decode(bytes.NewReader(imgData))
+		src, format, err := image.Decode(bytes.NewReader(imgData))
 		if err != nil {
-			slog.Warn("Failed to decode artist image, saving raw", "artistID", artistID, "error", err)
-			os.WriteFile(cachePath, imgData, 0644)
-			return nil, nil
+			slog.Warn("Failed to decode artist image", "artistID", artistID, "error", err, "size", len(imgData))
+			// Solo guardamos si es un formato que conocemos pero falló el decode, 
+			// pero mejor no guardar nada si falló para que se reintente luego.
+			return nil, err
 		}
 
 		resized := imaging.Resize(src, 800, 0, imaging.Linear)
-		_ = imaging.Save(resized, cachePath)
-		slog.Info("Successfully cached artist image", "artistID", artistID, "artist", name)
+		err = imaging.Save(resized, cachePath)
+		if err != nil {
+			slog.Error("Failed to save resized artist image", "artistID", artistID, "error", err)
+			return nil, err
+		}
+
+		slog.Info("Successfully cached artist image", "artistID", artistID, "artist", name, "format", format)
 		return nil, nil
 	})
 
 	if err != nil {
 		slog.Warn("Artist image process failed", "artistID", artistID, "error", err)
+		// Si falló y el archivo NO existe, servimos el placeholder sin cachear el error
+		if _, statErr := os.Stat(cachePath); statErr != nil {
+			s.servePlaceholderArtist(w)
+			return
+		}
 	}
 
 	if _, statErr := os.Stat(cachePath); statErr == nil {

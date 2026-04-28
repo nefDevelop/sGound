@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { 
     showToast, queue, currentIndex, isPlaying, inboxCount, rawCount, 
-    currentView, viewParams, isLoggedIn, setupRequired 
+    currentView, viewParams, isLoggedIn, setupRequired, apiFetch
   } from "./lib/stores.js";
   import { generatePalette, applyTheme } from "./lib/theme.js";
   
@@ -56,18 +56,6 @@
   });
 
   // --- Core Handlers ---
-
-  // --- Auth & Interceptor ---
-  async function apiFetch(url, options = {}) {
-    const res = await window.fetch(url, options);
-    if (res.status === 401) {
-      isLoggedIn.set(false);
-      localStorage.removeItem('username');
-      setupRequired.set(false);
-      return res;
-    }
-    return res;
-  }
 
   async function fetchTracks(append = false, silent = false) {
     if (loadingTracks || (!hasMoreTracks && append)) return;
