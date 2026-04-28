@@ -50,7 +50,6 @@ export async function apiFetch(url, options = {}) {
     if (res.status === 401) {
         isLoggedIn.set(false);
         localStorage.removeItem('username');
-        window.location.reload();
         return res;
     }
     return res;
