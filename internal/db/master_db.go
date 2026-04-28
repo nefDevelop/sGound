@@ -438,7 +438,10 @@ func (db *MasterDatabase) GetLowQualityTracks(threshold int) ([]models.Track, er
 	FROM tracks t
 	JOIN albums a ON t.album_id = a.id
 	JOIN artists art ON a.artist_id = art.id
-	WHERE t.status = 'active' AND t.bit_rate > 0 AND t.bit_rate < ?
+	WHERE t.status = 'active' 
+	  AND t.bit_rate > 0 
+	  AND t.bit_rate < ? 
+	  AND LOWER(t.format) NOT IN ('flac', 'wav', 'alac', 'dsd', 'aiff')
 	ORDER BY t.bit_rate ASC`
 
 	rows, err := db.Conn.Query(query, threshold*1000)

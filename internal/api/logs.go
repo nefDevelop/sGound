@@ -107,6 +107,15 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "data: %s\n\n", data)
 	}
 	logMu.Unlock()
+
+	// Initial heartbeat/confirm message
+	confirmEntry := LogEntry{
+		Timestamp: time.Now(),
+		Level:     "INFO",
+		Message:   "🚀 Real-time log stream established",
+	}
+	confirmData, _ := json.Marshal(confirmEntry)
+	fmt.Fprintf(w, "data: %s\n\n", confirmData)
 	w.(http.Flusher).Flush()
 
 	for {

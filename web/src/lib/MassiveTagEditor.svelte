@@ -3,6 +3,7 @@
   import Icon from './Icon.svelte';
   import { showToast, coverRefreshTrigger, libraryRefreshTrigger } from './stores.js';
   import { fade } from 'svelte/transition';
+  import CoverSearcher from './CoverSearcher.svelte';
   
   let { 
     isOpen = $bindable(false), 
@@ -20,6 +21,7 @@
   let showAlbumResults = $state(false);
   let searchingOnlyCover = $state(false);
   let fileBatchInput;
+  let coverSearcherOpen = $state(false);
 
   let isSingleAlbum = $derived(
     selectedTracks.length > 0 && 
@@ -483,7 +485,7 @@
         <div class="header-info-wrap">
           {#if albumInfo}
             <div class="header-cover-wrapper">
-              <button class="header-cover clickable" onclick={() => searchAlbumMetadata(true)} title="Click to search only cover">
+              <button class="header-cover clickable" onclick={() => coverSearcherOpen = true} title="Click to search only cover">
                 <img src="/api/cover/{albumInfo.coverTrackId}?v={$coverRefreshTrigger}" alt="" />
                 <div class="cover-edit-hint">
                   <Icon name="search" size={20} />
@@ -567,7 +569,7 @@
             <button class="tool-btn highlight" onclick={() => searchAlbumMetadata(false)} title="Search full album metadata">
               <Icon name="search" size={14} /> Search Album
             </button>
-            <button class="tool-btn" onclick={() => searchAlbumMetadata(true)} title="Search only for album cover">
+            <button class="tool-btn" onclick={() => coverSearcherOpen = true} title="Search only for album cover">
               <Icon name="image" size={14} /> Search Cover
             </button>
             <button class="tool-btn" onclick={autoSearchAll} disabled={loading}><Icon name="zap" size={14} /> Auto-Tag</button>
@@ -685,6 +687,19 @@
     </div>
   </div>
 </div>
+{/if}
+
+{#if albumInfo}
+  <CoverSearcher 
+    bind:isOpen={coverSearcherOpen}
+    albumId={selectedTracks[0].albumId || selectedTracks[0].album_id}
+    initialArtist={albumInfo.artist}
+    initialAlbum={albumInfo.title}
+    onapply={() => {
+        // Refresh local tracks in editor if needed
+        selectedTracks = [...selectedTracks];
+    }}
+  />
 {/if}
 
 <style>
