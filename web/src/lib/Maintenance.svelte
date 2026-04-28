@@ -5,6 +5,7 @@
   import { showToast } from './stores.js';
   import { fade } from 'svelte/transition';
   import LogViewer from './LogViewer.svelte';
+  import CoverSearcher from './CoverSearcher.svelte';
 
   let { onfixTags, subview = 'overview', onviewchange, onedit, refresh = $bindable() } = $props();
   
@@ -28,6 +29,13 @@
     y: 0,
     track: null,
     items: []
+  });
+
+  let searcherModal = $state({
+    isOpen: false,
+    albumId: "",
+    artist: "",
+    album: ""
   });
 
   // Re-fetch details when subview changes via navigation
@@ -378,7 +386,14 @@
                         </button>
                       {/if}
                       {#if item.type === 'missing' || item.type === 'small'}
-                        <button class="icon-btn primary" onclick={() => onedit?.({ id: item.id, coverId: true, search: true })} title="Search High Quality Cover">
+                        <button class="icon-btn primary" onclick={() => {
+                          searcherModal = {
+                            isOpen: true,
+                            albumId: item.id,
+                            artist: item.artist,
+                            album: item.title
+                          };
+                        }} title="Search High Quality Cover">
                           <Icon name="search" size={18} />
                         </button>
                       {/if}
@@ -543,6 +558,14 @@
     y={contextMenu.y} 
     items={contextMenu.items} 
     onclose={() => contextMenu.visible = false}
+  />
+
+  <CoverSearcher 
+    bind:isOpen={searcherModal.isOpen}
+    albumId={searcherModal.albumId}
+    initialArtist={searcherModal.artist}
+    initialAlbum={searcherModal.album}
+    onapply={() => refresh?.()}
   />
 </div>
 
