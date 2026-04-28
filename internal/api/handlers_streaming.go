@@ -284,18 +284,23 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		client := &http.Client{Timeout: 10 * time.Second}
+		client := &http.Client{Timeout: 15 * time.Second}
 		req, err := http.NewRequest("GET", imageURL, nil)
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("User-Agent", "SgoundMusicPlayer/1.0 (admin@example.com)")
+		// User-Agent más estándar para evitar bloqueos de Wikipedia/Last.fm
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 		resp, err := client.Do(req)
-		if err != nil || resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("fetch failed for %s: %v", name, err)
+		if err != nil {
+			return nil, fmt.Errorf("fetch network error for %s: %v", name, err)
 		}
 		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("fetch status error for %s: %d %s", name, resp.StatusCode, resp.Status)
+		}
 
 		limit := int64(10 * 1024 * 1024)
 		imgData, err := io.ReadAll(io.LimitReader(resp.Body, limit))
