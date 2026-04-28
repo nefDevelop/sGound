@@ -578,6 +578,11 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	if dbAlbumArtist == "" { dbAlbumArtist = artistName }
 	artistId := utils.GenerateID(utils.NormalizeArtist(dbAlbumArtist))
 
+	// Fallback for missing bitrate (common in lossless formats)
+	if bitRate == 0 && duration > 0 {
+		bitRate = int((float64(fileStat.Size()) * 8) / duration)
+	}
+
 	return &trackResult{
 		trackId: copyString(trackId), albumId: albumId, artistId: artistId,
 		artistName: artistName, dbAlbumArtist: dbAlbumArtist, albumName: albumName,
