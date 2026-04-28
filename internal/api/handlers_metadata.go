@@ -57,6 +57,7 @@ func (s *Server) handleEditTags(trackID string, w http.ResponseWriter, r *http.R
 
 	changes, err := editor.UpdateTags(trackID, body)
 	if err != nil {
+		slog.Error("❌ Failed to update tags", "trackID", trackID, "error", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{"status": "error", "message": err.Error(), "changes": changes})

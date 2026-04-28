@@ -267,14 +267,14 @@ func NewEditor(database *db.MasterDatabase) *Editor {
 
 func (e *Editor) executeTransaction(fn func(tx *sql.Tx) error) error {
 	var err error
-	for i := 0; i < 5; i++ {
-		tx, err := e.DB.Conn.Begin()
-		if err != nil {
-			if strings.Contains(err.Error(), "database is locked") {
-				time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+	for i := 0; i < 10; i++ { // Aumentado a 10 reintentos
+		tx, errTx := e.DB.Conn.Begin()
+		if errTx != nil {
+			if strings.Contains(errTx.Error(), "database is locked") {
+				time.Sleep(time.Duration(200*(i+1)) * time.Millisecond) // Más espera
 				continue
 			}
-			return err
+			return errTx
 		}
 
 		err = fn(tx)
@@ -284,12 +284,12 @@ func (e *Editor) executeTransaction(fn func(tx *sql.Tx) error) error {
 
 		tx.Rollback()
 		if strings.Contains(err.Error(), "database is locked") {
-			time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+			time.Sleep(time.Duration(200*(i+1)) * time.Millisecond)
 			continue
 		}
 		return err
 	}
-	return fmt.Errorf("transaction failed after retries: %w", err)
+	return fmt.Errorf("transaction failed after 10 retries: %w", err)
 }
 
 // UpdateTags escribe metadatos en el archivo físico y sincroniza el título localmente.
