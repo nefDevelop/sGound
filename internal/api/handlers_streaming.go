@@ -225,12 +225,13 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 
 		var imageURL string
 		var name string
-		err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ?", artistID).Scan(&imageURL, &name)
+		// Try by ID (case-insensitive)
+		err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ? COLLATE NOCASE", artistID).Scan(&imageURL, &name)
 		if err != nil {
-			// Fallback: Si no se encuentra por ID, intentar por nombre (por si acaso el ID es el nombre)
+			// Fallback: search by name
 			err = s.getDB(r).Conn.QueryRow("SELECT id, image_url, name FROM artists WHERE name = ?", artistID).Scan(&artistID, &imageURL, &name)
 			if err != nil {
-				slog.Error("Artist not found for image request", "artistID", artistID, "error", err)
+				slog.Error("Artist not found in database", "artistID", artistID)
 				return nil, err
 			}
 		}

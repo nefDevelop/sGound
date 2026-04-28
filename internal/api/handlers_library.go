@@ -744,15 +744,9 @@ func (s *Server) EnrichArtists() {
 	go func() {
 		slog.Info("🚀 Background artist enrichment started")
 		query := `
-			SELECT DISTINCT a.id, a.name 
-			FROM artists a
-			JOIN albums al ON a.id = al.artist_id
-			JOIN tracks t ON al.id = t.album_id
-			WHERE t.status = 'active' AND (
-				(a.image_url IS NULL OR a.image_url = '') OR 
-				(a.bio IS NULL OR a.bio = '') OR 
-				(a.tags IS NULL OR a.tags = '')
-			)`
+			SELECT DISTINCT id, name 
+			FROM artists 
+			WHERE (image_url IS NULL OR image_url = '') OR (bio IS NULL OR bio = '')`
 		rows, err := s.MasterDB.Conn.Query(query)
 		if err != nil {
 			slog.Error("Failed to query artists for enrichment", "error", err)
