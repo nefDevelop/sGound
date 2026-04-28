@@ -308,21 +308,10 @@
       <h1>Inbox</h1>
     </div>
     <div class="header-info">
-      {#if totalTracks > 0}
-        <div class="chip primary" title="Total de pistas en el Inbox">
-          <Icon name="inbox" size={14} />
-          {totalTracks} pistas
-        </div>
-      {/if}
       {#if $rawCount > 0}
         <div class="chip warning" title="Pistas descubiertas pendientes de analizar">
           <Icon name="loader" size={14} class="spin" />
           {$rawCount} analizando...
-        </div>
-      {/if}
-      {#if hasMore}
-        <div class="chip ghost" title="Mostrando parcial">
-          Cargando de {limit} en {limit}...
         </div>
       {/if}
     </div>

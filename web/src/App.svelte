@@ -217,7 +217,7 @@
     checkAuthStatus();
     loadTheme();
     if (get(isLoggedIn)) { fetchTracks(); fetchPlaylists(); checkScanStatus(); }
-    setInterval(checkScanStatus, 8000);
+    setInterval(checkScanStatus, 5000);
 
     window.addEventListener('popstate', (e) => {
       if (e.state?.view) { currentView.set(e.state.view); viewParams.set(e.state.params || {}); }

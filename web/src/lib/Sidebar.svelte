@@ -43,9 +43,6 @@
         {/if}
       </div>
       <span>Dashboard</span>
-      {#if hasPendingMusic}
-        <span class="nav-badge">{$inboxCount + $rawCount}</span>
-      {/if}
     </button>
 
     <div class="nav-label">Library</div>
@@ -244,11 +241,11 @@
     right: -2px;
     width: 10px;
     height: 10px;
-    background: var(--tertiary);
+    background: #ff4d4f;
     border-radius: 50%;
     border: 2px solid var(--surface);
     z-index: 20;
-    box-shadow: 0 0 10px var(--tertiary-40);
+    box-shadow: 0 0 10px rgba(255, 77, 79, 0.4);
   }
 
   .playlists-scroll {
