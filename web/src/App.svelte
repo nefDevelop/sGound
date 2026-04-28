@@ -135,6 +135,8 @@
       }
     },
     openEditor: async (item) => {
+      console.log("🎨 Opening SINGLE Track Editor for:", item.title);
+      isMassiveEditorOpen = false; // Cerrar el otro por si acaso
       // Fetch full track data (not minimal) before opening editor
       try {
         const res = await apiFetch(`/api/tracks?id=${item.id}&limit=1`);
@@ -154,6 +156,8 @@
       isTagEditorOpen = true;
     },
     openAlbumEditor: async (album) => {
+      console.log("📚 Opening MASSIVE Album Editor for:", album.title);
+      isTagEditorOpen = false; // Cerrar el otro por si acaso
       loadingTracks = true;
       try {
         const res = await apiFetch(`/api/albums/${album.id}/tracks`);
