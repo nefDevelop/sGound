@@ -100,6 +100,7 @@ func (s *Server) handleArtistActions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http.Request) {
+	user, _ := r.Context().Value(userKey).(*db.User)
 	var name string
 	var cachedImage, cachedSource, cachedBio, cachedTags, cachedSimilar sql.NullString
 	err := s.getDB(r).Conn.QueryRow("SELECT name, image_url, image_source, bio, tags, similar FROM artists WHERE id = ?", artistID).Scan(&name, &cachedImage, &cachedSource, &cachedBio, &cachedTags, &cachedSimilar)
@@ -107,10 +108,6 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 		http.NotFound(w, r)
 		return
 	}
-
-	var albumCount, trackCount int
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT id) FROM albums WHERE artist_id = ?", artistID).Scan(&albumCount)
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM tracks t JOIN albums a ON t.album_id = a.id WHERE a.artist_id = ? AND t.status = 'active'", artistID).Scan(&trackCount)
 
 	biography := cachedBio.String
 	externalImage := cachedImage.String
@@ -139,6 +136,41 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 			_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET bio = ?, image_url = ?, image_source = ?, tags = ?, similar = ? WHERE id = ?",
 				biography, externalImage, imageSource, tagsStr, similarStr, artistID)
 		}
+	}
+
+	var trackCount int
+	_ = s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT t.id) FROM tracks t JOIN albums a ON t.album_id = a.id WHERE a.artist_id = ? AND t.status = 'active'", artistID).Scan(&trackCount)
+
+	// 3. GET ALBUMS (Deduplicated)
+	whereClause := "WHERE al.artist_id = ? AND t.status = 'active'"
+	args := []interface{}{artistID}
+	pathFilter, pathArgs := s.getPathFilter(user)
+	if pathFilter != "" {
+		whereClause += " AND " + pathFilter
+		args = append(args, pathArgs...)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT DISTINCT al.title, COALESCE(al.year, 0)
+		FROM albums al
+		JOIN tracks t ON al.id = t.album_id
+		%s`, whereClause)
+
+	rows, err := s.getDB(r).Conn.Query(query, args...)
+	albumCount := 0
+	if err == nil {
+		type albumGroup struct{ exists bool }
+		groups := make(map[string]*albumGroup)
+		for rows.Next() {
+			var title string
+			var year int
+			if err := rows.Scan(&title, &year); err == nil {
+				normTitle := s.normalizeAlbumTitle(title, name)
+				groups[normTitle] = &albumGroup{exists: true}
+			}
+		}
+		albumCount = len(groups)
+		rows.Close()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -195,35 +227,7 @@ func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r
 		}
 
 		// Normalización agresiva para detectar duplicados
-		normTitle := strings.ToLower(title)
-		artistLower := strings.ToLower(artist)
-		
-		// Función para limpiar años y nombres de artista del final repetidamente
-		for {
-			changed := false
-			normTitle = strings.TrimSpace(normTitle)
-			
-			// 1. Quitar año al final (4 dígitos)
-			words := strings.Fields(normTitle)
-			if len(words) > 1 {
-				last := words[len(words)-1]
-				if len(last) == 4 {
-					if _, err := strconv.Atoi(last); err == nil {
-						normTitle = strings.TrimSpace(strings.TrimSuffix(normTitle, last))
-						changed = true
-					}
-				}
-			}
-			
-			// 2. Quitar nombre del artista al final
-			if strings.HasSuffix(normTitle, artistLower) {
-				normTitle = strings.TrimSpace(strings.TrimSuffix(normTitle, artistLower))
-				changed = true
-			}
-			
-			if !changed { break }
-		}
-
+		normTitle := s.normalizeAlbumTitle(title, artist)
 		albumData := map[string]interface{}{
 			"id": id, "title": title, "year": year, "artist": artist, "coverId": coverId,
 		}
@@ -611,4 +615,39 @@ func (s *Server) handleLibraryMetadata(w http.ResponseWriter, r *http.Request) {
 		"decades": decades,
 		"genres":  genres,
 	})
+}
+
+func (s *Server) normalizeAlbumTitle(title, artist string) string {
+	norm := strings.ToLower(title)
+	artistLower := strings.ToLower(artist)
+
+	for {
+		changed := false
+		norm = strings.TrimSpace(norm)
+		// Quitar puntuación común al final (-, _, .)
+		norm = strings.TrimRight(norm, " -_.")
+
+		// 1. Quitar año al final (4 dígitos)
+		words := strings.Fields(norm)
+		if len(words) > 1 {
+			last := words[len(words)-1]
+			if len(last) == 4 {
+				if _, err := strconv.Atoi(last); err == nil {
+					norm = strings.TrimSpace(strings.TrimSuffix(norm, last))
+					changed = true
+				}
+			}
+		}
+
+		// 2. Quitar nombre del artista al final
+		if strings.HasSuffix(norm, artistLower) {
+			norm = strings.TrimSpace(strings.TrimSuffix(norm, artistLower))
+			changed = true
+		}
+
+		if !changed {
+			break
+		}
+	}
+	return strings.TrimSpace(norm)
 }
