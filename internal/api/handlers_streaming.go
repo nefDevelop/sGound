@@ -231,13 +231,11 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		// 1. Intentar buscar por ID exacto
 		err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ?", artistID).Scan(&imageURL, &name)
 		if err != nil {
-			// AUTO-REPAIR: Si no está en 'artists', buscamos en 'tracks' por si el ID es de un artista huérfano
+			// (Lógica de auto-repair que ya teníamos...)
 			var foundName string
 			errScan := s.getDB(r).Conn.QueryRow("SELECT artist FROM tracks WHERE status = 'active' AND (artist IS NOT NULL AND artist != '') AND ? = ?", artistID, artistID).Scan(&foundName)
 			
-			// Si no lo encontramos directamente, probamos un enfoque más agresivo: buscar un track que al hashear su artista de este ID
 			if errScan != nil {
-				// Nota: Esto es lento, pero solo ocurre una vez por artista huérfano
 				rows, _ := s.getDB(r).Conn.Query("SELECT DISTINCT artist FROM tracks WHERE status = 'active'")
 				if rows != nil {
 					defer rows.Close()
@@ -258,7 +256,6 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 				_, _ = s.getDB(r).Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, foundName)
 				name = foundName
 			} else {
-				// 2. Si falla y el ID NO parece un hash (es decir, es un nombre), intentar buscar por nombre
 				if len(artistID) != 40 {
 					err = s.getDB(r).Conn.QueryRow("SELECT id, image_url, name FROM artists WHERE name = ?", artistID).Scan(&artistID, &imageURL, &name)
 				}
@@ -270,7 +267,7 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if imageURL == "" {
-			slog.Info("No image URL in DB, fetching external info", "artist", name)
+			slog.Info("🔍 No image URL in DB, fetching external info", "artist", name)
 			ext, _ := s.externalMeta.GetArtistInfo(name)
 			if ext != nil && ext.Image != "" {
 				imageURL = ext.Image
@@ -278,28 +275,30 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 				similarStr := strings.Join(ext.Similar, ",")
 				_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?",
 					ext.Image, ext.Biography, tagsStr, similarStr, artistID)
-				slog.Info("Found external image for artist", "artist", name, "url", imageURL)
-			} else {
-				return nil, fmt.Errorf("no image url found for %s", name)
 			}
 		}
+
+		if imageURL == "" {
+			return nil, fmt.Errorf("no image url found for artist: %s", name)
+		}
+
+		slog.Info("📥 Downloading artist image", "artist", name, "url", imageURL)
 
 		client := &http.Client{Timeout: 15 * time.Second}
 		req, err := http.NewRequest("GET", imageURL, nil)
 		if err != nil {
 			return nil, err
 		}
-		// User-Agent más estándar para evitar bloqueos de Wikipedia/Last.fm
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("fetch network error for %s: %v", name, err)
+			return nil, fmt.Errorf("network error fetching %s: %v", name, err)
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("fetch status error for %s: %d %s", name, resp.StatusCode, resp.Status)
+			return nil, fmt.Errorf("HTTP %d error for %s", resp.StatusCode, name)
 		}
 
 		limit := int64(10 * 1024 * 1024)
@@ -308,30 +307,31 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 			return nil, err
 		}
 
-		// Validar que no sea un error HTML o algo pequeño
-		if len(imgData) < 500 {
-			return nil, fmt.Errorf("image data too small (%d bytes), likely invalid", len(imgData))
-		}
-
 		imageProcessingSem <- struct{}{}
 		defer func() { <-imageProcessingSem }()
 
 		src, format, err := image.Decode(bytes.NewReader(imgData))
 		if err != nil {
-			slog.Warn("Failed to decode artist image", "artistID", artistID, "error", err, "size", len(imgData))
-			// Solo guardamos si es un formato que conocemos pero falló el decode, 
-			// pero mejor no guardar nada si falló para que se reintente luego.
+			slog.Warn("❌ Failed to decode image", "artist", name, "size", len(imgData), "error", err)
+			return nil, err
+		}
+
+		slog.Info("🎨 Image decoded", "artist", name, "format", format, "size", len(imgData))
+
+		// Asegurar directorio antes de guardar
+		if err := os.MkdirAll(filepath.Dir(cachePath), 0755); err != nil {
+			slog.Error("📁 Failed to create cache directory", "path", filepath.Dir(cachePath), "error", err)
 			return nil, err
 		}
 
 		resized := imaging.Resize(src, 800, 0, imaging.Linear)
 		err = imaging.Save(resized, cachePath)
 		if err != nil {
-			slog.Error("Failed to save resized artist image", "artistID", artistID, "error", err)
+			slog.Error("💾 Failed to save image to cache", "path", cachePath, "error", err)
 			return nil, err
 		}
 
-		slog.Info("Successfully cached artist image", "artistID", artistID, "artist", name, "format", format)
+		slog.Info("✨ Successfully cached artist image", "artist", name, "path", cachePath)
 		return nil, nil
 	})
 
