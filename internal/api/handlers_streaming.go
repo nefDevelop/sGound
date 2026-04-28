@@ -216,8 +216,8 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use singleflight to prevent redundant processing/fetching
-	_, _, _ = s.sf.Do("artist_img_"+artistID, func() (interface{}, error) {
+	// Final check: if we have it in cache (either from before or just processed), serve it
+	_, err, _ := s.sf.Do("artist_img_"+artistID, func() (interface{}, error) {
 		// Re-check cache inside singleflight to ensure we don't process if another request finished
 		if _, err := os.Stat(cachePath); err == nil {
 			return nil, nil
@@ -227,10 +227,16 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		var name string
 		err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ?", artistID).Scan(&imageURL, &name)
 		if err != nil {
-			return nil, err
+			// Fallback: Si no se encuentra por ID, intentar por nombre (por si acaso el ID es el nombre)
+			err = s.getDB(r).Conn.QueryRow("SELECT id, image_url, name FROM artists WHERE name = ?", artistID).Scan(&artistID, &imageURL, &name)
+			if err != nil {
+				slog.Error("Artist not found for image request", "artistID", artistID, "error", err)
+				return nil, err
+			}
 		}
 
 		if imageURL == "" {
+			slog.Info("No image URL in DB, fetching external info", "artist", name)
 			ext, _ := s.externalMeta.GetArtistInfo(name)
 			if ext != nil && ext.Image != "" {
 				imageURL = ext.Image
@@ -238,8 +244,9 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 				similarStr := strings.Join(ext.Similar, ",")
 				_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?",
 					ext.Image, ext.Biography, tagsStr, similarStr, artistID)
+				slog.Info("Found external image for artist", "artist", name, "url", imageURL)
 			} else {
-				return nil, fmt.Errorf("no image url")
+				return nil, fmt.Errorf("no image url found for %s", name)
 			}
 		}
 
@@ -252,7 +259,7 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 
 		resp, err := client.Do(req)
 		if err != nil || resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("fetch failed: %v", err)
+			return nil, fmt.Errorf("fetch failed for %s: %v", name, err)
 		}
 		defer resp.Body.Close()
 
@@ -274,12 +281,15 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 
 		resized := imaging.Resize(src, 800, 0, imaging.Linear)
 		_ = imaging.Save(resized, cachePath)
-		slog.Info("Successfully cached artist image", "artistID", artistID)
+		slog.Info("Successfully cached artist image", "artistID", artistID, "artist", name)
 		return nil, nil
 	})
 
-	// Final check: if we have it in cache (either from before or just processed), serve it
-	if _, err := os.Stat(cachePath); err == nil {
+	if err != nil {
+		slog.Warn("Artist image process failed", "artistID", artistID, "error", err)
+	}
+
+	if _, statErr := os.Stat(cachePath); statErr == nil {
 		w.Header().Set("Cache-Control", "public, max-age=604800")
 		w.Header().Set("Content-Type", "image/jpeg")
 		http.ServeFile(w, r, cachePath)
