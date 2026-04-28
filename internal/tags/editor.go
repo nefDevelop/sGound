@@ -330,7 +330,9 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) ([]TagC
 	mismatches := []string{}
 
 	for field, requestedValueRaw := range data {
-		if field == "id" { continue }
+		if field == "id" || field == "duration" || field == "size" || field == "format" || field == "bitrate" || field == "sampleRate" {
+			continue 
+		}
 
 		requestedValue := ""
 		switch v := requestedValueRaw.(type) {
