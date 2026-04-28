@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import Icon from './Icon.svelte';
   import TracksView from './TracksView.svelte';
   import { fade } from 'svelte/transition';
@@ -124,6 +124,7 @@
 
   async function approveAll() {
     isApprovingAll = true;
+    approvingCount = totalTracks; // Iniciar inmediatamente con el total conocido
     try {
       let ids = tracks.map(t => t.id);
       
@@ -142,12 +143,13 @@
       }
 
       if (ids.length > 0) {
-        approvingCount = ids.length;
+        approvingCount = ids.length; // Ajustar al total real obtenido
         const batchSize = 100;
         for (let i = 0; i < ids.length; i += batchSize) {
           const batch = ids.slice(i, i + batchSize);
           await approveIds(batch, false);
           approvingCount = Math.max(0, approvingCount - batch.length);
+          await tick(); 
         }
         await fetchInbox();
         selectedTracks = [];
@@ -161,6 +163,7 @@
 
   async function rejectAll() {
     isRejectingAll = true;
+    rejectingCount = totalTracks; // Iniciar inmediatamente
     try {
       let ids = tracks.map(t => t.id);
       
@@ -184,6 +187,7 @@
           const batch = ids.slice(i, i + batchSize);
           await rejectIds(batch, false);
           rejectingCount = Math.max(0, rejectingCount - batch.length);
+          await tick();
         }
         await fetchInbox();
         selectedTracks = [];

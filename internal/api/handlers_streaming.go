@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/disintegration/imaging"
 	"sgound/internal/db"
@@ -192,10 +193,15 @@ func (s *Server) servePlaceholderCover(w http.ResponseWriter) {
 }
 
 func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
-	artistID := s.extractID(r, "/api/artists/")
-	artistID = strings.TrimSuffix(artistID, "/image")
+	// Intentar obtener de PathValue (Go 1.22+) primero
+	artistID := r.PathValue("id")
+	if artistID == "" {
+		artistID = s.extractID(r, "/api/artists/")
+		artistID = strings.TrimSuffix(artistID, "/image")
+	}
 
 	if artistID == "" {
+		slog.Warn("Empty artist ID in image request", "path", r.URL.Path)
 		s.servePlaceholderArtist(w)
 		return
 	}
@@ -237,9 +243,16 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		resp, err := http.Get(imageURL)
+		client := &http.Client{Timeout: 10 * time.Second}
+		req, err := http.NewRequest("GET", imageURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", "SgoundMusicPlayer/1.0 (admin@example.com)")
+
+		resp, err := client.Do(req)
 		if err != nil || resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("fetch failed")
+			return nil, fmt.Errorf("fetch failed: %v", err)
 		}
 		defer resp.Body.Close()
 
@@ -254,12 +267,14 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 
 		src, _, err := image.Decode(bytes.NewReader(imgData))
 		if err != nil {
+			slog.Warn("Failed to decode artist image, saving raw", "artistID", artistID, "error", err)
 			os.WriteFile(cachePath, imgData, 0644)
 			return nil, nil
 		}
 
 		resized := imaging.Resize(src, 800, 0, imaging.Linear)
 		_ = imaging.Save(resized, cachePath)
+		slog.Info("Successfully cached artist image", "artistID", artistID)
 		return nil, nil
 	})
 

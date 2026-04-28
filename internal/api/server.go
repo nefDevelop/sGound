@@ -269,6 +269,7 @@ func (s *Server) extractID(r *http.Request, prefix string) string {
 	id = strings.TrimSuffix(id, "/organize")
 	id = strings.TrimSuffix(id, "/albums")
 	id = strings.TrimSuffix(id, "/tracks")
+	id = strings.TrimSuffix(id, "/image")
 
 	if decoded, err := url.PathUnescape(id); err == nil {
 		id = decoded
