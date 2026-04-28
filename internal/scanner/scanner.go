@@ -2,9 +2,7 @@ package scanner
 
 import (
 	"context"
-	"crypto/sha1"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -451,7 +449,7 @@ func (s *Scanner) ScanDirectory(rootPath string) error {
 		if err != nil { return nil }
 		if !d.IsDir() && IsAudioFile(d.Name()) == nil {
 			if _, exists := s.dbFileCache[path]; !exists {
-				buffer = append(buffer, rawInfo{GenerateID(path), path})
+				buffer = append(buffer, rawInfo{utils.GenerateID(path), path})
 				if len(buffer) >= 10 { // Lote de descubrimiento más pequeño
 					s.checkBackpressure()
 					flushDisc()
@@ -556,7 +554,7 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	}
 
 	trackId := tags.ReadPersistentID(path)
-	if trackId == "" { trackId = GenerateID(path) }
+	if trackId == "" { trackId = utils.GenerateID(path) }
 
 	var bitRate, sampleRate int
 	var duration float64
@@ -568,17 +566,17 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 
 	var groupingKey string
 	if albumArtistTag != "" {
-		groupingKey = "AA:" + NormalizeArtist(albumArtistTag)
+		groupingKey = "AA:" + utils.NormalizeArtist(albumArtistTag)
 	} else {
 		dir := filepath.Dir(path)
 		base := strings.ToLower(filepath.Base(dir))
 		if strings.HasPrefix(base, "cd") || strings.HasPrefix(base, "disc") || strings.HasPrefix(base, "disk") { dir = filepath.Dir(dir) }
 		groupingKey = "DIR:" + dir
 	}
-	albumId := GenerateID(groupingKey + "|" + NormalizeString(albumName))
+	albumId := utils.GenerateID(groupingKey + "|" + utils.NormalizeString(albumName))
 	dbAlbumArtist := albumArtistTag
 	if dbAlbumArtist == "" { dbAlbumArtist = artistName }
-	artistId := GenerateID(dbAlbumArtist)
+	artistId := utils.GenerateID(dbAlbumArtist)
 
 	return &trackResult{
 		trackId: copyString(trackId), albumId: albumId, artistId: artistId,
@@ -715,30 +713,9 @@ func (s *Scanner) recalculateAlbumArtist(albumId string) {
 	var maxFreq int
 	if rows.Next() { rows.Scan(&winnerName, &maxFreq) }
 	if winnerName == "" { return }
-	winnerArtistId := GenerateID(winnerName)
+	winnerArtistId := utils.GenerateID(winnerName)
 	s.DB.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", winnerArtistId, winnerName)
 	s.DB.Conn.Exec("UPDATE albums SET artist_id = ? WHERE id = ?", winnerArtistId, albumId)
-}
-
-func GenerateID(input string) string {
-	h := sha1.New()
-	h.Write([]byte(input))
-	return hex.EncodeToString(h.Sum(nil))
-}
-
-func NormalizeArtist(name string) string {
-	name = strings.ToLower(name)
-	separators := []string{" feat.", " ft.", " feat ", " ft ", " with "}
-	for _, sep := range separators {
-		if idx := strings.Index(name, sep); idx != -1 { name = name[:idx] }
-	}
-	return strings.TrimSpace(name)
-}
-
-func NormalizeString(s string) string {
-	s = strings.ToLower(s)
-	r := strings.NewReplacer(".", "", ",", "", "-", "", "(", "", ")", "", "[", "", "]", "", "'", "", "\"", "")
-	return strings.TrimSpace(r.Replace(s))
 }
 
 type trackResult struct {

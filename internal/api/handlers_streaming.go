@@ -16,6 +16,7 @@ import (
 	"github.com/disintegration/imaging"
 	"sgound/internal/db"
 	"sgound/internal/tags"
+	"sgound/internal/utils"
 )
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
@@ -230,14 +231,41 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		// 1. Intentar buscar por ID exacto
 		err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ?", artistID).Scan(&imageURL, &name)
 		if err != nil {
-			// 2. Si falla y el ID NO parece un hash (es decir, es un nombre), intentar buscar por nombre
-			// Un hash de sgound suele tener 40 caracteres (SHA1)
-			if len(artistID) != 40 {
-				err = s.getDB(r).Conn.QueryRow("SELECT id, image_url, name FROM artists WHERE name = ?", artistID).Scan(&artistID, &imageURL, &name)
-			}
+			// AUTO-REPAIR: Si no está en 'artists', buscamos en 'tracks' por si el ID es de un artista huérfano
+			var foundName string
+			errScan := s.getDB(r).Conn.QueryRow("SELECT artist FROM tracks WHERE status = 'active' AND (artist IS NOT NULL AND artist != '') AND ? = ?", artistID, artistID).Scan(&foundName)
 			
-			if err != nil {
-				return nil, fmt.Errorf("artist not found in DB: %s", artistID)
+			// Si no lo encontramos directamente, probamos un enfoque más agresivo: buscar un track que al hashear su artista de este ID
+			if errScan != nil {
+				// Nota: Esto es lento, pero solo ocurre una vez por artista huérfano
+				rows, _ := s.getDB(r).Conn.Query("SELECT DISTINCT artist FROM tracks WHERE status = 'active'")
+				if rows != nil {
+					defer rows.Close()
+					for rows.Next() {
+						var aName string
+						if err := rows.Scan(&aName); err == nil {
+							if utils.GenerateID(aName) == artistID {
+								foundName = aName
+								break
+							}
+						}
+					}
+				}
+			}
+
+			if foundName != "" {
+				slog.Info("🛠️ Auto-repairing missing artist record", "id", artistID, "name", foundName)
+				_, _ = s.getDB(r).Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, foundName)
+				name = foundName
+			} else {
+				// 2. Si falla y el ID NO parece un hash (es decir, es un nombre), intentar buscar por nombre
+				if len(artistID) != 40 {
+					err = s.getDB(r).Conn.QueryRow("SELECT id, image_url, name FROM artists WHERE name = ?", artistID).Scan(&artistID, &imageURL, &name)
+				}
+				
+				if err != nil && foundName == "" {
+					return nil, fmt.Errorf("artist not found in DB: %s", artistID)
+				}
 			}
 		}
 

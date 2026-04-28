@@ -305,7 +305,7 @@ func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
 	trackMeta := make(map[string]PendingTrack)
 
 	for _, t := range tracks {
-		norm := scanner.NormalizeArtist(t.Artist)
+		norm := utils.NormalizeArtist(t.Artist)
 		key := groupKey{norm, t.Album}
 		groups[key] = append(groups[key], t.ID)
 		trackMeta[t.ID] = t
@@ -363,7 +363,7 @@ func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
 		years := make(map[int]int)
 
 		for _, d := range data {
-			dNorm := scanner.NormalizeArtist(d.Artist)
+			dNorm := utils.NormalizeArtist(d.Artist)
 			if strings.Contains(dNorm, key.normArtist) || strings.Contains(key.normArtist, dNorm) {
 				counts[d.Artist]++
 				if d.Year > 0 { years[d.Year]++ }
@@ -381,10 +381,10 @@ func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if winnerArtist != "" {
-			winnerNorm := scanner.NormalizeArtist(winnerArtist)
+			winnerNorm := utils.NormalizeArtist(winnerArtist)
 			for _, id := range ids {
 				t := trackMeta[id]
-				currentNorm := scanner.NormalizeArtist(t.Artist)
+				currentNorm := utils.NormalizeArtist(t.Artist)
 				isSameArtistRoot := winnerNorm == currentNorm
 
 				if isSameArtistRoot && (t.Artist != winnerArtist || (winnerYear > 0 && t.Year != winnerYear)) {
@@ -435,11 +435,11 @@ func (s *Server) handleApplyInboxSuggestions(w http.ResponseWriter, r *http.Requ
 
 		success := true
 		for _, sug := range data.Suggestions {
-			artistId := scanner.GenerateID(sug.Artist)
+			artistId := utils.GenerateID(sug.Artist)
 			if _, err = tx.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistId, sug.Artist); err != nil { success = false; break }
 
-			groupingKey := "AA:" + scanner.NormalizeArtist(sug.Artist)
-			albumId := scanner.GenerateID(groupingKey + "|" + scanner.NormalizeString(sug.Album))
+			groupingKey := "AA:" + utils.NormalizeArtist(sug.Artist)
+			albumId := utils.GenerateID(groupingKey + "|" + utils.NormalizeString(sug.Album))
 			if _, err = tx.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)", albumId, artistId, sug.Album, sug.Year); err != nil { success = false; break }
 
 			if _, err = tx.Exec("UPDATE tracks SET album_id = ?, artist = ? WHERE id = ?", albumId, sug.Artist, sug.TrackID); err != nil { success = false; break }
