@@ -482,7 +482,7 @@
           {#if albumInfo}
             <div class="header-cover-wrapper">
               <button class="header-cover clickable" onclick={() => searchAlbumMetadata(true)} title="Click to search only cover">
-                <img src="/api/cover/{albumInfo.coverTrackId}" alt="" />
+                <img src="/api/cover/{albumInfo.coverTrackId}?v={$coverRefreshTrigger}" alt="" />
                 <div class="cover-edit-hint">
                   <Icon name="search" size={20} />
                 </div>
@@ -586,7 +586,7 @@
                 {#each albumSearchResults as rel}
                   <button class="result-item with-cover" onclick={() => selectAlbumRelease(rel)}>
                     <div class="res-cover">
-                      <img src="https://coverartarchive.org/release/{rel.id}/front-250" alt="" onerror={(e) => { if (e.currentTarget instanceof HTMLImageElement) e.currentTarget.src='/api/cover/placeholder'; }} />
+                      <img src="https://coverartarchive.org/release/{rel.id}/front-250" alt="" onerror={(e) => { if (e.currentTarget instanceof HTMLImageElement) e.currentTarget.src='/api/cover/placeholder?v=' + $coverRefreshTrigger; }} />
                     </div>
                     <div class="res-details">
                       <span class="rel-title">{rel.title}</span>

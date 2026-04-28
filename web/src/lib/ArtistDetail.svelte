@@ -3,6 +3,7 @@
   import Icon from './Icon.svelte';
   import AlbumsGrid from './AlbumsGrid.svelte';
   import { fade, slide } from 'svelte/transition';
+  import { coverRefreshTrigger } from './stores.js';
   
   let { artistId, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum, onshuffle } = $props();
   
@@ -35,7 +36,7 @@
   });
 
   function getAvatarUrl(id) {
-    return `/api/artists/${encodeURIComponent(id)}/image`;
+    return `/api/artists/${encodeURIComponent(id)}/image?v=${$coverRefreshTrigger}`;
   }
 </script>
 

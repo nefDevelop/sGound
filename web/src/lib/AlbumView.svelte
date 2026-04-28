@@ -4,6 +4,7 @@
   import Artwork from "./Artwork.svelte";
   import TracksView from "./TracksView.svelte";
   import { fade } from "svelte/transition";
+  import { coverRefreshTrigger } from "./stores.js";
 
   let { albumId, onplay, onback, onedit, oneditAlbum, onshuffle } = $props();
 
@@ -65,7 +66,7 @@
     <header class="album-header">
       <div class="cover-art">
         <Artwork
-          src={`/api/cover/${album.coverId}`}
+          src={`/api/cover/${album.coverId}?v=${$coverRefreshTrigger}`}
           alt={album.title}
           borderRadius="32px"
         />

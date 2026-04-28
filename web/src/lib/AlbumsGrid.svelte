@@ -1,5 +1,5 @@
 <script>
-  import { inboxCount, rawCount } from './stores.js';
+  import { inboxCount, rawCount, coverRefreshTrigger } from './stores.js';
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
@@ -119,7 +119,7 @@
         >
           <div class="cover-wrapper">
             <Artwork 
-              src={`/api/cover/${album.coverId}`} 
+              src={`/api/cover/${album.coverId}?v=${$coverRefreshTrigger}`} 
               alt={album.title} 
             />
             <div class="play-overlay">
