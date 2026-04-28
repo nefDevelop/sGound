@@ -199,6 +199,7 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		artistID = s.extractID(r, "/api/artists/")
 		artistID = strings.TrimSuffix(artistID, "/image")
 	}
+	artistID = strings.TrimSpace(artistID)
 
 	if artistID == "" {
 		slog.Warn("Empty artist ID in image request", "path", r.URL.Path)
@@ -225,14 +226,18 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 
 		var imageURL string
 		var name string
-		// Try by ID (case-insensitive)
-		err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ? COLLATE NOCASE", artistID).Scan(&imageURL, &name)
+		
+		// 1. Intentar buscar por ID exacto
+		err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ?", artistID).Scan(&imageURL, &name)
 		if err != nil {
-			// Fallback: search by name
-			err = s.getDB(r).Conn.QueryRow("SELECT id, image_url, name FROM artists WHERE name = ?", artistID).Scan(&artistID, &imageURL, &name)
+			// 2. Si falla y el ID NO parece un hash (es decir, es un nombre), intentar buscar por nombre
+			// Un hash de sgound suele tener 40 caracteres (SHA1)
+			if len(artistID) != 40 {
+				err = s.getDB(r).Conn.QueryRow("SELECT id, image_url, name FROM artists WHERE name = ?", artistID).Scan(&artistID, &imageURL, &name)
+			}
+			
 			if err != nil {
-				slog.Error("Artist not found in database", "artistID", artistID)
-				return nil, err
+				return nil, fmt.Errorf("artist not found in DB: %s", artistID)
 			}
 		}
 
