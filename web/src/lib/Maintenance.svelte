@@ -6,6 +6,7 @@
   import { fade, slide } from 'svelte/transition';
   import LogViewer from './LogViewer.svelte';
   import CoverSearcher from './CoverSearcher.svelte';
+  import ConfirmModal from './ConfirmModal.svelte';
 
   let { onfixTags, subview = 'overview', onviewchange, onedit, refresh = $bindable() } = $props();
   
@@ -36,6 +37,16 @@
     albumId: "",
     artist: "",
     album: ""
+  });
+
+  let confirmState = $state({
+    isOpen: false,
+    title: "",
+    message: "",
+    confirmLabel: "Confirm",
+    type: "info",
+    icon: "zap",
+    onconfirm: null
   });
 
   // Re-fetch details when subview changes via navigation
@@ -77,34 +88,53 @@
   }
 
   async function runCleanup() {
-    if (!confirm(`Purge ${health.orphanCount} orphan entries from database?`)) return;
-    try {
-      const res = await fetch('/api/library/cleanup', { method: 'POST' });
-      const data = await res.json();
-      showToast(`Purged ${data.removed} stale entries`, "success");
-      fetchHealth();
-      if (currentView === 'orphans') currentList = [];
-    } catch (e) {
-      showToast("Cleanup failed", "error");
-    }
+    confirmState = {
+      isOpen: true,
+      title: "Library Cleanup",
+      message: `Are you sure you want to purge ${health.orphanCount} orphan entries from the database? This cleans up references to files that no longer exist.`,
+      confirmLabel: "Clean Up Now",
+      type: "info",
+      icon: "trash",
+      onconfirm: async () => {
+        try {
+          const res = await fetch('/api/library/cleanup', { method: 'POST' });
+          const data = await res.json();
+          showToast(`Purged ${data.removed} stale entries`, "success");
+          fetchHealth();
+          if (currentView === 'orphans') currentList = [];
+        } catch (e) {
+          showToast("Cleanup failed", "error");
+        }
+      }
+    };
   }
 
   async function normalizeCover(item) {
     let msg = `Normalize "${item.title}" cover?`;
     if (item.type === 'huge') {
-      msg = `The cover for "${item.title}" (${item.width}x${item.height}) is too large and impacts performance.\n\nIt will be resized to 800px and converted to optimized JPEG. Continue?`;
+      msg = `The cover for "${item.title}" (${item.width}x${item.height}) is too large and impacts performance. It will be resized to 800px and converted to optimized JPEG. Continue?`;
     }
-    if (!confirm(msg)) return;
-    try {
-      const res = await fetch(`/api/library/normalize-cover?id=${item.id}`, { method: 'POST' });
-      if (res.ok) {
-        showToast("Cover optimized successfully", "success");
-        fetchDetail(currentView);
-        fetchHealth();
+    
+    confirmState = {
+      isOpen: true,
+      title: "Optimize Artwork",
+      message: msg,
+      confirmLabel: "Optimize & Embed",
+      type: "info",
+      icon: "zap",
+      onconfirm: async () => {
+        try {
+          const res = await fetch(`/api/library/normalize-cover?id=${item.id}`, { method: 'POST' });
+          if (res.ok) {
+            showToast("Cover optimized successfully", "success");
+            fetchDetail(currentView);
+            fetchHealth();
+          }
+        } catch (e) {
+          showToast("Optimization failed", "error");
+        }
       }
-    } catch (e) {
-      showToast("Optimization failed", "error");
-    }
+    };
   }
 
   async function rescanCover(item) {
@@ -123,24 +153,33 @@
   }
 
   async function deleteTrack(track) {
-    if (!confirm(`Permanently delete "${track.title}" from library?`)) return;
-    try {
-      const res = await fetch(`/api/tracks/${track.id}`, { method: 'DELETE' });
-      if (res.ok) {
-        if (subview === 'duplicates') {
-          // Remove from group and filter groups that no longer have duplicates
-          currentList = currentList
-            .map(group => group.filter(t => t.id !== track.id))
-            .filter(group => group.length > 1);
-        } else {
-          currentList = currentList.filter(t => t.id !== track.id);
+    confirmState = {
+      isOpen: true,
+      title: "Delete Track",
+      message: `Are you sure you want to permanently delete "${track.title}"? This cannot be undone.`,
+      confirmLabel: "Delete Forever",
+      type: "danger",
+      icon: "trash",
+      onconfirm: async () => {
+        try {
+          const res = await fetch(`/api/tracks/${track.id}`, { method: 'DELETE' });
+          if (res.ok) {
+            if (subview === 'duplicates') {
+              // Remove from group and filter groups that no longer have duplicates
+              currentList = currentList
+                .map(group => group.filter(t => t.id !== track.id))
+                .filter(group => group.length > 1);
+            } else {
+              currentList = currentList.filter(t => t.id !== track.id);
+            }
+            fetchHealth();
+            showToast("Asset deleted successfully", "success");
+          }
+        } catch (e) {
+          showToast("Deletion failed", "error");
         }
-        fetchHealth();
-        showToast("Asset deleted successfully", "success");
       }
-    } catch (e) {
-      showToast("Deletion failed", "error");
-    }
+    };
   }
   function formatDuration(seconds) {
     if (!seconds) return '--:--';
@@ -600,6 +639,16 @@
     initialArtist={searcherModal.artist}
     initialAlbum={searcherModal.album}
     onapply={() => refresh?.()}
+  />
+
+  <ConfirmModal 
+    bind:isOpen={confirmState.isOpen}
+    title={confirmState.title}
+    message={confirmState.message}
+    confirmLabel={confirmState.confirmLabel}
+    type={confirmState.type}
+    icon={confirmState.icon}
+    onconfirm={confirmState.onconfirm}
   />
 </div>
 
