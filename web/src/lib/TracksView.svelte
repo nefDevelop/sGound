@@ -3,7 +3,7 @@
   import ContextMenu from './ContextMenu.svelte';
   import StarRating from './StarRating.svelte';
   import { get } from 'svelte/store';
-  import { showToast } from './stores.js';
+  import { showToast, coverRefreshTrigger } from './stores.js';
   import Artwork from './Artwork.svelte';
   
   let { 
@@ -415,7 +415,7 @@
                 <td class="title-cell" ondblclick={(e) => startEdit(track, 'title', e)}>
                   <div class="flex-align">
                     <Artwork 
-                      src={`/api/cover/${track.id}`} 
+                      src={`/api/cover/${track.id}?v=${$coverRefreshTrigger}`} 
                       size="40px" 
                       borderRadius="10px" 
                       alt="" 

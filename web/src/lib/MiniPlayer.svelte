@@ -3,7 +3,7 @@
   import { fade } from 'svelte/transition';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { queue, currentIndex, audioQuality, effectiveQuality, isPlaying, showToast, volume, isShuffle, repeatMode } from './stores.js';
+  import { queue, currentIndex, audioQuality, effectiveQuality, isPlaying, showToast, volume, isShuffle, repeatMode, coverRefreshTrigger } from './stores.js';
   import { get } from 'svelte/store';
   import Artwork from './Artwork.svelte';
   
@@ -260,7 +260,7 @@
     <div class="cover-container">
       {#if currentPlaying?.id}
         <Artwork 
-          src="/api/cover/{currentPlaying.id}" 
+          src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" 
           alt="Cover" 
           size="60px" 
           borderRadius="12px" 

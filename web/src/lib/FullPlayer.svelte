@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade, fly } from 'svelte/transition';
-  import { audioQuality, queue, currentIndex, volume, isShuffle, repeatMode } from './stores.js';
+  import { audioQuality, queue, currentIndex, volume, isShuffle, repeatMode, coverRefreshTrigger } from './stores.js';
   import ContextMenu from './ContextMenu.svelte';
   import StarRating from './StarRating.svelte';
   import Artwork from './Artwork.svelte';
@@ -239,7 +239,7 @@
           <div class="cover-wrapper-container">
             <div class="cover-wrapper">
                <Artwork 
-                 src="/api/cover/{currentPlaying.id}" 
+                 src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" 
                  alt="Cover" 
                  borderRadius={subView === 'cover' ? '24px' : '12px'}
                  onclick={() => { if(subView !== 'cover') subView = 'cover'; }}
@@ -320,7 +320,7 @@
                   <div class="queue-item">
                     <span class="q-index">{i + 1}</span>
                     <Artwork 
-                      src="/api/cover/{next.id}" 
+                      src="/api/cover/{next.id}?v={$coverRefreshTrigger}" 
                       alt="" 
                       size="44px" 
                       borderRadius="8px" 
@@ -368,9 +368,9 @@
             >
               <!-- Liquid Background -->
               <div class="cinema-background">
-                <img src="/api/cover/{currentPlaying.id}" alt="" class="bg-blur-layer layer-1" />
-                <img src="/api/cover/{currentPlaying.id}" alt="" class="bg-blur-layer layer-2" />
-                <img src="/api/cover/{currentPlaying.id}" alt="" class="bg-blur-layer layer-3" />
+                <img src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" alt="" class="bg-blur-layer layer-1" />
+                <img src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" alt="" class="bg-blur-layer layer-2" />
+                <img src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" alt="" class="bg-blur-layer layer-3" />
                 <div class="bg-vignette"></div>
               </div>
 
@@ -388,8 +388,8 @@
 
                 <div class="cinema-artwork-box">
                    <div class="artwork-glare"></div>
-                   <div class="artwork-bloom" style="background-image: url('/api/cover/{currentPlaying.id}')"></div>
-                   <img src="/api/cover/{currentPlaying.id}" alt="" class="cinema-artwork" />
+                   <div class="artwork-bloom" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
+                   <img src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" alt="" class="cinema-artwork" />
                 </div>
                 
                 <div class="cinema-meta" class:visible={showControls}>
