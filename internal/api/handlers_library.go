@@ -618,64 +618,58 @@ func (s *Server) handleLibraryMissingTags(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(tracks)
 }
 
-func (s *Server) handleLibraryMissingCovers(w http.ResponseWriter, r *http.Request) {
-	rows, _ := s.getDB(r).Conn.Query(`
-		SELECT al.id, al.title, ar.name as artist, t.path
+func (s *Server) handleLibraryAllCovers(w http.ResponseWriter, r *http.Request) {
+	dbase := s.getDB(r)
+	var result []map[string]interface{}
+
+	// 1. Missing covers
+	rows, _ := dbase.Conn.Query(`
+		SELECT al.id, al.title, ar.name as artist, t.path, 0, 0, 0
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
 		JOIN tracks t ON t.album_id = al.id
 		WHERE al.cover_width IS NULL OR al.cover_width = 0
-		GROUP BY al.id
-	`)
-	defer rows.Close()
-	var result []map[string]interface{}
-	for rows.Next() {
+		GROUP BY al.id`)
+	for rows != nil && rows.Next() {
 		var id, title, artist, path string
-		rows.Scan(&id, &title, &artist, &path)
+		var wd, ht, sz int
+		rows.Scan(&id, &title, &artist, &path, &wd, &ht, &sz)
 		result = append(result, map[string]interface{}{"id": id, "title": title, "artist": artist, "path": path, "type": "missing"})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
-}
+	if rows != nil { rows.Close() }
 
-func (s *Server) handleLibrarySmallCovers(w http.ResponseWriter, r *http.Request) {
-	rows, _ := s.getDB(r).Conn.Query(`
-		SELECT al.id, al.title, ar.name as artist, t.path, al.cover_width, al.cover_height
+	// 2. Small covers
+	rows, _ = dbase.Conn.Query(`
+		SELECT al.id, al.title, ar.name as artist, t.path, al.cover_width, al.cover_height, al.cover_size
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
 		JOIN tracks t ON t.album_id = al.id
 		WHERE al.cover_width > 0 AND (al.cover_width < 300 OR al.cover_height < 300)
-		GROUP BY al.id
-	`)
-	defer rows.Close()
-	var result []map[string]interface{}
-	for rows.Next() {
+		GROUP BY al.id`)
+	for rows != nil && rows.Next() {
 		var id, title, artist, path string
-		var wCount, hCount int
-		rows.Scan(&id, &title, &artist, &path, &wCount, &hCount)
-		result = append(result, map[string]interface{}{"id": id, "title": title, "artist": artist, "path": path, "width": wCount, "height": hCount, "type": "small"})
+		var wd, ht, sz int
+		rows.Scan(&id, &title, &artist, &path, &wd, &ht, &sz)
+		result = append(result, map[string]interface{}{"id": id, "title": title, "artist": artist, "path": path, "width": wd, "height": ht, "size": sz, "type": "small"})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
-}
+	if rows != nil { rows.Close() }
 
-func (s *Server) handleLibraryHugeCovers(w http.ResponseWriter, r *http.Request) {
-	rows, _ := s.getDB(r).Conn.Query(`
+	// 3. Huge covers
+	rows, _ = dbase.Conn.Query(`
 		SELECT al.id, al.title, ar.name as artist, t.path, al.cover_width, al.cover_height, al.cover_size
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
 		JOIN tracks t ON t.album_id = al.id
 		WHERE al.cover_width > 1500 OR al.cover_height > 1500 OR al.cover_size > 2000000
-		GROUP BY al.id
-	`)
-	defer rows.Close()
-	var result []map[string]interface{}
-	for rows.Next() {
+		GROUP BY al.id`)
+	for rows != nil && rows.Next() {
 		var id, title, artist, path string
-		var wCount, hCount, size int
-		rows.Scan(&id, &title, &artist, &path, &wCount, &hCount, &size)
-		result = append(result, map[string]interface{}{"id": id, "title": title, "artist": artist, "path": path, "width": wCount, "height": hCount, "size": size, "type": "huge"})
+		var wd, ht, sz int
+		rows.Scan(&id, &title, &artist, &path, &wd, &ht, &sz)
+		result = append(result, map[string]interface{}{"id": id, "title": title, "artist": artist, "path": path, "width": wd, "height": ht, "size": sz, "type": "huge"})
 	}
+	if rows != nil { rows.Close() }
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }

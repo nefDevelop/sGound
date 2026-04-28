@@ -81,17 +81,21 @@
     }
   }
 
-  async function normalizeCover(albumId) {
-    if (!confirm("Normalize this cover to 800px JPG? This will improve performance and consistency.")) return;
+  async function normalizeCover(item) {
+    let msg = `Normalize "${item.title}" cover?`;
+    if (item.type === 'huge') {
+      msg = `The cover for "${item.title}" (${item.width}x${item.height}) is too large and impacts performance.\n\nIt will be resized to 800px and converted to optimized JPEG. Continue?`;
+    }
+    if (!confirm(msg)) return;
     try {
-      const res = await fetch(`/api/library/normalize-cover?id=${albumId}`, { method: 'POST' });
+      const res = await fetch(`/api/library/normalize-cover?id=${item.id}`, { method: 'POST' });
       if (res.ok) {
-        showToast("Cover normalized successfully", "success");
+        showToast("Cover optimized successfully", "success");
         fetchDetail(currentView);
         fetchHealth();
       }
     } catch (e) {
-      showToast("Normalization failed", "error");
+      showToast("Optimization failed", "error");
     }
   }
 
@@ -238,31 +242,18 @@
         <button class="bento-btn" onclick={() => loadDetail('low-quality')}>Inspect Detail</button>
       </div>
 
-      <div class="bento-card" class:warning={health.missingCovers > 0}>
+      <div class="bento-card highlight" class:warning={(health.missingCovers + health.smallCovers + health.hugeCovers) > 0}>
         <div class="card-header">
           <Icon name="image" size={32} />
-          <span class="lbl">Missing Covers</span>
+          <span class="lbl">Cover Quality</span>
         </div>
-        <span class="val">{health.missingCovers}</span>
-        <button class="bento-btn" onclick={() => loadDetail('missing-covers')}>Inspect Detail</button>
-      </div>
-
-      <div class="bento-card" class:warning={health.smallCovers > 0}>
-        <div class="card-header">
-          <Icon name="maximize" size={32} />
-          <span class="lbl">Small Covers</span>
+        <span class="val">{health.missingCovers + health.smallCovers + health.hugeCovers}</span>
+        <div class="card-info-row">
+          <span class="mini-stat"><b>{health.missingCovers}</b> missing</span>
+          <span class="mini-stat"><b>{health.smallCovers}</b> small</span>
+          <span class="mini-stat"><b>{health.hugeCovers}</b> huge</span>
         </div>
-        <span class="val">{health.smallCovers}</span>
-        <button class="bento-btn" onclick={() => loadDetail('small-covers')}>Inspect Detail</button>
-      </div>
-
-      <div class="bento-card" class:warning={health.hugeCovers > 0}>
-        <div class="card-header">
-          <Icon name="alertTriangle" size={32} />
-          <span class="lbl">Huge Covers</span>
-        </div>
-        <span class="val">{health.hugeCovers}</span>
-        <button class="bento-btn" onclick={() => loadDetail('huge-covers')}>Inspect Detail</button>
+        <button class="bento-btn" onclick={() => loadDetail('covers')}>Manage Artwork</button>
       </div>
 
       <div class="bento-card highlight">
@@ -298,10 +289,8 @@
               Tracks grouped by content similarity.
             {:else if currentView === 'orphans'}
               Isolated database entries with no physical files.
-            {:else if currentView === 'missing-covers'}
-              Albums with no embedded or local artwork.
-            {:else if currentView === 'small-covers'}
-              Artwork smaller than 300x300 pixels (low resolution).
+            {:else if currentView === 'covers'}
+              Albums with missing, low-resolution, or excessively large artwork.
             {:else if currentView === 'huge-covers'}
               Artwork larger than 1500px or 2MB (performance impact).
             {:else if currentView === 'missing-tags'}
@@ -344,6 +333,14 @@
                     </td>
                     <td>
                       <div class="attr-badges">
+                        {#if item.type === 'missing'}
+                          <span class="status-badge error">MISSING</span>
+                        {:else if item.type === 'huge'}
+                          <span class="status-badge warning">HUGE</span>
+                        {:else}
+                          <span class="status-badge info">SMALL</span>
+                        {/if}
+                        
                         {#if item.width}
                           <span class="quality-badge">
                             {item.width}x{item.height}
@@ -354,21 +351,25 @@
                             {(item.size / 1024 / 1024).toFixed(2)} MB
                           </span>
                         {/if}
-                        <span class="format-badge-mini" style="color: var(--tertiary)">{item.type.toUpperCase()}</span>
                       </div>
                     </td>
                     <td>
                        <code class="path-snippet" title={item.path}>{item.path}</code>
                     </td>
                     <td class="actions-col">
-                      <button class="icon-btn" onclick={() => onedit?.({ id: item.id, coverId: true })} title="Edit Album Tags/Cover">
-                        <Icon name="edit" size={18} />
-                      </button>
-                      {#if item.type !== 'missing'}
-                        <button class="icon-btn" onclick={() => normalizeCover(item.id)} title="Normalize to JPG 800px">
-                          <Icon name="zap" size={18} color="var(--tertiary)" />
+                      {#if item.type === 'missing' || item.type === 'small'}
+                        <button class="icon-btn primary" onclick={() => onedit?.({ id: item.id, coverId: true, search: true })} title="Search High Quality Cover">
+                          <Icon name="search" size={18} />
                         </button>
                       {/if}
+                      {#if item.type === 'huge'}
+                        <button class="icon-btn success" onclick={() => normalizeCover(item)} title="Optimize & Resize">
+                          <Icon name="zap" size={18} />
+                        </button>
+                      {/if}
+                      <button class="icon-btn" onclick={() => onedit?.({ id: item.id, coverId: true })} title="Manual Edit">
+                        <Icon name="edit" size={18} />
+                      </button>
                     </td>
                   </tr>
                 {/each}
@@ -622,6 +623,20 @@
   .duplicate-row { transition: all 0.2s; }
   .attr-badges { display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; margin-top: 0.4rem; }
   
+  .card-info-row { display: flex; gap: 0.8rem; margin-top: -0.5rem; }
+  .mini-stat { font-size: 0.75rem; color: var(--text-muted); background: var(--surface-container-highest); padding: 0.4rem 0.8rem; border-radius: 12px; }
+  .mini-stat b { color: var(--text-main); }
+
+  .status-badge { font-size: 0.65rem; font-weight: 900; padding: 0.2rem 0.5rem; border-radius: 4px; letter-spacing: 0.05em; }
+  .status-badge.error { background: #ff444420; color: #ff4444; }
+  .status-badge.warning { background: var(--tertiary-20); color: var(--tertiary); }
+  .status-badge.info { background: var(--primary-20); color: var(--primary); }
+
+  .icon-btn.success { background: #10b98120; color: #10b981; }
+  .icon-btn.success:hover { background: #10b981; color: white; }
+  .icon-btn.primary { background: var(--primary-20); color: var(--primary); }
+  .icon-btn.primary:hover { background: var(--primary); color: white; }
+
   .format-badge-mini {
     background: var(--surface-container-highest);
     color: var(--text-muted);

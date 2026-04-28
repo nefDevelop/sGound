@@ -513,18 +513,25 @@ func (s *Server) handleNormalizeCover(w http.ResponseWriter, r *http.Request) {
 
 	resized := imaging.Resize(src, 800, 0, imaging.Lanczos)
 	
-	rows, _ := s.getDB(r).Conn.Query("SELECT path FROM tracks WHERE album_id = ?", albumID)
+	rows, _ := s.getDB(r).Conn.Query("SELECT path, id FROM tracks WHERE album_id = ?", albumID)
 	defer rows.Close()
 
 	buf := new(bytes.Buffer)
 	imaging.Encode(buf, resized, imaging.JPEG)
 	normalizedData := buf.Bytes()
 
+	editor := tags.NewEditor(s.getDB(r))
+	
+	// Actually update the files on disk!
 	for rows.Next() {
-		var p string
-		rows.Scan(&p)
+		var p, trackID string
+		rows.Scan(&p, &trackID)
 		if s.Watcher != nil {
 			s.Watcher.MutePath(p, 5*time.Second)
+		}
+		// Use the editor to embed the normalized cover
+		if err := editor.EmbedCover(trackID, normalizedData, "image/jpeg"); err != nil {
+			slog.Error("Failed to normalize track cover", "track", trackID, "err", err)
 		}
 	}
 
