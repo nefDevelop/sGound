@@ -324,9 +324,13 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		slog.Info("🎨 Image decoded", "artist", name, "format", format, "size", len(imgData))
 
 		// Asegurar directorio antes de guardar
-		if err := os.MkdirAll(filepath.Dir(cachePath), 0755); err != nil {
-			slog.Error("📁 Failed to create cache directory", "path", filepath.Dir(cachePath), "error", err)
-			return nil, err
+		cacheDir := filepath.Dir(cachePath)
+		if err := os.MkdirAll(cacheDir, 0755); err != nil {
+			slog.Error("📁 Primary cache failed, trying system temp", "path", cacheDir, "error", err)
+			// Fallback: usar directorio temporal del sistema si el configurado falla
+			tempCacheDir := filepath.Join(os.TempDir(), "sgound-cache", "artists")
+			os.MkdirAll(tempCacheDir, 0755)
+			cachePath = filepath.Join(tempCacheDir, artistID+".jpg")
 		}
 
 		resized := imaging.Resize(src, 800, 0, imaging.Linear)

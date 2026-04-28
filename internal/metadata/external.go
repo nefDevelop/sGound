@@ -75,7 +75,42 @@ func (e *ExternalMetadata) GetArtistInfo(artistName string) (*ArtistInfo, error)
 	// 2. Last.fm para Similares y Tags
 	e.enrichWithLastFM(artistName, info)
 
+	// 3. Deezer como fuente de respaldo de alta calidad para imágenes
+	if info.Image == "" {
+		e.enrichWithDeezer(artistName, info)
+	}
+
 	return info, nil
+}
+
+func (e *ExternalMetadata) enrichWithDeezer(name string, info *ArtistInfo) {
+	apiURL := fmt.Sprintf("https://api.deezer.com/search/artist?q=%s", url.QueryEscape(name))
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, _ := http.NewRequest("GET", apiURL, nil)
+	req.Header.Set("User-Agent", "SgoundMusicPlayer/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Data []struct {
+			PictureXl string `json:"picture_xl"`
+			PictureL  string `json:"picture_big"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || len(result.Data) == 0 {
+		return
+	}
+
+	if result.Data[0].PictureXl != "" {
+		info.Image = result.Data[0].PictureXl
+	} else if result.Data[0].PictureL != "" {
+		info.Image = result.Data[0].PictureL
+	}
 }
 
 func (e *ExternalMetadata) enrichWithLastFM(name string, info *ArtistInfo) {
