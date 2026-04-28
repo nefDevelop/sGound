@@ -267,15 +267,20 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if imageURL == "" {
-			slog.Info("🔍 No image URL in DB, fetching external info", "artist", name)
-			ext, _ := s.externalMeta.GetArtistInfo(name)
-			if ext != nil && ext.Image != "" {
-				imageURL = ext.Image
-				tagsStr := strings.Join(ext.Tags, ",")
-				similarStr := strings.Join(ext.Similar, ",")
-				_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?",
-					ext.Image, ext.Biography, tagsStr, similarStr, artistID)
-			}
+			// Usar SingleFlight por NOMBRE de artista para evitar peticiones redundantes a Wikipedia/Last.fm
+			res, _, _ := s.sf.Do("ext_meta_"+name, func() (interface{}, error) {
+				slog.Info("🔍 No image URL in DB, fetching external info", "artist", name)
+				ext, _ := s.externalMeta.GetArtistInfo(name)
+				if ext != nil && ext.Image != "" {
+					tagsStr := strings.Join(ext.Tags, ",")
+					similarStr := strings.Join(ext.Similar, ",")
+					_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?",
+						ext.Image, ext.Biography, tagsStr, similarStr, artistID)
+					return ext.Image, nil
+				}
+				return "", nil
+			})
+			imageURL = res.(string)
 		}
 
 		if imageURL == "" {

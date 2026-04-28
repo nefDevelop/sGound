@@ -576,7 +576,7 @@ func (s *Scanner) ParseFileWithCache(path string, oldStatus string) (*trackResul
 	albumId := utils.GenerateID(groupingKey + "|" + utils.NormalizeString(albumName))
 	dbAlbumArtist := albumArtistTag
 	if dbAlbumArtist == "" { dbAlbumArtist = artistName }
-	artistId := utils.GenerateID(dbAlbumArtist)
+	artistId := utils.GenerateID(utils.NormalizeArtist(dbAlbumArtist))
 
 	return &trackResult{
 		trackId: copyString(trackId), albumId: albumId, artistId: artistId,
