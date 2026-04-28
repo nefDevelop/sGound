@@ -1,5 +1,5 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import Icon from './Icon.svelte';
 
@@ -10,6 +10,11 @@
   let showPassword = $state(false);
   let loading = $state(false);
   let error = $state('');
+  let inputRef = $state();
+
+  onMount(() => {
+    inputRef?.focus();
+  });
 
   async function handleSetup() {
     if (password.length < 8) {
@@ -68,7 +73,7 @@
         <label for="password">Nueva Contraseña</label>
         <div class="input-wrapper" class:error={error && password !== confirmPassword}>
           <Icon name="lock" size={20} color="var(--primary)" />
-          <input type={showPassword ? "text" : "password"} id="password" bind:value={password} placeholder="Mínimo 8 caracteres" required autocomplete="new-password" />
+          <input bind:this={inputRef} type={showPassword ? "text" : "password"} id="password" bind:value={password} placeholder="Mínimo 8 caracteres" required autocomplete="new-password" />
           <button type="button" class="visibility-toggle" onclick={() => showPassword = !showPassword} tabindex="-1">
             <Icon name={showPassword ? "eyeOff" : "eye"} size={18} color="var(--text-muted)" />
           </button>

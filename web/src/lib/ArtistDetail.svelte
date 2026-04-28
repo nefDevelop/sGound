@@ -87,8 +87,14 @@
              </div>
            {/if}
          </div>
-       </div>
-    </header>
+        </div>
+        {#if artist.imageSource}
+          <div class="attribution">
+            <Icon name="camera" size={12} />
+            <span>Imagen de {artist.imageSource}</span>
+          </div>
+        {/if}
+     </header>
 
     <div class="detail-grid">
       <div class="main-content">

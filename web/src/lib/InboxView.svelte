@@ -1,17 +1,26 @@
 <script>
-  import { onMount, tick } from 'svelte';
-  import Icon from './Icon.svelte';
-  import TracksView from './TracksView.svelte';
-  import { fade } from 'svelte/transition';
-  import { inboxCount, rawCount, apiFetch } from './stores.js';
+  import { onMount, tick } from "svelte";
+  import Icon from "./Icon.svelte";
+  import TracksView from "./TracksView.svelte";
+  import { fade } from "svelte/transition";
+  import { inboxCount, rawCount, apiFetch } from "./stores.js";
 
-  let { onplay, onedit, onapproved, onrejected, onhide, onbulkReject, ondeletePhysical, scanStatus } = $props();
-  
+  let {
+    onplay,
+    onedit,
+    onapproved,
+    onrejected,
+    onhide,
+    onbulkReject,
+    ondeletePhysical,
+    scanStatus,
+  } = $props();
+
   let tracks = $state([]);
   let loading = $state(true);
   let tracksOffset = $state(0);
   let hasMore = $state(true);
-  const limit = 40; 
+  const limit = 40;
   let selectedTracks = $state([]);
   let suggestions = $state([]);
   let isAnalyzing = $state(false);
@@ -22,40 +31,50 @@
   let isApprovingSelected = $state(false);
   let isRejectingSelected = $state(false);
   let isApplyingSuggestions = $state(false);
-  
+
   // Conteo real sincronizado con el servidor para esta vista
   let totalServer = $state(0);
   let totalFromHeader = $state(0);
-  
+
   // Lógica de conteo definitiva: Header > Store > Scanner > Local
-  let totalTracks = $derived(Math.max(
-    totalFromHeader,
-    totalServer, 
-    $inboxCount + $rawCount, 
-    tracks.length,
-    (scanStatus?.inboxCount || 0) + (scanStatus?.rawCount || 0)
-  ));
+  let totalTracks = $derived(
+    Math.max(
+      totalFromHeader,
+      totalServer,
+      $inboxCount + $rawCount,
+      tracks.length,
+      (scanStatus?.inboxCount || 0) + (scanStatus?.rawCount || 0),
+    ),
+  );
 
   onMount(() => {
     fetchInbox();
-    
+
     // Escuchar scroll del contenedor global (.scroll-view)
-    const scrollView = document.querySelector('.scroll-view');
+    const scrollView = document.querySelector(".scroll-view");
     if (scrollView) {
       const handleScroll = () => {
         const { scrollTop, scrollHeight, clientHeight } = scrollView;
-        if (scrollHeight - scrollTop <= clientHeight + 300 && !loading && hasMore) {
+        if (
+          scrollHeight - scrollTop <= clientHeight + 300 &&
+          !loading &&
+          hasMore
+        ) {
           fetchInbox(true, true);
         }
       };
-      scrollView.addEventListener('scroll', handleScroll);
-      return () => scrollView.removeEventListener('scroll', handleScroll);
+      scrollView.addEventListener("scroll", handleScroll);
+      return () => scrollView.removeEventListener("scroll", handleScroll);
     }
   });
 
   let pendingAnalysisCount = 0;
 
-  export async function fetchInbox(append = false, silent = false, isFinal = false) {
+  export async function fetchInbox(
+    append = false,
+    silent = false,
+    isFinal = false,
+  ) {
     if (!silent) loading = true;
     if (!append) {
       tracks = []; // Clear immediately to show loading state and avoid stale data
@@ -66,7 +85,9 @@
 
     try {
       // 1. Obtener las pistas del lote actual
-      const res = await apiFetch(`/api/tracks?status=pending,raw&limit=${limit}&offset=${tracksOffset}`);
+      const res = await apiFetch(
+        `/api/tracks?status=pending,raw&limit=${limit}&offset=${tracksOffset}`,
+      );
       if (res.ok) {
         // LEER HEADER MAESTRO DE CONTEO
         const countHeader = res.headers.get("X-Total-Count");
@@ -89,8 +110,8 @@
 
         // 2. REGLA: Analizar solo si tenemos un lote de 20+ o si es el aviso final
         if (pendingAnalysisCount >= 20 || isFinal) {
-           analyzeInbox();
-           pendingAnalysisCount = 0;
+          analyzeInbox();
+          pendingAnalysisCount = 0;
         }
       }
 
@@ -102,7 +123,6 @@
         inboxCount.set(statusData.inboxCount || 0);
         rawCount.set(statusData.rawCount || 0);
       }
-
     } catch (e) {
       console.error("Inbox fetch failed:", e);
     } finally {
@@ -114,16 +134,18 @@
     isApprovingAll = true;
     approvingCount = totalTracks; // Iniciar inmediatamente con el total conocido
     try {
-      let ids = tracks.map(t => t.id);
-      
+      let ids = tracks.map((t) => t.id);
+
       // Si sabemos que hay más pistas de las que se ven, las pedimos todas al servidor antes de aprobar
       if (totalTracks > tracks.length || hasMore) {
         try {
           const fetchLimit = Math.max(totalTracks + 100, 2000);
-          const res = await apiFetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
+          const res = await apiFetch(
+            `/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`,
+          );
           if (res.ok) {
             const data = await res.json();
-            ids = data.map(t => t.id);
+            ids = data.map((t) => t.id);
           }
         } catch (e) {
           console.error("Error fetching all IDs for approval:", e);
@@ -137,7 +159,7 @@
           const batch = ids.slice(i, i + batchSize);
           await approveIds(batch, false);
           approvingCount = Math.max(0, approvingCount - batch.length);
-          await tick(); 
+          await tick();
         }
         await fetchInbox();
         selectedTracks = [];
@@ -153,15 +175,17 @@
     isRejectingAll = true;
     rejectingCount = totalTracks; // Iniciar inmediatamente
     try {
-      let ids = tracks.map(t => t.id);
-      
+      let ids = tracks.map((t) => t.id);
+
       if (totalTracks > tracks.length || hasMore) {
         try {
           const fetchLimit = Math.max(totalTracks + 100, 2000);
-          const res = await apiFetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
+          const res = await apiFetch(
+            `/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`,
+          );
           if (res.ok) {
             const data = await res.json();
-            ids = data.map(t => t.id);
+            ids = data.map((t) => t.id);
           }
         } catch (e) {
           console.error("Error fetching all IDs for rejection:", e);
@@ -191,7 +215,7 @@
     if (selectedTracks.length === 0) return;
     isApprovingSelected = true;
     try {
-      const ids = selectedTracks.map(t => t.id);
+      const ids = selectedTracks.map((t) => t.id);
       await approveIds(ids);
     } finally {
       isApprovingSelected = false;
@@ -200,10 +224,10 @@
 
   async function approveIds(ids, refresh = true) {
     try {
-      const res = await apiFetch('/api/tracks/approve', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids })
+      const res = await apiFetch("/api/tracks/approve", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
       });
       if (res.ok && refresh) {
         await fetchInbox();
@@ -225,13 +249,13 @@
     if (isAnalyzing) return;
     isAnalyzing = true;
     try {
-      const res = await apiFetch('/api/library/inbox/analyze');
+      const res = await apiFetch("/api/library/inbox/analyze");
       if (res.ok) {
         const data = await res.json();
         suggestions = data.suggestions || [];
         // Aplicamos las sugerencias al estado local para visualización
-        tracks = tracks.map(t => {
-          const s = suggestions.find(sug => sug.trackId === t.id);
+        tracks = tracks.map((t) => {
+          const s = suggestions.find((sug) => sug.trackId === t.id);
           if (s) {
             return { ...t, suggestedArtist: s.artist, suggestedYear: s.year };
           }
@@ -249,14 +273,14 @@
     if (suggestions.length === 0) return;
     isApplyingSuggestions = true;
     try {
-      const res = await apiFetch('/api/library/inbox/apply-suggestions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ suggestions })
+      const res = await apiFetch("/api/library/inbox/apply-suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suggestions }),
       });
       if (res.ok) {
         suggestions = [];
-        await fetchInbox(); 
+        await fetchInbox();
       }
     } catch (e) {
       console.error(e);
@@ -266,20 +290,26 @@
   }
 
   async function applySingleSuggestion(track) {
-    const sug = suggestions.find(s => s.trackId === track.id);
+    const sug = suggestions.find((s) => s.trackId === track.id);
     if (!sug) return;
-    
+
     try {
-      const res = await apiFetch('/api/library/inbox/apply-suggestions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ suggestions: [sug] })
+      const res = await apiFetch("/api/library/inbox/apply-suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suggestions: [sug] }),
       });
       if (res.ok) {
-        suggestions = suggestions.filter(s => s.trackId !== track.id);
-        tracks = tracks.map(t => {
+        suggestions = suggestions.filter((s) => s.trackId !== track.id);
+        tracks = tracks.map((t) => {
           if (t.id === track.id) {
-            return { ...t, artist: sug.artist, year: sug.year, suggestedArtist: null, suggestedYear: null };
+            return {
+              ...t,
+              artist: sug.artist,
+              year: sug.year,
+              suggestedArtist: null,
+              suggestedYear: null,
+            };
           }
           return t;
         });
@@ -297,59 +327,82 @@
     </div>
     <div class="header-info">
       {#if $rawCount > 0}
-        <div class="chip warning" title="Pistas descubiertas pendientes de analizar">
+        <div
+          class="chip warning"
+          title="Pistas descubiertas pendientes de analizar"
+        >
           <Icon name="loader" size={14} class="spin" />
           {$rawCount} analizando...
         </div>
       {/if}
     </div>
-    
-      <div class="actions">
-        {#if suggestions.length > 0}
-          <button class="btn magic" onclick={applySuggestions} disabled={isApplyingSuggestions}>
-            {#if isApplyingSuggestions}
-              <Icon name="loader" size={18} class="spin" />
-              Aplicando...
-            {:else}
-              <Icon name="zap" size={18} />
-              Aplicar Cambios ({suggestions.length})
-            {/if}
-          </button>
-        {/if}
 
-        {#if selectedTracks.length > 0}
-          <button class="btn danger" onclick={() => rejectIds(selectedTracks.map(t => t.id))} disabled={isApprovingSelected || isRejectingSelected}>
-            <Icon name="trash" size={18} />
-            Reject ({selectedTracks.length})
-          </button>
-          <button class="btn primary" onclick={approveSelected} disabled={isApprovingSelected || isRejectingSelected}>
-            {#if isApprovingSelected}
-              <Icon name="loader" size={18} class="spin" />
-              Approving...
-            {:else}
-              <Icon name="zap" size={18} />
-              Approve Selected ({selectedTracks.length})
-            {/if}
-          </button>
-        {:else}
-          <button class="btn ghost" onclick={rejectAll} disabled={totalTracks === 0 || isRejectingAll || isApprovingAll}>
-            {#if isRejectingAll}
-              <Icon name="loader" size={18} class="spin" />
-              Reject All ({rejectingCount})
-            {:else}
-              Reject All ({totalTracks})
-            {/if}
-          </button>
-          <button class="btn ghost" onclick={approveAll} disabled={totalTracks === 0 || isApprovingAll || isRejectingAll}>
-            {#if isApprovingAll}
-              <Icon name="loader" size={18} class="spin" />
-              Approve All ({approvingCount})
-            {:else}
-              Approve All ({totalTracks})
-            {/if}
-          </button>
-        {/if}
-      </div>
+    <div class="actions">
+      {#if suggestions.length > 0}
+        <button
+          class="btn magic"
+          onclick={applySuggestions}
+          disabled={isApplyingSuggestions}
+        >
+          {#if isApplyingSuggestions}
+            <Icon name="loader" size={18} class="spin" />
+            Aplicando...
+          {:else}
+            <Icon name="zap" size={18} />
+            Aplicar Cambios ({suggestions.length})
+          {/if}
+        </button>
+      {/if}
+
+      {#if selectedTracks.length > 0}
+        <button
+          class="btn danger"
+          onclick={() => rejectIds(selectedTracks.map((t) => t.id))}
+          disabled={isApprovingSelected || isRejectingSelected}
+        >
+          <Icon name="trash" size={18} />
+          Reject ({selectedTracks.length})
+        </button>
+        <button
+          class="btn primary"
+          onclick={approveSelected}
+          disabled={isApprovingSelected || isRejectingSelected}
+        >
+          {#if isApprovingSelected}
+            <Icon name="loader" size={18} class="spin" />
+            Approving...
+          {:else}
+            <Icon name="zap" size={18} />
+            Approve Selected ({selectedTracks.length})
+          {/if}
+        </button>
+      {:else}
+        <button
+          class="btn ghost"
+          onclick={rejectAll}
+          disabled={totalTracks === 0 || isRejectingAll || isApprovingAll}
+        >
+          {#if isRejectingAll}
+            <Icon name="loader" size={18} class="spin" />
+            Reject All ({rejectingCount})
+          {:else}
+            Reject All ({totalTracks})
+          {/if}
+        </button>
+        <button
+          class="btn ghost"
+          onclick={approveAll}
+          disabled={totalTracks === 0 || isApprovingAll || isRejectingAll}
+        >
+          {#if isApprovingAll}
+            <Icon name="loader" size={18} class="spin" />
+            Approve All ({approvingCount})
+          {:else}
+            Approve All ({totalTracks})
+          {/if}
+        </button>
+      {/if}
+    </div>
   </header>
 
   <div class="inbox-content">
@@ -358,17 +411,20 @@
     {:else if tracks.length === 0}
       <div class="empty-state">
         <div class="empty-icon"><Icon name="shield" size={64} /></div>
-        <p>No se han encontrado canciones en el Inbox. Haz clic en "Escanear Biblioteca" en Ajustes para comenzar.</p>
+        <p>
+          No se han encontrado canciones en el Inbox. Haz clic en "Escanear
+          Biblioteca" en Ajustes para comenzar.
+        </p>
       </div>
     {:else}
-      <TracksView 
-        {tracks} 
-        onselectionChange={(sel) => selectedTracks = sel}
-        onplay={onplay}
-        onedit={onedit}
+      <TracksView
+        {tracks}
+        onselectionChange={(sel) => (selectedTracks = sel)}
+        {onplay}
+        {onedit}
         onqueue={(track) => {}}
         onhide={(track) => rejectIds([track.id])}
-        onbulkReject={onbulkReject}
+        {onbulkReject}
         ondeletePhysical={(track) => ondeletePhysical(track, fetchInbox)}
         onapplySuggestions={applySingleSuggestion}
         isInbox={true}
@@ -376,8 +432,8 @@
       />
       {#if loading && tracks.length > 0}
         <div class="loader-more">
-           <Icon name="loader" size={24} class="spin" />
-           <span>Cargando más pistas...</span>
+          <Icon name="loader" size={24} class="spin" />
+          <span>Cargando más pistas...</span>
         </div>
       {/if}
     {/if}
@@ -385,7 +441,6 @@
 </div>
 
 <style>
-
   .section-header {
     display: flex;
     justify-content: space-between;
@@ -394,9 +449,18 @@
     gap: 2rem;
   }
 
-  h1 { font-size: 2.5rem; font-weight: 950; margin: 0; letter-spacing: -1.5px; color: var(--text-main); }
+  h1 {
+    font-size: 2.5rem;
+    font-weight: 950;
+    margin: 0;
+    letter-spacing: -1.5px;
+    color: var(--text-main);
+  }
 
-  .actions { display: flex; gap: 1rem; }
+  .actions {
+    display: flex;
+    gap: 1rem;
+  }
 
   .btn {
     display: flex;
@@ -410,19 +474,45 @@
     border: none;
   }
 
-  .btn.primary { background: var(--primary); color: white; box-shadow: 0 4px 12px var(--primary-10); }
-  .btn.magic { background: var(--primary); color: white; box-shadow: 0 4px 12px var(--primary-10); animation: pulse 2s infinite; }
-  .btn.danger { background: #ff4444; color: white; }
-  .btn.ghost { background: var(--surface-container-high); color: var(--text-main); }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  @keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
+  .btn.primary {
+    background: var(--primary);
+    color: white;
+    box-shadow: 0 4px 12px var(--primary-10);
+  }
+  .btn.magic {
+    background: var(--primary);
+    color: white;
+    box-shadow: 0 4px 12px var(--primary-10);
+    animation: pulse 2s infinite;
+  }
+  .btn.danger {
+    background: #ff4444;
+    color: white;
+  }
+  .btn.ghost {
+    background: var(--surface-container-high);
+    color: var(--text-main);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
-  .inbox-content { flex: 1; }
+  @keyframes pulse {
+    0% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.05);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  .inbox-content {
+    flex: 1;
+  }
 
   .empty-state {
     display: flex;
@@ -445,5 +535,9 @@
     font-weight: 700;
   }
 
-  .header-info { display: flex; gap: 1rem; align-items: center; }
+  .header-info {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+  }
 </style>

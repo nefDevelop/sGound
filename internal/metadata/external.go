@@ -16,6 +16,7 @@ const LASTFM_API_KEY = "3884e889f074ca68516087d19e078028" // API Key pública pa
 type ArtistInfo struct {
 	Biography string   `json:"biography"`
 	Image     string   `json:"image"`
+	Source    string   `json:"source"`
 	Tags      []string `json:"tags"`
 	Similar   []string `json:"similar"`
 }
@@ -157,12 +158,14 @@ func (e *ExternalMetadata) enrichWithLastFM(name string, info *ArtistInfo) {
 		for _, img := range result.Artist.Image {
 			if img.Size == "mega" || img.Size == "extralarge" {
 				info.Image = img.URL
+				info.Source = "Last.fm"
 				break
 			}
 		}
 		// Final fallback to any image
 		if info.Image == "" && result.Artist.Image[0].URL != "" {
 			info.Image = result.Artist.Image[0].URL
+			info.Source = "Last.fm"
 		}
 	}
 
@@ -263,8 +266,10 @@ func (e *ExternalMetadata) fetchSummary(title, lang string) (*ArtistInfo, error)
 	info := &ArtistInfo{Biography: result.Extract}
 	if result.OriginalImage.Source != "" {
 		info.Image = result.OriginalImage.Source
+		info.Source = "Wikipedia"
 	} else if result.Thumbnail.Source != "" {
 		info.Image = result.Thumbnail.Source
+		info.Source = "Wikipedia"
 	}
 	return info, nil
 }

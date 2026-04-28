@@ -1,5 +1,5 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import Icon from './Icon.svelte';
 
@@ -9,6 +9,11 @@
   let showPassword = $state(false);
   let loading = $state(false);
   let error = $state('');
+  let inputRef = $state();
+
+  onMount(() => {
+    inputRef?.focus();
+  });
 
   async function handleLogin() {
     if (!username) return;
@@ -75,7 +80,7 @@
         <label for="username">Usuario</label>
         <div class="input-wrapper" class:error={error && !username}>
           <Icon name="user" size={20} color="var(--primary)" />
-          <input type="text" id="username" bind:value={username} placeholder="admin" required autocomplete="username" />
+          <input bind:this={inputRef} type="text" id="username" bind:value={username} placeholder="admin" required autocomplete="username" />
         </div>
       </div>
 

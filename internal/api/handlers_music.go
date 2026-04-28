@@ -101,8 +101,8 @@ func (s *Server) handleArtistActions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http.Request) {
 	var name string
-	var cachedImage, cachedBio, cachedTags, cachedSimilar sql.NullString
-	err := s.getDB(r).Conn.QueryRow("SELECT name, image_url, bio, tags, similar FROM artists WHERE id = ?", artistID).Scan(&name, &cachedImage, &cachedBio, &cachedTags, &cachedSimilar)
+	var cachedImage, cachedSource, cachedBio, cachedTags, cachedSimilar sql.NullString
+	err := s.getDB(r).Conn.QueryRow("SELECT name, image_url, image_source, bio, tags, similar FROM artists WHERE id = ?", artistID).Scan(&name, &cachedImage, &cachedSource, &cachedBio, &cachedTags, &cachedSimilar)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -114,6 +114,7 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 
 	biography := cachedBio.String
 	externalImage := cachedImage.String
+	imageSource := cachedSource.String
 	tags := strings.Split(cachedTags.String, ",")
 	similar := strings.Split(cachedSimilar.String, ",")
 
@@ -130,19 +131,20 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 		if ext != nil {
 			biography = ext.Biography
 			externalImage = ext.Image
+			imageSource = ext.Source
 			tags = ext.Tags
 			similar = ext.Similar
 			tagsStr := strings.Join(tags, ",")
 			similarStr := strings.Join(similar, ",")
-			_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET bio = ?, image_url = ?, tags = ?, similar = ? WHERE id = ?",
-				biography, externalImage, tagsStr, similarStr, artistID)
+			_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET bio = ?, image_url = ?, image_source = ?, tags = ?, similar = ? WHERE id = ?",
+				biography, externalImage, imageSource, tagsStr, similarStr, artistID)
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
 		"id": artistID, "name": name, "albumCount": albumCount, "trackCount": trackCount,
-		"biography": biography, "imageUrl": externalImage,
+		"biography": biography, "imageUrl": externalImage, "imageSource": imageSource,
 		"tags": tags, "similar": similar,
 	}
 
