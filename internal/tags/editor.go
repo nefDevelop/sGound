@@ -694,7 +694,12 @@ func (e *Editor) EmbedCover(trackID string, imgData []byte, mimeType string) err
 			Encoding: id3v2.EncodingUTF8, MimeType: mimeType,
 			PictureType: id3v2.PTFrontCover, Description: "Front Cover", Picture: imgData,
 		})
-		return tag.Save()
+		err = tag.Save()
+		if err == nil {
+			now := time.Now()
+			_ = os.Chtimes(path, now, now)
+		}
+		return err
 	case ".flac":
 		f, err := ParseFLAC(path)
 		if err != nil { return err }
@@ -704,7 +709,12 @@ func (e *Editor) EmbedCover(trackID string, imgData []byte, mimeType string) err
 		picture, _ := flacpicture.NewFromImageData(flacpicture.PictureTypeFrontCover, "Front Cover", imgData, mimeType)
 		pictureMeta := picture.Marshal()
 		f.Meta = append(f.Meta, &pictureMeta)
-		return f.Save(path)
+		err = f.Save(path)
+		if err == nil {
+			now := time.Now()
+			_ = os.Chtimes(path, now, now)
+		}
+		return err
 	}
 	return fmt.Errorf("unsupported format for cover embedding: %s", ext)
 }

@@ -476,6 +476,9 @@ func (s *Server) embedCoverToTracks(r *http.Request, trackID string, applyToAlbu
 		}
 		cachePath := filepath.Join(s.Config.CachePath, "covers", id+".jpg")
 		os.Remove(cachePath)
+
+		// Clear album cover metadata to force server re-scan of dimensions/format
+		s.MasterDB.Conn.Exec("UPDATE albums SET cover_size = 0, cover_format = NULL WHERE id = (SELECT album_id FROM tracks WHERE id = ?)", id)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
