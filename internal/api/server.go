@@ -125,6 +125,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/api/library/low-quality", auth(s.handleLibraryLowQuality))
 	mux.HandleFunc("/api/library/missing-tags", auth(s.handleLibraryMissingTags))
 	mux.HandleFunc("/api/library/covers", auth(s.handleLibraryAllCovers))
+	mux.HandleFunc("/api/library/rescan-cover", auth(s.handleRescanCover))
 	mux.HandleFunc("/api/library/normalize-cover", auth(s.handleNormalizeCover))
 	mux.HandleFunc("/api/library/cleanup", auth(s.handleLibraryCleanup))
 	mux.HandleFunc("/api/library/organize", auth(s.handleOrganizeLibrary))

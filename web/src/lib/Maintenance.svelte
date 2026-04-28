@@ -99,6 +99,21 @@
     }
   }
 
+  async function rescanCover(item) {
+    try {
+      const res = await fetch(`/api/library/rescan-cover?id=${item.id}`, { method: 'POST' });
+      if (res.ok) {
+        showToast("Cover metadata synced from file", "success");
+        fetchDetail(currentView);
+        fetchHealth();
+      } else {
+        showToast("No embedded cover found in file", "warning");
+      }
+    } catch (e) {
+      showToast("Sync failed", "error");
+    }
+  }
+
   async function deleteTrack(track) {
     if (!confirm(`Permanently delete "${track.title}" from library?`)) return;
     try {
@@ -357,6 +372,11 @@
                        <code class="path-snippet" title={item.path}>{item.path}</code>
                     </td>
                     <td class="actions-col">
+                      {#if item.type === 'missing'}
+                        <button class="icon-btn success" onclick={() => rescanCover(item)} title="Rescan File (Try Auto-fix)">
+                          <Icon name="cloud" size={18} />
+                        </button>
+                      {/if}
                       {#if item.type === 'missing' || item.type === 'small'}
                         <button class="icon-btn primary" onclick={() => onedit?.({ id: item.id, coverId: true, search: true })} title="Search High Quality Cover">
                           <Icon name="search" size={18} />

@@ -547,3 +547,43 @@ func (s *Server) handleNormalizeCover(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
 }
+
+func (s *Server) handleRescanCover(w http.ResponseWriter, r *http.Request) {
+	albumID := r.URL.Query().Get("id")
+	if albumID == "" {
+		http.Error(w, "Missing album id", http.StatusBadRequest)
+		return
+	}
+
+	var fpath string
+	err := s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE album_id = ? LIMIT 1", albumID).Scan(&fpath)
+	if err != nil {
+		http.Error(w, "No tracks found for this album", http.StatusNotFound)
+		return
+	}
+
+	metadata, err := tags.Open(fpath)
+	if err != nil || metadata.Picture() == nil {
+		http.Error(w, "No embedded cover found to rescan", http.StatusNotFound)
+		return
+	}
+
+	pic := metadata.Picture()
+	src, _, err := image.Decode(bytes.NewReader(pic.Data))
+	if err != nil {
+		http.Error(w, "Failed to decode image during rescan", http.StatusInternalServerError)
+		return
+	}
+
+	wDim := src.Bounds().Dx()
+	hDim := src.Bounds().Dy()
+
+	s.getDB(r).Conn.Exec(`
+		UPDATE albums 
+		SET cover_width = ?, cover_height = ?, cover_size = ?, cover_format = ?
+		WHERE id = ?`, 
+		wDim, hDim, len(pic.Data), pic.MIME, albumID)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success"}`))
+}

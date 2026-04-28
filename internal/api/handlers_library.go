@@ -1,9 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"log/slog"
 	"net/http"
 	"os"
@@ -170,8 +174,13 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 		newID := tags.GenerateUUID()
 		editor := tags.NewEditor(dbase)
 
-		func(p string, tid string) {
+		// Deep Scan for covers during approval
+		func(p string, tid string, albID string) {
 			metadata, _ := tags.Open(p)
+			var imgData []byte
+			var mime string
+
+			// 1. Try to find cover if missing
 			if metadata == nil || metadata.Picture() == nil {
 				dir := filepath.Dir(p)
 				common := []string{"cover", "folder", "front", "album", "artwork"}
@@ -186,15 +195,33 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 						if strings.HasPrefix(base, c) { found = true; break }
 					}
 					if found {
-						imgData, _ := os.ReadFile(filepath.Join(dir, ent.Name()))
-						mime := "image/jpeg"
+						imgData, _ = os.ReadFile(filepath.Join(dir, ent.Name()))
+						mime = "image/jpeg"
 						if ext == ".png" { mime = "image/png" }
-						editor.EmbedCover(oldID, imgData, mime)
+						editor.EmbedCover(tid, imgData, mime)
 						break
 					}
 				}
 			}
-		}(path, newID)
+
+			// 2. REGARDLESS of whether we just embedded it or it was already there, 
+			// RE-READ dimensions to sync database
+			metadata, _ = tags.Open(p) // Re-open to get fresh state
+			if metadata != nil && metadata.Picture() != nil {
+				pic := metadata.Picture()
+				src, _, err := image.Decode(bytes.NewReader(pic.Data))
+				if err == nil {
+					w := src.Bounds().Dx()
+					h := src.Bounds().Dy()
+					s.MasterDB.Conn.Exec(`
+						UPDATE albums 
+						SET cover_width = ?, cover_height = ?, cover_size = ?, cover_format = ?
+						WHERE id = (SELECT album_id FROM tracks WHERE id = ?)`, 
+						w, h, len(pic.Data), pic.MIME, tid)
+					slog.Info("📸 Cover metadata synchronized during approval", "track", tid, "dims", fmt.Sprintf("%dx%d", w, h))
+				}
+			}
+		}(path, oldID, "")
 
 		if err := tags.WritePersistentID(path, newID); err != nil {
 			slog.Error("⚠️ Non-fatal: Failed to write physical SGOUND_ID, but approving in DB anyway", "path", path, "err", err)
