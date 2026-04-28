@@ -70,6 +70,7 @@ func (s *Server) handleEditTags(trackID string, w http.ResponseWriter, r *http.R
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	slog.Info("✅ Tags updated and verified physically", "trackID", trackID)
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "changes": changes})
 }
 
@@ -461,6 +462,8 @@ func (s *Server) embedCoverToTracks(r *http.Request, trackID string, applyToAlbu
 	for _, id := range trackIDs {
 		if err := editor.EmbedCover(id, imgData, mimeType); err != nil {
 			slog.Error("Failed to embed cover", "track", id, "error", err)
+		} else {
+			slog.Info("🖼️ Cover embedded successfully", "trackID", id)
 		}
 		cachePath := filepath.Join(s.Config.CachePath, "covers", id+".jpg")
 		os.Remove(cachePath)

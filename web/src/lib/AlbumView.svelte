@@ -4,7 +4,7 @@
   import Artwork from "./Artwork.svelte";
   import TracksView from "./TracksView.svelte";
   import { fade } from "svelte/transition";
-  import { coverRefreshTrigger } from "./stores.js";
+  import { coverRefreshTrigger, libraryRefreshTrigger } from "./stores.js";
 
   let { albumId, onplay, onback, onedit, oneditAlbum, onshuffle } = $props();
 
@@ -13,7 +13,7 @@
   let loading = $state(true);
 
   $effect(() => {
-    if (albumId) fetchAlbumDetails();
+    if (albumId || $libraryRefreshTrigger) fetchAlbumDetails();
   });
 
   async function fetchAlbumDetails() {

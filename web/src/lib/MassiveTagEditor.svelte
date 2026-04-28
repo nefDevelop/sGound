@@ -1,7 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
-  import { showToast, coverRefreshTrigger } from './stores.js';
+  import { showToast, coverRefreshTrigger, libraryRefreshTrigger } from './stores.js';
   import { fade } from 'svelte/transition';
   
   let { 
@@ -260,6 +260,8 @@
 
       await Promise.all(promises);
       
+      console.log("✅ All bulk updates confirmed by server!");
+      libraryRefreshTrigger.set(Date.now());
       saveSuccess = true;
       processingStatus = "Success!";
       setTimeout(() => {
