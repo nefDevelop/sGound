@@ -92,7 +92,9 @@
       const data = await res.json();
       const wasScanning = scanStatus.scanning;
       scanStatus = data;
-      inboxCount.set(data.inboxCount);
+      
+      // Update global stores for real-time UI updates (badge, dots)
+      inboxCount.set(data.inboxCount || 0);
       rawCount.set(data.rawCount || 0);
 
       if (data.scanning && !pollingInterval) startPolling();

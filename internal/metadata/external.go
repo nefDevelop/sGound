@@ -82,8 +82,11 @@ func (e *ExternalMetadata) enrichWithLastFM(name string, info *ArtistInfo) {
 	apiURL := fmt.Sprintf("http://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=%s&api_key=%s&format=json&lang=%s", 
 		url.QueryEscape(name), LASTFM_API_KEY, e.Config.Language)
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(apiURL)
+	client := &http.Client{Timeout: 7 * time.Second}
+	req, _ := http.NewRequest("GET", apiURL, nil)
+	req.Header.Set("User-Agent", "SgoundMusicPlayer/1.0 (admin@example.com)")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		slog.Warn("⚠️ Fallo al conectar con Last.fm", "err", err)
 		return
@@ -92,6 +95,10 @@ func (e *ExternalMetadata) enrichWithLastFM(name string, info *ArtistInfo) {
 
 	var result struct {
 		Artist struct {
+			Image []struct {
+				URL  string `json:"#text"`
+				Size string `json:"size"`
+			} `json:"image"`
 			Tags struct {
 				Tag []struct {
 					Name string `json:"name"`
@@ -109,7 +116,22 @@ func (e *ExternalMetadata) enrichWithLastFM(name string, info *ArtistInfo) {
 		return
 	}
 
-	// Extraer Tags
+	// 1. Fallback Image from Last.fm if Wikipedia failed
+	if info.Image == "" && len(result.Artist.Image) > 0 {
+		// Prefer "mega" or "extralarge" size
+		for _, img := range result.Artist.Image {
+			if img.Size == "mega" || img.Size == "extralarge" {
+				info.Image = img.URL
+				break
+			}
+		}
+		// Final fallback to any image
+		if info.Image == "" && result.Artist.Image[0].URL != "" {
+			info.Image = result.Artist.Image[0].URL
+		}
+	}
+
+	// 2. Extraer Tags
 	for _, t := range result.Artist.Tags.Tag {
 		found := false
 		for _, existing := range info.Tags {
@@ -120,7 +142,7 @@ func (e *ExternalMetadata) enrichWithLastFM(name string, info *ArtistInfo) {
 		}
 	}
 
-	// Extraer Similares
+	// 3. Extraer Similares
 	for _, s := range result.Artist.Similar.Artist {
 		found := false
 		for _, existing := range info.Similar {

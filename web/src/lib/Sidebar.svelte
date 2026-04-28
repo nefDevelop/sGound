@@ -38,7 +38,7 @@
     >
       <div class="nav-icon-wrap">
         <Icon name="grid" size={18} />
-        {#if hasPendingMusic}
+        {#if $inboxCount > 0 || $rawCount > 0}
           <span class="nav-notification-dot"></span>
         {/if}
       </div>

@@ -790,8 +790,16 @@ func (s *Server) EnrichArtists() {
 					if err == nil && ext != nil {
 						tagsStr := strings.Join(ext.Tags, ",")
 						similarStr := strings.Join(ext.Similar, ",")
-						_, _ = s.MasterDB.Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?", 
-							ext.Image, ext.Biography, tagsStr, similarStr, a.ID)
+						err = s.MasterDB.Conn.QueryRow("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ? RETURNING name", 
+							ext.Image, ext.Biography, tagsStr, similarStr, a.ID).Scan(&a.Name)
+						if err == nil {
+							slog.Info("✨ Artist enriched successfully", "name", a.Name, "hasImage", ext.Image != "")
+						} else {
+							// Fallback if RETURNING is not supported or fails
+							_, _ = s.MasterDB.Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?", 
+								ext.Image, ext.Biography, tagsStr, similarStr, a.ID)
+							slog.Info("✨ Artist enriched successfully", "id", a.ID, "hasImage", ext.Image != "")
+						}
 					}
 					// Still sleep a bit to avoid aggressive rate-limiting
 					time.Sleep(250 * time.Millisecond)
@@ -800,12 +808,13 @@ func (s *Server) EnrichArtists() {
 		}
 
 		for _, task := range tasks {
+			slog.Debug("⏳ Queuing artist for enrichment", "name", task.Name)
 			jobs <- task
 		}
 		close(jobs)
 		wg.Wait()
 
-		slog.Info("✅ Background artist enrichment completed")
+		slog.Info("✅ Background artist enrichment completed", "processed", len(tasks))
 		utils.PurgeMemory(s.MasterDB.Conn)
 	}()
 }
