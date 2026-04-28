@@ -117,7 +117,7 @@
       onselectAlbum={selectAlbum}
       onplayAlbum={handlers.handlePlayAlbum}
       onqueueAlbum={handlers.handleQueueAlbum}
-      oneditAlbum={handlers.openEditor}
+      oneditAlbum={handlers.openAlbumEditor}
       onnavinbox={() => navigate('inbox')}
     />
   {:else if $currentView === "artist-detail"}
@@ -126,7 +126,7 @@
       onselectAlbum={selectAlbum}
       onplayAlbum={handlers.handlePlayAlbum}
       onqueueAlbum={handlers.handleQueueAlbum}
-      oneditAlbum={handlers.openEditor}
+      oneditAlbum={handlers.openAlbumEditor}
       onshuffle={handlers.handleShufflePlay}
     />
   {:else if $currentView === "album"}
@@ -134,6 +134,7 @@
       albumId={$viewParams['albumId']}
       onplay={handlers.handlePlay}
       onedit={handlers.openEditor}
+      oneditAlbum={handlers.openAlbumEditor}
       onback={() => history.back()}
       onshuffle={handlers.handleShufflePlay}
     />

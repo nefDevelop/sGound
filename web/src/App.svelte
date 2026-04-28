@@ -153,6 +153,22 @@
       }
       isTagEditorOpen = true;
     },
+    openAlbumEditor: async (album) => {
+      loadingTracks = true;
+      try {
+        const res = await apiFetch(`/api/albums/${album.id}/tracks`);
+        if (res.ok) {
+          selectedTracks = await res.json();
+          isMassiveEditorOpen = true;
+        } else {
+          showToast("Error al cargar pistas del álbum", "error");
+        }
+      } catch (e) {
+        showToast("Error de conexión", "error");
+      } finally {
+        loadingTracks = false;
+      }
+    },
     handleSelectionChange: (s) => (selectedTracks = s),
     handleSearch: async (query) => {
       if (!query) { fetchTracks(); return; }
