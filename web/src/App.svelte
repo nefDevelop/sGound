@@ -191,6 +191,14 @@
       });
       if (res.ok) { showToast("Hidden", "success"); fetchTracks(); callback?.(); }
     },
+    handleBulkReject: async (ids, callback, refresh = true) => {
+      const res = await apiFetch(`/api/tracks/reject`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      });
+      if (res.ok && refresh) { fetchTracks(); callback?.(); }
+      return res.ok;
+    },
     fetchTracks,
     checkScanStatus
   };

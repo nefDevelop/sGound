@@ -17,6 +17,8 @@
   let isAnalyzing = $state(false);
   let isApprovingAll = $state(false);
   let isRejectingAll = $state(false);
+  let approvingCount = $state(0);
+  let rejectingCount = $state(0);
   let isApprovingSelected = $state(false);
   let isRejectingSelected = $state(false);
   let isApplyingSuggestions = $state(false);
@@ -140,10 +142,20 @@
       }
 
       if (ids.length > 0) {
-        await approveIds(ids);
+        approvingCount = ids.length;
+        const batchSize = 100;
+        for (let i = 0; i < ids.length; i += batchSize) {
+          const batch = ids.slice(i, i + batchSize);
+          await approveIds(batch, false);
+          approvingCount = Math.max(0, approvingCount - batch.length);
+        }
+        await fetchInbox();
+        selectedTracks = [];
+        onapproved?.();
       }
     } finally {
       isApprovingAll = false;
+      approvingCount = 0;
     }
   }
 
@@ -166,10 +178,20 @@
       }
 
       if (ids.length > 0) {
-        await rejectIds(ids);
+        rejectingCount = ids.length;
+        const batchSize = 100;
+        for (let i = 0; i < ids.length; i += batchSize) {
+          const batch = ids.slice(i, i + batchSize);
+          await rejectIds(batch, false);
+          rejectingCount = Math.max(0, rejectingCount - batch.length);
+        }
+        await fetchInbox();
+        selectedTracks = [];
+        onrejected?.();
       }
     } finally {
       isRejectingAll = false;
+      rejectingCount = 0;
     }
   }
 
@@ -184,25 +206,27 @@
     }
   }
 
-  async function approveIds(ids) {
+  async function approveIds(ids, refresh = true) {
     try {
       const res = await fetch('/api/tracks/approve', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids })
       });
-      if (res.ok) {
+      if (res.ok && refresh) {
         await fetchInbox();
         selectedTracks = [];
         onapproved?.();
       }
+      return res.ok;
     } catch (e) {
       console.error(e);
+      return false;
     }
   }
 
-  async function rejectIds(ids) {
-    onbulkReject?.(ids);
+  async function rejectIds(ids, refresh = true) {
+    await onbulkReject?.(ids, refresh);
   }
 
   async function analyzeInbox() {
@@ -330,7 +354,7 @@
           <button class="btn ghost" onclick={rejectAll} disabled={totalTracks === 0 || isRejectingAll || isApprovingAll}>
             {#if isRejectingAll}
               <Icon name="loader" size={18} class="spin" />
-              Rejecting...
+              Reject All ({rejectingCount})
             {:else}
               Reject All ({totalTracks})
             {/if}
@@ -338,7 +362,7 @@
           <button class="btn ghost" onclick={approveAll} disabled={totalTracks === 0 || isApprovingAll || isRejectingAll}>
             {#if isApprovingAll}
               <Icon name="loader" size={18} class="spin" />
-              Approving...
+              Approve All ({approvingCount})
             {:else}
               Approve All ({totalTracks})
             {/if}

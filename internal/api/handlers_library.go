@@ -800,7 +800,7 @@ func (s *Server) EnrichArtists() {
 							ext.Image, ext.Biography, tagsStr, similarStr, a.ID)
 					}
 					// Still sleep a bit to avoid aggressive rate-limiting
-					time.Sleep(1000 * time.Millisecond)
+					time.Sleep(250 * time.Millisecond)
 				}
 			}()
 		}

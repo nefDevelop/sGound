@@ -30,7 +30,7 @@ type ScanStatus struct {
 }
 
 var (
-	imageProcessingSem = make(chan struct{}, 2) // Máximo 2 procesos de imagen pesados a la vez
+	imageProcessingSem = make(chan struct{}, 6) // Aumentado para mayor concurrencia en grids de imágenes
 )
 
 type Server struct {

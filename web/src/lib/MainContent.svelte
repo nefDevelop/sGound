@@ -108,12 +108,12 @@
       onapproved={() => { handlers.fetchTracks(false); handlers.checkScanStatus(); }}
       onrejected={handlers.checkScanStatus}
       onhide={(track) => handlers.handleReject(track, () => inboxRef?.fetchInbox())}
-      onbulkReject={(ids) => handlers.handleBulkReject(ids, () => inboxRef?.fetchInbox())}
+      onbulkReject={(ids, refresh) => handlers.handleBulkReject(ids, () => inboxRef?.fetchInbox(), refresh)}
       ondeletePhysical={(track) => handlers.handleDeletePhysical(track, () => inboxRef?.fetchInbox())}
     />
   {:else if $currentView === "albums"}
     <AlbumsGrid 
-      artistId={$viewParams?.artistId}
+      artistId={$viewParams['artistId']}
       onselectAlbum={selectAlbum}
       onplayAlbum={handlers.handlePlayAlbum}
       onqueueAlbum={handlers.handleQueueAlbum}
@@ -122,7 +122,7 @@
     />
   {:else if $currentView === "artist-detail"}
     <ArtistDetail
-      artistId={$viewParams?.artistId}
+      artistId={$viewParams['artistId']}
       onselectAlbum={selectAlbum}
       onplayAlbum={handlers.handlePlayAlbum}
       onqueueAlbum={handlers.handleQueueAlbum}
@@ -131,7 +131,7 @@
     />
   {:else if $currentView === "album"}
     <AlbumView
-      albumId={$viewParams?.albumId}
+      albumId={$viewParams['albumId']}
       onplay={handlers.handlePlay}
       onedit={handlers.openEditor}
       onback={() => history.back()}
@@ -150,7 +150,7 @@
   {:else if $currentView === "smart-playlist"}
     <SmartPlaylistView 
       bind:this={smartRef}
-      {...$viewParams?.smart}
+      {...$viewParams['smart']}
       currentPlaying={currentPlaying}
       onback={() => history.back()}
       onplay={handlers.handlePlay}
@@ -163,7 +163,7 @@
   {:else if $currentView === "playlist"}
     <PlaylistsView
       bind:this={playlistRef}
-      playlist={$viewParams?.playlist}
+      playlist={$viewParams['playlist']}
       currentPlaying={currentPlaying}
       onplay={handlers.handlePlay}
       onedit={handlers.openEditor}
@@ -177,7 +177,7 @@
     <Settings onscan={handlers.triggerScan} />
   {:else if $currentView === "maintenance"}
     <Maintenance 
-      subview={$viewParams?.subview || 'overview'} 
+      subview={$viewParams['subview'] || 'overview'} 
       onviewchange={(v) => navigate('maintenance', { subview: v })}
       onfixTags={handlers.handleFixTags} 
       onedit={handlers.openEditor}

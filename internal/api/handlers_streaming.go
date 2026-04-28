@@ -128,7 +128,7 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 			if pic := metadata.Picture(); pic != nil {
 				src, _, err := image.Decode(bytes.NewReader(pic.Data))
 				if err == nil {
-					resized := imaging.Resize(src, 600, 0, imaging.Lanczos)
+					resized := imaging.Resize(src, 600, 0, imaging.Linear)
 					imaging.Save(resized, cachePath)
 					w.Header().Set("Cache-Control", "public, max-age=604800")
 					w.Header().Set("Content-Type", "image/jpeg")
@@ -167,7 +167,7 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 			}
 			src, _, err := image.Decode(bytes.NewReader(imgData))
 			if err == nil {
-				resized := imaging.Resize(src, 600, 0, imaging.Lanczos)
+				resized := imaging.Resize(src, 600, 0, imaging.Linear)
 				imaging.Save(resized, cachePath)
 				w.Header().Set("Cache-Control", "public, max-age=604800")
 				w.Header().Set("Content-Type", "image/jpeg")
@@ -258,7 +258,7 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 			return nil, nil
 		}
 
-		resized := imaging.Resize(src, 800, 0, imaging.Lanczos)
+		resized := imaging.Resize(src, 800, 0, imaging.Linear)
 		_ = imaging.Save(resized, cachePath)
 		return nil, nil
 	})
