@@ -230,6 +230,29 @@
     border: 1px solid rgba(255,255,255,0.1);
   }
 
+  .attribution {
+    position: absolute;
+    bottom: 2rem;
+    right: 2.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: rgba(0,0,0,0.2);
+    backdrop-filter: blur(5px);
+    border-radius: 100px;
+    font-size: 0.65rem;
+    font-weight: 800;
+    color: rgba(255,255,255,0.5);
+    z-index: 3;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border: 1px solid rgba(255,255,255,0.05);
+    pointer-events: none;
+    transition: opacity 0.3s;
+  }
+  .artist-header:hover .attribution { opacity: 0.8; }
+
   .detail-grid {
     display: grid;
     grid-template-columns: 1fr 350px;
