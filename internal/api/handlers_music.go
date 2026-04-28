@@ -126,7 +126,7 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 	}
 
 	isDisambiguation := strings.Contains(biography, "puede referirse a") || strings.Contains(biography, "may refer to")
-	if biography == "" || externalImage == "" || len(tags) == 0 || isDisambiguation {
+	if biography == "" || externalImage == "" || len(tags) == 0 || isDisambiguation || imageSource == "" {
 		ext, _ := s.externalMeta.GetArtistInfo(name)
 		if ext != nil {
 			biography = ext.Biography
@@ -194,23 +194,34 @@ func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r
 			_ = s.getDB(r).Conn.QueryRow("SELECT id FROM tracks WHERE album_id = ? LIMIT 1", id).Scan(&coverId)
 		}
 
-		// Normalización agresiva para detectar duplicados (ej: Aurora 2020 al final)
+		// Normalización agresiva para detectar duplicados
 		normTitle := strings.ToLower(title)
-		normTitle = strings.TrimSpace(normTitle)
-		// Si el título termina en el nombre del artista o en un año de 4 dígitos, lo limpiamos para comparar
 		artistLower := strings.ToLower(artist)
-		if strings.HasSuffix(normTitle, artistLower) {
-			normTitle = strings.TrimSpace(strings.TrimSuffix(normTitle, artistLower))
-		}
-		// Limpiar año al final (ej: "2020")
-		words := strings.Fields(normTitle)
-		if len(words) > 1 {
-			last := words[len(words)-1]
-			if len(last) == 4 {
-				if _, err := strconv.Atoi(last); err == nil {
-					normTitle = strings.TrimSpace(strings.TrimSuffix(normTitle, last))
+		
+		// Función para limpiar años y nombres de artista del final repetidamente
+		for {
+			changed := false
+			normTitle = strings.TrimSpace(normTitle)
+			
+			// 1. Quitar año al final (4 dígitos)
+			words := strings.Fields(normTitle)
+			if len(words) > 1 {
+				last := words[len(words)-1]
+				if len(last) == 4 {
+					if _, err := strconv.Atoi(last); err == nil {
+						normTitle = strings.TrimSpace(strings.TrimSuffix(normTitle, last))
+						changed = true
+					}
 				}
 			}
+			
+			// 2. Quitar nombre del artista al final
+			if strings.HasSuffix(normTitle, artistLower) {
+				normTitle = strings.TrimSpace(strings.TrimSuffix(normTitle, artistLower))
+				changed = true
+			}
+			
+			if !changed { break }
 		}
 
 		albumData := map[string]interface{}{

@@ -243,21 +243,19 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    background: rgba(0,0,0,0.2);
-    backdrop-filter: blur(5px);
+    padding: 0.6rem 1.2rem;
+    background: var(--surface-container-highest);
+    backdrop-filter: blur(10px);
     border-radius: 100px;
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     font-weight: 800;
-    color: rgba(255,255,255,0.5);
-    z-index: 3;
+    color: var(--text-main);
+    z-index: 10;
     text-transform: uppercase;
     letter-spacing: 1px;
-    border: 1px solid rgba(255,255,255,0.05);
-    pointer-events: none;
-    transition: opacity 0.3s;
+    border: 1px solid var(--white-05);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
   }
-  .artist-header:hover .attribution { opacity: 0.8; }
 
   .detail-grid {
     display: grid;
