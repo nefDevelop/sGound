@@ -4,28 +4,39 @@
 
   let logs = $state([]);
   let autoScroll = $state(true);
-  let pollInterval;
-  let scrollContainer;
+  let scrollContainer = $state(null);
+  let eventSource;
 
-  onMount(async () => {
-    fetchLogs();
-    pollInterval = setInterval(fetchLogs, 2000);
+  onMount(() => {
+    connectStream();
   });
 
   onDestroy(() => {
-    clearInterval(pollInterval);
+    if (eventSource) eventSource.close();
   });
 
-  async function fetchLogs() {
-    try {
-      const res = await fetch('/api/logs');
-      if (res.ok) {
-        logs = await res.json();
+  function connectStream() {
+    if (eventSource) eventSource.close();
+    
+    // Note: EventSource doesn't support custom headers
+    eventSource = new EventSource('/api/logs?stream=true'); 
+
+    eventSource.onmessage = (event) => {
+      try {
+        const entry = JSON.parse(event.data);
+        logs = [...logs, entry];
+        if (logs.length > 200) logs = logs.slice(1);
         if (autoScroll) scrollToBottom();
+      } catch (e) {
+        console.error("Failed to parse log entry", e);
       }
-    } catch (e) {
-      console.error("Failed to fetch logs", e);
-    }
+    };
+
+    eventSource.onerror = () => {
+      console.warn("Log stream disconnected, retrying...");
+      eventSource.close();
+      setTimeout(connectStream, 3000);
+    };
   }
 
   function scrollToBottom() {
@@ -62,7 +73,7 @@
         <input type="checkbox" bind:checked={autoScroll} />
         Auto-scroll
       </label>
-      <button class="icon-btn" onclick={fetchLogs} title="Refresh logs">
+      <button class="icon-btn" onclick={connectStream} title="Reconnect stream">
         <Icon name="refreshCw" size={14} />
       </button>
     </div>

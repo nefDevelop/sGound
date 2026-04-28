@@ -510,9 +510,24 @@ func (s *Server) handleLibraryHealth(w http.ResponseWriter, r *http.Request) {
 	lowQual, _ := s.getDB(r).GetLowQualityTracks(128)
 	health["lowQualityCount"] = len(lowQual)
 	var missingCovers, smallCovers, hugeCovers int
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM albums WHERE cover_width IS NULL OR cover_width = 0").Scan(&missingCovers)
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM albums WHERE cover_width > 0 AND (cover_width < 300 OR cover_height < 300)").Scan(&smallCovers)
-	s.getDB(r).Conn.QueryRow("SELECT COUNT(*) FROM albums WHERE cover_width > 1500 OR cover_height > 1500 OR cover_size > 2000000").Scan(&hugeCovers)
+	s.getDB(r).Conn.QueryRow(`
+		SELECT COUNT(DISTINCT al.id) 
+		FROM albums al
+		JOIN tracks t ON t.album_id = al.id
+		WHERE t.status = 'active' AND (al.cover_width IS NULL OR al.cover_width = 0)`).Scan(&missingCovers)
+	
+	s.getDB(r).Conn.QueryRow(`
+		SELECT COUNT(DISTINCT al.id) 
+		FROM albums al
+		JOIN tracks t ON t.album_id = al.id
+		WHERE t.status = 'active' AND al.cover_width > 0 AND (al.cover_width < 300 OR al.cover_height < 300)`).Scan(&smallCovers)
+	
+	s.getDB(r).Conn.QueryRow(`
+		SELECT COUNT(DISTINCT al.id) 
+		FROM albums al
+		JOIN tracks t ON t.album_id = al.id
+		WHERE t.status = 'active' AND (al.cover_width > 1500 OR al.cover_height > 1500 OR al.cover_size > 2000000)`).Scan(&hugeCovers)
+	
 	health["missingCovers"] = missingCovers
 	health["smallCovers"] = smallCovers
 	health["hugeCovers"] = hugeCovers

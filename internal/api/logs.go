@@ -3,6 +3,7 @@ package api
 import (
     "context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -19,7 +20,9 @@ type LogEntry struct {
 var (
 	logBuffer []LogEntry
 	logMu     sync.Mutex
-	maxLogs   = 100
+	maxLogs   = 200
+	clients   = make(map[chan LogEntry]bool)
+	clientMu  sync.Mutex
 )
 
 type MemoryHandler struct {
@@ -50,19 +53,71 @@ func (h *MemoryHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 	logMu.Unlock()
 
+	// Broadcast to active clients
+	clientMu.Lock()
+	for client := range clients {
+		select {
+		case client <- entry:
+		default:
+			// Client slow, skip or drop
+		}
+	}
+	clientMu.Unlock()
+
 	return h.Handler.Handle(ctx, r)
 }
 
 func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
-	logMu.Lock()
-	defer logMu.Unlock()
+	if r.Header.Get("Accept") == "text/event-stream" || r.URL.Query().Get("stream") == "true" {
+		s.handleLogStream(w, r)
+		return
+	}
 
-    // Enviar los últimos logs (pueden ser muchos, así que limitamos si es necesario)
-    logs := logBuffer
-    if len(logs) == 0 {
-        logs = []LogEntry{}
-    }
+	logMu.Lock()
+	logs := make([]LogEntry, len(logBuffer))
+	copy(logs, logBuffer)
+	logMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(logs)
 }
+
+func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	logChan := make(chan LogEntry, 10)
+	clientMu.Lock()
+	clients[logChan] = true
+	clientMu.Unlock()
+
+	defer func() {
+		clientMu.Lock()
+		delete(clients, logChan)
+		clientMu.Unlock()
+		close(logChan)
+	}()
+
+	// Replay history
+	logMu.Lock()
+	for _, entry := range logBuffer {
+		data, _ := json.Marshal(entry)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+	}
+	logMu.Unlock()
+	w.(http.Flusher).Flush()
+
+	for {
+		select {
+		case entry := <-logChan:
+			data, _ := json.Marshal(entry)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			w.(http.Flusher).Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+

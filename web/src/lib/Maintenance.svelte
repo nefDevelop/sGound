@@ -1,9 +1,9 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
   import { showToast } from './stores.js';
-  import { fade } from 'svelte/transition';
+  import { fade, slide } from 'svelte/transition';
   import LogViewer from './LogViewer.svelte';
   import CoverSearcher from './CoverSearcher.svelte';
 
@@ -208,6 +208,31 @@
       }
     };
   }
+  let activityStream = $state([]);
+  let es = null;
+
+  onMount(() => {
+    fetchHealth();
+    connectActivity();
+  });
+
+  onDestroy(() => {
+    if (es) es.close();
+  });
+
+  function connectActivity() {
+    if (es) es.close();
+    es = new EventSource('/api/logs?stream=true');
+    es.onmessage = (e) => {
+      const entry = JSON.parse(e.data);
+      activityStream = [entry, ...activityStream].slice(0, 3);
+    };
+    es.onerror = () => {
+      es.close();
+      setTimeout(connectActivity, 5000);
+    };
+  }
+
   // Expose refresh function to parent
   refresh = () => {
     fetchHealth();
@@ -297,7 +322,16 @@
           <span class="lbl">Server Activity</span>
         </div>
         <div class="terminal-preview">
-          Monitoring real-time events...
+          {#if activityStream.length === 0}
+            Monitoring real-time events...
+          {:else}
+            {#each activityStream as log}
+              <div class="log-line" in:fade>
+                <span class="p-time">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
+                <span class="p-msg">{log.message}</span>
+              </div>
+            {/each}
+          {/if}
         </div>
         <button class="bento-btn primary" onclick={() => loadDetail('logs')}>View Logs</button>
       </div>
@@ -601,8 +635,11 @@
   .card-header { display: flex; align-items: center; gap: 1.2rem; color: var(--text-muted); }
   .card-header .lbl { text-transform: uppercase; font-size: 0.9rem; font-weight: 800; letter-spacing: 0.1em; }
 
-  .bento-card.terminal { background: #0d1117; border-color: #30363d; }
-  .terminal-preview { flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #8b949e; opacity: 0.8; }
+  .bento-card.terminal { background: #05070a; border-color: #1a1d23; box-shadow: inset 0 0 40px rgba(0,0,0,0.5); }
+  .terminal-preview { flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #8b949e; opacity: 0.9; display: flex; flex-direction: column; gap: 0.4rem; overflow: hidden; }
+  .log-line { display: flex; gap: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 2px solid var(--primary-20); padding-left: 0.8rem; }
+  .p-time { color: #586069; flex-shrink: 0; }
+  .p-msg { color: #e1e4e8; flex: 1; overflow: hidden; text-overflow: ellipsis; }
 
   .bento-card .val { font-size: 4rem; font-weight: 950; color: var(--text-main); line-height: 1; letter-spacing: -0.05em; }
 
