@@ -6,7 +6,7 @@
   import Artwork from './Artwork.svelte';
   import Skeleton from './Skeleton.svelte';
   
-  let { artistId = null, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum, onnavinbox = null } = $props();
+  let { artistId = null, onselectAlbum, onplayAlbum, onqueueAlbum, oneditAlbum, onnavinbox = null, showHeader = true } = $props();
   
   let albums = $state([]);
   let loading = $state(true);
