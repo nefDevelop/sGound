@@ -94,10 +94,10 @@
     <section class="bento-item welcome-tile">
       <div class="welcome-header">
         <h1>Welcome back, <span>User</span></h1>
-        {#if ($inboxCount > 0 || $rawCount > 0)}
+        {#if ($inboxCount > 0 || $rawCount > 0 || stats.inboxCount > 0)}
           <button class="inbox-notification-badge" onclick={onselectInbox} title="View pending tracks">
             <Icon name="inbox" size={24} />
-            <span class="badge-number">{$inboxCount + $rawCount}</span>
+            <span class="badge-number">{Math.max($inboxCount + $rawCount, stats.inboxCount + (stats.rawCount || 0))}</span>
           </button>
         {/if}
       </div>
