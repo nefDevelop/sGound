@@ -159,8 +159,9 @@ func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r
 	}
 
 	query := fmt.Sprintf(`
-		SELECT DISTINCT al.id, al.title, COALESCE(al.year, 0) 
+		SELECT DISTINCT al.id, al.title, COALESCE(al.year, 0), ar.name as artist, COALESCE(al.cover_id, '') as cover_id
 		FROM albums al
+		JOIN artists ar ON al.artist_id = ar.id
 		JOIN tracks t ON al.id = t.album_id
 		%s
 		ORDER BY al.year DESC`, whereClause)
@@ -174,12 +175,20 @@ func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r
 
 	var albums []map[string]interface{}
 	for rows.Next() {
-		var id, title string
+		var id, title, artist, coverId string
 		var year int
-		if err := rows.Scan(&id, &title, &year); err != nil {
+		if err := rows.Scan(&id, &title, &year, &artist, &coverId); err != nil {
 			continue
 		}
-		albums = append(albums, map[string]interface{}{"id": id, "title": title, "year": year})
+		
+		// Fallback for coverId: use first track if album cover is missing
+		if coverId == "" {
+			_ = s.getDB(r).Conn.QueryRow("SELECT id FROM tracks WHERE album_id = ? LIMIT 1", id).Scan(&coverId)
+		}
+
+		albums = append(albums, map[string]interface{}{
+			"id": id, "title": title, "year": year, "artist": artist, "coverId": coverId,
+		})
 	}
 
 	if len(albums) == 0 {

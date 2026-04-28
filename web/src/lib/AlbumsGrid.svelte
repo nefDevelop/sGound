@@ -62,6 +62,7 @@
 </script>
 
 <div class="albums-container">
+{#if showHeader}
   <header class="section-header">
     <div class="title-row">
       <h1>Albums</h1>
@@ -78,6 +79,7 @@
       </div>
     {/if}
   </header>
+{/if}
 
   {#if loading}
     <div class="albums-grid">

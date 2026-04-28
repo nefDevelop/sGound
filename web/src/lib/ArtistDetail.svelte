@@ -102,6 +102,7 @@
           onqueueAlbum={onqueueAlbum}
           oneditAlbum={oneditAlbum}
           onnavinbox={() => {}}
+          showHeader={false}
         />
       </div>
 
