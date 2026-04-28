@@ -445,8 +445,5 @@
     font-weight: 700;
   }
 
-
-
   .header-info { display: flex; gap: 1rem; align-items: center; }
-  .chip.ghost { background: var(--surface-container-highest); color: var(--text-muted); font-size: 0.75rem; border: 1px solid var(--border-color); }
 </style>

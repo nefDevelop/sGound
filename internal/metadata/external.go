@@ -190,8 +190,9 @@ func (e *ExternalMetadata) enrichWithLastFM(name string, info *ArtistInfo) {
 }
 
 func (e *ExternalMetadata) searchBestTitle(name string) string {
-	searchURL := fmt.Sprintf("https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=%s&format=json&srlimit=1", url.QueryEscape(name))
-	client := &http.Client{Timeout: 5 * time.Second}
+	// Intentamos buscar el artista con la palabra "music" para filtrar ambigüedades (ej: Aurora -> Aurora singer)
+	searchURL := fmt.Sprintf("https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=%s+music&format=json&srlimit=5", url.QueryEscape(name))
+	client := &http.Client{Timeout: 7 * time.Second}
 	req, _ := http.NewRequest("GET", searchURL, nil)
 	req.Header.Set("User-Agent", "SgoundMusicPlayer/1.0 (admin@example.com)")
 
@@ -205,6 +206,7 @@ func (e *ExternalMetadata) searchBestTitle(name string) string {
 		Query struct {
 			Search []struct {
 				Title string `json:"title"`
+				Snippet string `json:"snippet"`
 			} `json:"search"`
 		} `json:"query"`
 	}
@@ -212,7 +214,21 @@ func (e *ExternalMetadata) searchBestTitle(name string) string {
 		return ""
 	}
 
-	return strings.ReplaceAll(result.Query.Search[0].Title, " ", "_")
+	// Priorizar resultados que contengan "singer", "band", "musician" o el nombre exacto
+	bestMatch := result.Query.Search[0].Title
+	lowerName := strings.ToLower(name)
+	for _, res := range result.Query.Search {
+		snip := strings.ToLower(res.Snippet)
+		title := strings.ToLower(res.Title)
+		if strings.Contains(snip, "singer") || strings.Contains(snip, "musician") || strings.Contains(snip, "band") || strings.Contains(snip, "musical") {
+			if strings.Contains(title, lowerName) {
+				bestMatch = res.Title
+				break
+			}
+		}
+	}
+
+	return strings.ReplaceAll(bestMatch, " ", "_")
 }
 
 func (e *ExternalMetadata) fetchSummary(title, lang string) (*ArtistInfo, error) {

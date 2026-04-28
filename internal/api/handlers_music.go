@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -123,7 +124,8 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 		similar = []string{}
 	}
 
-	if biography == "" || externalImage == "" || len(tags) == 0 {
+	isDisambiguation := strings.Contains(biography, "puede referirse a") || strings.Contains(biography, "may refer to")
+	if biography == "" || externalImage == "" || len(tags) == 0 || isDisambiguation {
 		ext, _ := s.externalMeta.GetArtistInfo(name)
 		if ext != nil {
 			biography = ext.Biography
@@ -173,7 +175,11 @@ func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r
 	}
 	defer rows.Close()
 
-	var albums []map[string]interface{}
+	type albumGroup struct {
+		best map[string]interface{}
+	}
+	groups := make(map[string]*albumGroup)
+
 	for rows.Next() {
 		var id, title, artist, coverId string
 		var year int
@@ -186,10 +192,52 @@ func (s *Server) handleGetArtistAlbums(artistID string, w http.ResponseWriter, r
 			_ = s.getDB(r).Conn.QueryRow("SELECT id FROM tracks WHERE album_id = ? LIMIT 1", id).Scan(&coverId)
 		}
 
-		albums = append(albums, map[string]interface{}{
+		// Normalización agresiva para detectar duplicados (ej: Aurora 2020 al final)
+		normTitle := strings.ToLower(title)
+		normTitle = strings.TrimSpace(normTitle)
+		// Si el título termina en el nombre del artista o en un año de 4 dígitos, lo limpiamos para comparar
+		artistLower := strings.ToLower(artist)
+		if strings.HasSuffix(normTitle, artistLower) {
+			normTitle = strings.TrimSpace(strings.TrimSuffix(normTitle, artistLower))
+		}
+		// Limpiar año al final (ej: "2020")
+		words := strings.Fields(normTitle)
+		if len(words) > 1 {
+			last := words[len(words)-1]
+			if len(last) == 4 {
+				if _, err := strconv.Atoi(last); err == nil {
+					normTitle = strings.TrimSpace(strings.TrimSuffix(normTitle, last))
+				}
+			}
+		}
+
+		albumData := map[string]interface{}{
 			"id": id, "title": title, "year": year, "artist": artist, "coverId": coverId,
-		})
+		}
+
+		if existing, ok := groups[normTitle]; ok {
+			// Si el nuevo tiene año y el viejo no, o si el nuevo tiene un título más corto (limpio), preferirlo
+			existingYear := existing.best["year"].(int)
+			if (year > 0 && existingYear == 0) || (len(title) < len(existing.best["title"].(string))) {
+				existing.best = albumData
+			}
+		} else {
+			groups[normTitle] = &albumGroup{best: albumData}
+		}
 	}
+
+	var albums []map[string]interface{}
+	for _, g := range groups {
+		albums = append(albums, g.best)
+	}
+
+	// Volver a ordenar por año DESC después de la consolidación
+	sort.Slice(albums, func(i, j int) bool {
+		yi := albums[i]["year"].(int)
+		yj := albums[j]["year"].(int)
+		if yi != yj { return yi > yj }
+		return albums[i]["title"].(string) < albums[j]["title"].(string)
+	})
 
 	if len(albums) == 0 {
 		albums = []map[string]interface{}{}
