@@ -655,7 +655,7 @@ func (s *Server) handleLibraryAllCovers(w http.ResponseWriter, r *http.Request) 
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
 		JOIN tracks t ON t.album_id = al.id
-		WHERE al.cover_width IS NULL OR al.cover_width = 0
+		WHERE t.status = 'active' AND (al.cover_width IS NULL OR al.cover_width = 0)
 		GROUP BY al.id`)
 	for rows != nil && rows.Next() {
 		var id, title, artist, path string
@@ -671,7 +671,7 @@ func (s *Server) handleLibraryAllCovers(w http.ResponseWriter, r *http.Request) 
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
 		JOIN tracks t ON t.album_id = al.id
-		WHERE al.cover_width > 0 AND (al.cover_width < 300 OR al.cover_height < 300)
+		WHERE t.status = 'active' AND al.cover_width > 0 AND (al.cover_width < 300 OR al.cover_height < 300)
 		GROUP BY al.id`)
 	for rows != nil && rows.Next() {
 		var id, title, artist, path string
@@ -687,7 +687,7 @@ func (s *Server) handleLibraryAllCovers(w http.ResponseWriter, r *http.Request) 
 		FROM albums al
 		JOIN artists ar ON al.artist_id = ar.id
 		JOIN tracks t ON t.album_id = al.id
-		WHERE al.cover_width > 1500 OR al.cover_height > 1500 OR al.cover_size > 2000000
+		WHERE t.status = 'active' AND (al.cover_width > 1500 OR al.cover_height > 1500 OR al.cover_size > 2000000)
 		GROUP BY al.id`)
 	for rows != nil && rows.Next() {
 		var id, title, artist, path string

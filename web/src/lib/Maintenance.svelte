@@ -381,7 +381,7 @@
                     </td>
                     <td class="actions-col">
                       {#if item.type === 'missing'}
-                        <button class="icon-btn success" onclick={() => rescanCover(item)} title="Rescan File (Try Auto-fix)">
+                        <button class="icon-btn success" onclick={() => rescanCover(item)} title="Sync: Try extracting cover from file">
                           <Icon name="cloud" size={18} />
                         </button>
                       {/if}
@@ -393,16 +393,16 @@
                             artist: item.artist,
                             album: item.title
                           };
-                        }} title="Search High Quality Cover">
+                        }} title="Search: Find HD Cover on Internet">
                           <Icon name="search" size={18} />
                         </button>
                       {/if}
                       {#if item.type === 'huge'}
-                        <button class="icon-btn success" onclick={() => normalizeCover(item)} title="Optimize & Resize">
+                        <button class="icon-btn success" onclick={() => normalizeCover(item)} title="Optimize: Resize huge artwork">
                           <Icon name="zap" size={18} />
                         </button>
                       {/if}
-                      <button class="icon-btn" onclick={() => onedit?.({ id: item.id, coverId: true })} title="Manual Edit">
+                      <button class="icon-btn" onclick={() => onedit?.({ id: item.id, coverId: true })} title="Edit: Manual metadata editor">
                         <Icon name="edit" size={18} />
                       </button>
                     </td>
