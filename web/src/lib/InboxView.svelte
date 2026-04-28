@@ -15,6 +15,11 @@
   let selectedTracks = $state([]);
   let suggestions = $state([]);
   let isAnalyzing = $state(false);
+  let isApprovingAll = $state(false);
+  let isRejectingAll = $state(false);
+  let isApprovingSelected = $state(false);
+  let isRejectingSelected = $state(false);
+  let isApplyingSuggestions = $state(false);
   
   // Conteo real sincronizado con el servidor para esta vista
   let totalServer = $state(0);
@@ -116,50 +121,67 @@
   }
 
   async function approveAll() {
-    let ids = tracks.map(t => t.id);
-    
-    // Si sabemos que hay más pistas de las que se ven, las pedimos todas al servidor antes de aprobar
-    if (totalTracks > tracks.length || hasMore) {
-      try {
-        const fetchLimit = Math.max(totalTracks + 100, 2000);
-        const res = await fetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
-        if (res.ok) {
-          const data = await res.json();
-          ids = data.map(t => t.id);
+    isApprovingAll = true;
+    try {
+      let ids = tracks.map(t => t.id);
+      
+      // Si sabemos que hay más pistas de las que se ven, las pedimos todas al servidor antes de aprobar
+      if (totalTracks > tracks.length || hasMore) {
+        try {
+          const fetchLimit = Math.max(totalTracks + 100, 2000);
+          const res = await fetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
+          if (res.ok) {
+            const data = await res.json();
+            ids = data.map(t => t.id);
+          }
+        } catch (e) {
+          console.error("Error fetching all IDs for approval:", e);
         }
-      } catch (e) {
-        console.error("Error fetching all IDs for approval:", e);
       }
-    }
 
-    if (ids.length === 0) return;
-    await approveIds(ids);
+      if (ids.length > 0) {
+        await approveIds(ids);
+      }
+    } finally {
+      isApprovingAll = false;
+    }
   }
 
   async function rejectAll() {
-    let ids = tracks.map(t => t.id);
-    
-    if (totalTracks > tracks.length || hasMore) {
-      try {
-        const fetchLimit = Math.max(totalTracks + 100, 2000);
-        const res = await fetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
-        if (res.ok) {
-          const data = await res.json();
-          ids = data.map(t => t.id);
+    isRejectingAll = true;
+    try {
+      let ids = tracks.map(t => t.id);
+      
+      if (totalTracks > tracks.length || hasMore) {
+        try {
+          const fetchLimit = Math.max(totalTracks + 100, 2000);
+          const res = await fetch(`/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`);
+          if (res.ok) {
+            const data = await res.json();
+            ids = data.map(t => t.id);
+          }
+        } catch (e) {
+          console.error("Error fetching all IDs for rejection:", e);
         }
-      } catch (e) {
-        console.error("Error fetching all IDs for rejection:", e);
       }
-    }
 
-    if (ids.length === 0) return;
-    await rejectIds(ids);
+      if (ids.length > 0) {
+        await rejectIds(ids);
+      }
+    } finally {
+      isRejectingAll = false;
+    }
   }
 
   async function approveSelected() {
     if (selectedTracks.length === 0) return;
-    const ids = selectedTracks.map(t => t.id);
-    await approveIds(ids);
+    isApprovingSelected = true;
+    try {
+      const ids = selectedTracks.map(t => t.id);
+      await approveIds(ids);
+    } finally {
+      isApprovingSelected = false;
+    }
   }
 
   async function approveIds(ids) {
@@ -209,6 +231,7 @@
 
   async function applySuggestions() {
     if (suggestions.length === 0) return;
+    isApplyingSuggestions = true;
     try {
       const res = await fetch('/api/library/inbox/apply-suggestions', {
         method: 'POST',
@@ -221,6 +244,8 @@
       }
     } catch (e) {
       console.error(e);
+    } finally {
+      isApplyingSuggestions = false;
     }
   }
 
@@ -276,27 +301,47 @@
     
       <div class="actions">
         {#if suggestions.length > 0}
-          <button class="btn magic" onclick={applySuggestions}>
-            <Icon name="zap" size={18} />
-            Aplicar Cambios ({suggestions.length})
+          <button class="btn magic" onclick={applySuggestions} disabled={isApplyingSuggestions}>
+            {#if isApplyingSuggestions}
+              <Icon name="loader" size={18} class="spin" />
+              Aplicando...
+            {:else}
+              <Icon name="zap" size={18} />
+              Aplicar Cambios ({suggestions.length})
+            {/if}
           </button>
         {/if}
 
         {#if selectedTracks.length > 0}
-          <button class="btn danger" onclick={() => rejectIds(selectedTracks.map(t => t.id))}>
+          <button class="btn danger" onclick={() => rejectIds(selectedTracks.map(t => t.id))} disabled={isApprovingSelected || isRejectingSelected}>
             <Icon name="trash" size={18} />
             Reject ({selectedTracks.length})
           </button>
-          <button class="btn primary" onclick={approveSelected}>
-            <Icon name="zap" size={18} />
-            Approve Selected ({selectedTracks.length})
+          <button class="btn primary" onclick={approveSelected} disabled={isApprovingSelected || isRejectingSelected}>
+            {#if isApprovingSelected}
+              <Icon name="loader" size={18} class="spin" />
+              Approving...
+            {:else}
+              <Icon name="zap" size={18} />
+              Approve Selected ({selectedTracks.length})
+            {/if}
           </button>
         {:else}
-          <button class="btn ghost" onclick={rejectAll} disabled={totalTracks === 0}>
-            Reject All ({totalTracks})
+          <button class="btn ghost" onclick={rejectAll} disabled={totalTracks === 0 || isRejectingAll || isApprovingAll}>
+            {#if isRejectingAll}
+              <Icon name="loader" size={18} class="spin" />
+              Rejecting...
+            {:else}
+              Reject All ({totalTracks})
+            {/if}
           </button>
-          <button class="btn ghost" onclick={approveAll} disabled={totalTracks === 0}>
-            Approve All ({totalTracks})
+          <button class="btn ghost" onclick={approveAll} disabled={totalTracks === 0 || isApprovingAll || isRejectingAll}>
+            {#if isApprovingAll}
+              <Icon name="loader" size={18} class="spin" />
+              Approving...
+            {:else}
+              Approve All ({totalTracks})
+            {/if}
           </button>
         {/if}
       </div>
@@ -396,10 +441,6 @@
   }
 
 
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
 
   .header-info { display: flex; gap: 1rem; align-items: center; }
   .chip.ghost { background: var(--surface-container-highest); color: var(--text-muted); font-size: 0.75rem; border: 1px solid var(--border-color); }
