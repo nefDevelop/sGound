@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -36,7 +38,62 @@ type MBRelease struct {
 }
 
 func (m *MBClient) SearchRelease(artist, album string) ([]MBRelease, error) {
-	query := fmt.Sprintf("artist:\"%s\" AND release:\"%s\"", artist, album)
+	// 1. Limpiar el título del álbum de "ruido" común (Bootleg, Expanded, etc)
+	cleanAlbum := album
+	noiseRegex := []string{
+		`\(Expanded.*\)`, `\(Bootleg.*\)`, `\(Remastered.*\)`, `\(Deluxe.*\)`,
+		`\[Expanded.*\]`, `\[Bootleg.*\]`, `\[Remastered.*\]`, `\[Deluxe.*\]`,
+		`\(by .*\)`, 
+	}
+	
+	for _, pattern := range noiseRegex {
+		re := regexp.MustCompile("(?i)" + pattern)
+		cleanAlbum = re.ReplaceAllString(cleanAlbum, "")
+	}
+	cleanAlbum = strings.TrimSpace(cleanAlbum)
+	
+	// Limpieza de caracteres extraños al final
+	cleanAlbum = strings.TrimFunc(cleanAlbum, func(r rune) bool {
+		return r < 32 || r > 126 // Solo ASCII imprimible básico para la búsqueda inicial
+	})
+
+	// Ejecutar búsqueda estricta primero
+	releases, err := m.doSearch(artist, cleanAlbum, true)
+	if err == nil && len(releases) > 0 {
+		return releases, nil
+	}
+
+	// 2. Si falla, intentar limpiar más agresivamente (quitar todo lo que esté entre paréntesis)
+	aggressiveAlbum := cleanAlbum
+	if openParen := strings.Index(aggressiveAlbum, "("); openParen > 0 {
+		aggressiveAlbum = strings.TrimSpace(aggressiveAlbum[:openParen])
+	}
+
+	if aggressiveAlbum != cleanAlbum {
+		releases, err = m.doSearch(artist, aggressiveAlbum, false)
+		if err == nil && len(releases) > 0 {
+			return releases, nil
+		}
+	}
+
+	// 3. Fallback final: búsqueda difusa sin comillas
+	return m.doSearch(artist, aggressiveAlbum, false)
+}
+
+func (m *MBClient) doSearch(artist, album string, strict bool) ([]MBRelease, error) {
+	var parts []string
+	if artist != "" {
+		parts = append(parts, fmt.Sprintf("artist:\"%s\"", artist))
+	}
+	if album != "" {
+		if strict {
+			parts = append(parts, fmt.Sprintf("release:\"%s\"", album))
+		} else {
+			parts = append(parts, fmt.Sprintf("release:%s", album))
+		}
+	}
+	
+	query := strings.Join(parts, " AND ")
 	u := fmt.Sprintf("%s/release?query=%s&fmt=json", m.BaseURL, url.QueryEscape(query))
 	
 	req, _ := http.NewRequest("GET", u, nil)

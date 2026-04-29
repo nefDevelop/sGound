@@ -2,6 +2,8 @@
   import { createEventDispatcher } from 'svelte';
   import { fade } from 'svelte/transition';
   import Icon from './Icon.svelte';
+  import Artwork from './Artwork.svelte';
+  import CoverSearcher from './CoverSearcher.svelte';
   import { showToast, coverRefreshTrigger } from './stores.js';
   
   let { 
@@ -17,6 +19,7 @@
   let suggestions = $state([]);
   let activeSuggestionField = $state("");
   let applyCoverToAlbum = $state(false);
+  let isCoverSearcherOpen = $state(false);
   let fileInput;
 
   async function handleSave() {
@@ -214,19 +217,23 @@
     }
   }
 }}>
-  <div class="modal glass" onclick={(e) => e.stopPropagation()}>
-    <div class="modal-header">
-      <div class="header-info-wrap">
-        <div class="header-cover">
-          <img src="/api/cover/{track.id}?t={Date.now()}" alt="" />
+    <div class="modal glass" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-header">
+        <div class="header-info-wrap">
+          <Artwork 
+            src="/api/cover/{track.id}" 
+            size="56px" 
+            borderRadius="12px"
+            showSearchOverlay={true}
+            onclick={() => (isCoverSearcherOpen = true)}
+          />
+          <div class="header-info">
+            <h2>Edit Track Tags</h2>
+            <p class="subtitle">{track.title || 'Untitled'}</p>
+          </div>
         </div>
-        <div class="header-info">
-          <h2>Edit Track Tags</h2>
-          <p class="subtitle">{track.title || 'Untitled'}</p>
-        </div>
+        <button class="close-btn" onclick={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
       </div>
-      <button class="close-btn" onclick={closeModal}><Icon name="x" size={20} color="#94a3b8" /></button>
-    </div>
 
     <div class="bulk-layout">
       <aside class="bulk-sidebar">
@@ -348,9 +355,18 @@
     </div>
   </div>
 </div>
+
+<CoverSearcher 
+  bind:isOpen={isCoverSearcherOpen}
+  trackId={track.id}
+  albumId={track.albumId || track.album_id} 
+  initialArtist={track.artist}
+  initialAlbum={track.album}
+/>
 {/if}
 
 <style>
+  /* ... (previous styles) ... */
   .modal-backdrop {
     position: fixed;
     top: 0; left: 0; width: 100%; height: 100%;
@@ -368,7 +384,7 @@
     border-radius: 40px;
     width: 95%;
     max-width: 1000px;
-    height: 80vh;
+    max-height: 90vh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 40px 120px rgba(0,0,0,0.6);
@@ -382,14 +398,24 @@
     align-items: center;
     padding: 1.5rem 2.5rem;
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
   }
   .header-info-wrap { display: flex; align-items: center; gap: 1.5rem; }
-  .header-cover { width: 50px; height: 50px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border-color); }
-  .header-cover img { width: 100%; height: 100%; object-fit: cover; }
   .header-info h2 { margin: 0; font-size: 0.85rem; font-weight: 900; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1.5px; }
   .header-info .subtitle { margin: 0; font-size: 1.1rem; color: white; font-weight: 800; }
 
   .bulk-layout { display: grid; grid-template-columns: 280px 1fr; gap: 0; flex: 1; overflow: hidden; }
+  
+  @media (max-width: 768px) {
+    .bulk-layout { grid-template-columns: 1fr; overflow-y: auto; display: block; }
+    .modal { border-radius: 24px; height: 95vh; }
+    .modal-header { padding: 1rem 1.5rem; }
+    .footer-actions { padding: 1rem 1.5rem; flex-direction: column-reverse; }
+    .save-btn { width: 100%; }
+    .bulk-sidebar { border-right: none; border-bottom: 1px solid var(--border-color); overflow: visible; padding: 1.5rem; }
+    .tracks-scroll { overflow: visible; padding: 1.5rem; }
+  }
+
   .bulk-sidebar { 
     display: flex; flex-direction: column; gap: 1.5rem; padding: 2.5rem;
     background: rgba(0,0,0,0.15); border-right: 1px solid var(--border-color);
@@ -423,16 +449,27 @@
   .res-title { font-weight: 700; color: white; font-size: 0.85rem; }
   .res-sub { font-size: 0.75rem; color: var(--text-muted); }
 
-  .tracks-list-area { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .tracks-list-area { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   .tracks-scroll { flex: 1; overflow-y: auto; padding: 2.5rem; }
+
+  @media (max-width: 480px) {
+    .tracks-scroll { padding: 1.5rem; }
+    .form-grid { grid-template-columns: 1fr; }
+  }
 
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
   .col-span-2 { grid-column: span 2; }
 
-  .tag-form label { display: flex; flex-direction: column; gap: 0.5rem; color: var(--text-muted); font-size: 0.85rem; font-weight: 700; }
+  .tag-form label { 
+    display: flex; flex-direction: column; gap: 0.5rem; 
+    color: var(--text-muted); font-size: 0.85rem; font-weight: 700;
+    min-width: 0; /* Evita desbordamiento en flex */
+  }
   .tag-form input, .tag-form textarea {
     background: var(--surface-container); border: 1px solid var(--border-color);
     color: white; padding: 0.8rem 1.2rem; border-radius: 14px; outline: none; transition: all 0.2s;
+    width: 100%;
+    box-sizing: border-box;
   }
   .tag-form input:focus, .tag-form textarea:focus { border-color: var(--primary); background: var(--surface); }
   .tag-form textarea { height: 120px; font-family: inherit; }
@@ -451,7 +488,9 @@
 
   .footer-actions {
     display: flex; justify-content: flex-end; gap: 1.5rem;
-    padding: 2rem 2.5rem; border-top: 1px solid var(--border-color); background: rgba(0,0,0,0.1);
+    padding: 1.5rem 2.5rem; border-top: 1px solid var(--border-color); 
+    background: rgba(0,0,0,0.15);
+    flex-shrink: 0;
   }
   .save-btn {
     background: var(--primary); color: white; padding: 1rem 3rem;
@@ -459,8 +498,8 @@
     box-shadow: 0 10px 30px var(--primary-20); transition: all 0.2s;
   }
   .save-btn:hover { transform: translateY(-3px); }
-  .cancel-btn { background: transparent; border: none; color: #64748b; font-weight: 600; cursor: pointer; }
+  .cancel-btn { background: transparent; border: none; color: #64748b; font-weight: 600; cursor: pointer; padding: 0.8rem; }
 
   input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
-  input[type=number] { -moz-appearance: textfield; }
+  input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 </style>

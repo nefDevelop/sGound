@@ -1,7 +1,8 @@
 <script>
   import { coverRefreshTrigger } from './stores.js';
-  /** @type {{ src: string, alt?: string, size?: string, borderRadius?: string, onclick?: (e: MouseEvent) => void }} */
-  let { src, alt = "Cover", size = "100%", borderRadius = "24px", onclick } = $props();
+  import Icon from './Icon.svelte';
+  /** @type {{ src: string, alt?: string, size?: string, borderRadius?: string, showSearchOverlay?: boolean, onclick?: (e: MouseEvent) => void }} */
+  let { src, alt = "Cover", size = "100%", borderRadius = "24px", showSearchOverlay = false, onclick } = $props();
   
   let loaded = $state(false);
   let error = $state(false);
@@ -23,8 +24,11 @@
   }
 </script>
 
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div 
   class="artwork-container" 
+  class:interactive={onclick || showSearchOverlay}
   style:width={size} 
   style:height={size} 
   style:border-radius={borderRadius}
@@ -44,6 +48,12 @@
     onerror={handleError}
   />
 
+  {#if showSearchOverlay}
+    <div class="search-overlay">
+      <Icon name="search" size={24} color="white" />
+    </div>
+  {/if}
+
   {#if error}
     <div class="error-fallback" style:border-radius={borderRadius}>
        <span class="fallback-text">{alt.charAt(0).toUpperCase()}</span>
@@ -61,6 +71,32 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  .artwork-container.interactive {
+    cursor: pointer;
+  }
+  .artwork-container.interactive:hover {
+    transform: scale(1.05);
+    z-index: 10;
+  }
+
+  .search-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(var(--primary-rgb), 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 5;
+  }
+
+  .artwork-container:hover .search-overlay {
+    opacity: 1;
   }
 
   .skeleton {

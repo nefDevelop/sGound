@@ -718,34 +718,43 @@ func (s *Server) handleLibraryResyncIndex(w http.ResponseWriter, r *http.Request
 		return
 	}
 	
-	err := s.executeTransaction(func(tx *sql.Tx) error {
-		// Clear search index
-		if _, err := tx.Exec("DELETE FROM search_idx"); err != nil {
-			return fmt.Errorf("failed to clear index: %w", err)
+	dbase := s.getDB(r)
+	
+	// 1. REPARACIÓN PROFUNDA DE ARTISTAS (Limpieza de corrupción y re-vinculación)
+	slog.Info("🛠️ Starting Deep Artist Metadata Repair...")
+	rows, err := dbase.Conn.Query("SELECT id, artist FROM tracks")
+	if err == nil {
+		defer rows.Close()
+		count := 0
+		for rows.Next() {
+			var trackID, rawArtist string
+			if err := rows.Scan(&trackID, &rawArtist); err == nil {
+				// Limpiar nombre y generar ID normalizado
+				cleanArtist := utils.SanitizeString(rawArtist)
+				artistID := utils.GenerateID(utils.NormalizeArtist(cleanArtist))
+				
+				// Asegurar que existe el artista con el nombre limpio
+				_, _ = dbase.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, cleanArtist)
+				
+				// Actualizar la canción para que apunte al ID correcto y tenga el nombre limpio
+				_, _ = dbase.Conn.Exec("UPDATE tracks SET artist = ? WHERE id = ?", cleanArtist, trackID)
+				count++
+			}
 		}
-		
-		// Re-insert all active tracks
-		_, err := tx.Exec(`
-			INSERT INTO search_idx(id, title, artist, album, genre)
-			SELECT t.id, t.title, COALESCE(t.artist, 'Unknown'), COALESCE(al.title, 'Unknown'), COALESCE(t.genre, 'Unknown')
-			FROM tracks t
-			LEFT JOIN albums al ON t.album_id = al.id
-			WHERE t.status = 'active'
-		`)
-		if err != nil {
-			return fmt.Errorf("failed to re-insert tracks: %w", err)
-		}
-		return nil
-	})
+		slog.Info("✅ Deep Artist Repair completed", "processed_tracks", count)
+	}
+
+	// 2. RECONSTRUCCIÓN DEL ÍNDICE DE BÚSQUEDA (FTS5 usa sintaxis especial)
+	_, err = dbase.Conn.Exec("INSERT INTO search_idx(search_idx) VALUES('rebuild')")
 
 	if err != nil {
-		slog.Error("Search index resync failed", "error", err)
+		slog.Error("Library resync failed", "error", err)
 		http.Error(w, "Resync failed: " + err.Error(), http.StatusInternalServerError)
 		return
 	}
 	
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"success", "message":"Search index rebuilt"}`))
+	w.Write([]byte(`{"status":"success", "message":"Library metadata repaired and index rebuilt"}`))
 }
 
 func (s *Server) handleLibraryCleanPlaylists(w http.ResponseWriter, r *http.Request) {
@@ -957,11 +966,16 @@ func (s *Server) handleOrganizeStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) EnrichArtists() {
 	go func() {
 		slog.Info("🚀 Background artist enrichment started")
+		now := time.Now().Unix()
+		dayAgo := now - 86400
+
 		query := `
-			SELECT DISTINCT id, name 
+			SELECT id, name 
 			FROM artists 
-			WHERE (image_url IS NULL OR image_url = '') OR (bio IS NULL OR bio = '')`
-		rows, err := s.MasterDB.Conn.Query(query)
+			WHERE ((image_url IS NULL OR image_url = '') OR (bio IS NULL OR bio = ''))
+			  AND (last_enrich_attempt < ?)`
+		
+		rows, err := s.MasterDB.Conn.Query(query, dayAgo)
 		if err != nil {
 			slog.Error("Failed to query artists for enrichment", "error", err)
 			return
@@ -978,17 +992,14 @@ func (s *Server) EnrichArtists() {
 		}
 
 		if len(tasks) == 0 {
-			slog.Info("✨ All artists are already enriched")
+			slog.Info("✨ No artists need enrichment at this moment")
 			return
 		}
 
-		// Use a worker pool of 3 to speed things up
 		jobs := make(chan artistTask, len(tasks))
 		var wg sync.WaitGroup
-		numWorkers := 3
-		if len(tasks) < numWorkers {
-			numWorkers = len(tasks)
-		}
+		numWorkers := 5
+		if len(tasks) < numWorkers { numWorkers = len(tasks) }
 
 		for w := 1; w <= numWorkers; w++ {
 			wg.Add(1)
@@ -1000,29 +1011,25 @@ func (s *Server) EnrichArtists() {
 						continue
 					}
 					
+					_, _ = s.MasterDB.Conn.Exec("UPDATE artists SET last_enrich_attempt = ? WHERE id = ?", now, a.ID)
+
 					ext, err := s.externalMeta.GetArtistInfo(a.Name)
 					if err == nil && ext != nil {
 						tagsStr := strings.Join(ext.Tags, ",")
 						similarStr := strings.Join(ext.Similar, ",")
-						err = s.MasterDB.Conn.QueryRow("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ? RETURNING name", 
-							ext.Image, ext.Biography, tagsStr, similarStr, a.ID).Scan(&a.Name)
+						_, err = s.MasterDB.Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ?, last_enrich_attempt = ? WHERE id = ?", 
+							ext.Image, ext.Biography, tagsStr, similarStr, now, a.ID)
+						
 						if err == nil {
 							slog.Info("✨ Artist enriched successfully", "name", a.Name, "hasImage", ext.Image != "")
-						} else {
-							// Fallback if RETURNING is not supported or fails
-							_, _ = s.MasterDB.Conn.Exec("UPDATE artists SET image_url = ?, bio = ?, tags = ?, similar = ? WHERE id = ?", 
-								ext.Image, ext.Biography, tagsStr, similarStr, a.ID)
-							slog.Info("✨ Artist enriched successfully", "id", a.ID, "hasImage", ext.Image != "")
 						}
 					}
-					// Still sleep a bit to avoid aggressive rate-limiting
-					time.Sleep(250 * time.Millisecond)
+					time.Sleep(100 * time.Millisecond)
 				}
 			}()
 		}
 
 		for _, task := range tasks {
-			slog.Debug("⏳ Queuing artist for enrichment", "name", task.Name)
 			jobs <- task
 		}
 		close(jobs)

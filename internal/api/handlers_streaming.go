@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/disintegration/imaging"
 	"sgound/internal/db"
 	"sgound/internal/tags"
-	"sgound/internal/utils"
+
+	"github.com/disintegration/imaging"
 )
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +36,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	absTrackPath, _ := filepath.Abs(fpath)
-	
+
 	// Si el archivo no existe en la ruta absoluta, podría ser un desajuste de Docker/Host
 	if _, err := os.Stat(absTrackPath); os.IsNotExist(err) {
 		slog.Warn("File not found at DB path, attempting correction", "db_path", fpath)
@@ -242,7 +242,12 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		s.servePlaceholderArtist(w)
 		return
 	}
+	s.handleGetArtistImageWithID(artistID, w, r)
+}
 
+// handleGetArtistImageWithID es el núcleo del procesamiento de imágenes de artistas.
+// Separa la resolución del ID de la lógica real para poder llamarse desde distintos puntos.
+func (s *Server) handleGetArtistImageWithID(artistID string, w http.ResponseWriter, r *http.Request) {
 	cachePath := filepath.Join(s.Config.CachePath, "artists", artistID+".jpg")
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 
@@ -255,53 +260,27 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Final check: if we have it in cache (either from before or just processed), serve it
 	_, err, _ := s.sf.Do("artist_img_"+artistID, func() (interface{}, error) {
-		// Re-check cache inside singleflight to ensure we don't process if another request finished
 		if _, err := os.Stat(cachePath); err == nil {
 			return nil, nil
 		}
 
 		var imageURL string
 		var name string
-		
+
 		// 1. Intentar buscar por ID exacto
 		err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ?", artistID).Scan(&imageURL, &name)
 		if err != nil {
-			var foundName string
-			// (Lógica de auto-repair que ya teníamos...)
-			// Intentar encontrar qué nombre de artista genera este ID recorriendo los artistas únicos en tracks
-			rows, _ := s.getDB(r).Conn.Query("SELECT DISTINCT artist FROM tracks WHERE status = 'active' AND artist IS NOT NULL AND artist != ''")
-			if rows != nil {
-				defer rows.Close()
-				for rows.Next() {
-					var aName string
-					if err := rows.Scan(&aName); err == nil {
-						if utils.GenerateID(aName) == artistID {
-							foundName = aName
-							break
-						}
-					}
-				}
+			if len(artistID) < 40 {
+				_ = s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE name = ?", artistID).Scan(&imageURL, &name)
 			}
 
-			if foundName != "" {
-				slog.Info("🛠️ Auto-repairing missing artist record", "id", artistID, "name", foundName)
-				_, _ = s.getDB(r).Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, foundName)
-				name = foundName
-			} else {
-				if len(artistID) != 40 {
-					err = s.getDB(r).Conn.QueryRow("SELECT id, image_url, name FROM artists WHERE name = ?", artistID).Scan(&artistID, &imageURL, &name)
-				}
-				
-				if err != nil && foundName == "" {
-					return nil, fmt.Errorf("artist not found in DB: %s", artistID)
-				}
+			if name == "" {
+				return nil, fmt.Errorf("artist not found in DB: %s", artistID)
 			}
 		}
 
 		if imageURL == "" {
-			// Usar SingleFlight por NOMBRE de artista para evitar peticiones redundantes a Wikipedia/Last.fm
 			res, _, _ := s.sf.Do("ext_meta_"+name, func() (interface{}, error) {
 				slog.Info("🔍 No image URL in DB, fetching external info", "artist", name)
 				ext, _ := s.externalMeta.GetArtistInfo(name)
@@ -318,6 +297,7 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if imageURL == "" {
+			_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET last_enrich_attempt = ? WHERE id = ?", time.Now().Unix(), artistID)
 			return nil, fmt.Errorf("no image url found for artist: %s", name)
 		}
 
@@ -357,11 +337,8 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 
 		slog.Info("🎨 Image decoded", "artist", name, "format", format, "size", len(imgData))
 
-		// Asegurar directorio antes de guardar
 		cacheDir := filepath.Dir(cachePath)
 		if err := os.MkdirAll(cacheDir, 0755); err != nil {
-			slog.Error("📁 Primary cache failed, trying system temp", "path", cacheDir, "error", err)
-			// Fallback: usar directorio temporal del sistema si el configurado falla
 			tempCacheDir := filepath.Join(os.TempDir(), "sgound-cache", "artists")
 			os.MkdirAll(tempCacheDir, 0755)
 			cachePath = filepath.Join(tempCacheDir, artistID+".jpg")
@@ -380,7 +357,6 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		slog.Warn("Artist image process failed", "artistID", artistID, "error", err)
-		// Si falló y el archivo NO existe, servimos el placeholder sin cachear el error
 		if _, statErr := os.Stat(cachePath); statErr != nil {
 			s.servePlaceholderArtist(w)
 			return

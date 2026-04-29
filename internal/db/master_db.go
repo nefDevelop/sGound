@@ -226,6 +226,7 @@ func (db *MasterDatabase) initSchema() error {
 	db.addColumnIfNotExists("artists", "bio", "TEXT")
 	db.addColumnIfNotExists("artists", "tags", "TEXT")
 	db.addColumnIfNotExists("artists", "similar", "TEXT")
+	db.addColumnIfNotExists("artists", "last_enrich_attempt", "INTEGER DEFAULT 0")
 	db.addColumnIfNotExists("albums", "cover_id", "TEXT")
 	db.addColumnIfNotExists("albums", "cover_width", "INTEGER")
 	db.addColumnIfNotExists("albums", "cover_height", "INTEGER")

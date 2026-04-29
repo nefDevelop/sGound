@@ -7,6 +7,7 @@
   let {
     isOpen = $bindable(false),
     albumId = "",
+    trackId = "",
     initialArtist = "",
     initialAlbum = "",
     onapply = null,
@@ -31,7 +32,7 @@
   });
 
   async function search() {
-    if (!artist || !album) return;
+    if (!artist && !album) return;
     loading = true;
     results = [];
     try {
@@ -53,15 +54,30 @@
     const coverUrl = `https://coverartarchive.org/release/${releaseId}/front-500`;
 
     try {
-      // 1. Get all tracks for this album to apply the cover to all of them
-      const tracksRes = await fetch(`/api/albums/${albumId}/tracks`);
-      if (!tracksRes.ok) throw new Error("Failed to get album tracks");
-      const tracks = await tracksRes.json();
+      let trackIds = [];
+      
+      // 1. Intentar obtener todas las pistas del álbum si tenemos ID
+      if (albumId && albumId !== "") {
+        const tracksRes = await fetch(`/api/albums/${albumId}/tracks`);
+        if (tracksRes.ok) {
+          const tracksData = await tracksRes.json();
+          trackIds = tracksData.map(t => t.id);
+        }
+      } 
+      
+      // 2. Si no hay álbum o falló, usar el trackId individual como fallback
+      if (trackIds.length === 0 && trackId) {
+        trackIds = [trackId];
+      }
 
-      showToast(`Applying cover to ${tracks.length} tracks...`, "info");
+      if (trackIds.length === 0) {
+        throw new Error("No track reference available");
+      }
 
-      const promises = tracks.map((t) =>
-        fetch(`/api/tracks/${t.id}/cover-url`, {
+      showToast(`Applying cover to ${trackIds.length} tracks...`, "info");
+
+      const promises = trackIds.map((id) =>
+        fetch(`/api/tracks/${id}/cover-url`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: coverUrl }),
@@ -70,10 +86,12 @@
 
       await Promise.all(promises);
 
-      // 2. Clear album metadata in DB to force rescan of dimensions
-      await fetch(`/api/library/rescan-cover?id=${albumId}`, {
-        method: "POST",
-      });
+      // 3. Refrescar el álbum solo si existe
+      if (albumId) {
+        await fetch(`/api/library/rescan-cover?id=${albumId}`, {
+          method: "POST",
+        });
+      }
 
       showToast("HD Cover applied successfully", "success");
       coverRefreshTrigger.set(Date.now());
@@ -347,8 +365,8 @@
   .results-container {
     flex: 1;
     overflow-y: auto;
-    padding: 2.5rem;
-    min-height: 400px;
+    padding: 3rem;
+    min-height: 450px;
   }
 
   .status-box {
@@ -367,8 +385,8 @@
 
   .cover-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 2rem;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 2.5rem;
   }
 
   .cover-card {
@@ -378,12 +396,12 @@
     cursor: pointer;
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 1.2rem;
     text-align: left;
-    transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1);
+    transition: transform 0.4s cubic-bezier(0.2, 0, 0, 1);
   }
   .cover-card:hover {
-    transform: translateY(-8px);
+    transform: translateY(-12px);
   }
 
   .img-wrapper {

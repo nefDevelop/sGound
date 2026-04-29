@@ -282,15 +282,17 @@
   .logout-btn:hover { background: rgba(248, 113, 113, 0.1) !important; }
 
   @media (max-width: 1100px) {
-    .nav-label, .brand h2, .nav-item span, .nav-badge { display: none; }
-    .brand { justify-content: center; padding: 1rem 0; width: 100%; }
+    .nav-label, .brand h2, .nav-item span, .nav-badge, .nav-divider { display: none; }
+    .brand { justify-content: center; padding: 1rem 0; width: 100%; margin-bottom: 1.5rem; }
+    .logo { width: 40px; height: 40px; } /* Ligeramente más grande para el rail */
     .sidebar { align-items: center; padding: 1.5rem 0; width: 80px; }
+    nav { align-items: center; gap: 0.8rem; }
     .nav-item { 
-      width: 48px; 
-      height: 48px; 
+      width: 52px; 
+      height: 52px; 
       justify-content: center; 
       padding: 0; 
-      margin: 0.4rem 0;
+      margin: 0;
       border-radius: 16px; 
     }
   }

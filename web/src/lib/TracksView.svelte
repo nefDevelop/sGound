@@ -5,6 +5,7 @@
   import { get } from 'svelte/store';
   import { showToast, coverRefreshTrigger } from './stores.js';
   import Artwork from './Artwork.svelte';
+  import CoverSearcher from './CoverSearcher.svelte';
   
   let { 
     tracks = $bindable([]), 
@@ -28,6 +29,8 @@
   
   let selectedIds = $state(new Set());
   let sortConfig = $state({ field: 'title', direction: 'asc' });
+  let isCoverSearcherOpen = $state(false);
+  let activeTrackForCover = $state(null);
 
   // Virtualization state
   let scrollTop = $state(0);
@@ -415,10 +418,16 @@
                 <td class="title-cell" ondblclick={(e) => startEdit(track, 'title', e)}>
                   <div class="flex-align">
                     <Artwork 
-                      src={`/api/cover/${track.id}?v=${$coverRefreshTrigger}`} 
+                      src={`/api/cover/${track.id}`} 
                       size="40px" 
                       borderRadius="10px" 
                       alt="" 
+                      showSearchOverlay={true}
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        activeTrackForCover = track;
+                        isCoverSearcherOpen = true;
+                      }}
                     />
                     <div class="info-stack">
                       {#if editingCell.trackId === track.id && editingCell.field === 'title'}
@@ -599,6 +608,16 @@
     items={contextMenu.items}
     onclose={() => contextMenu.visible = false}
   />
+
+  {#if activeTrackForCover}
+    <CoverSearcher 
+      bind:isOpen={isCoverSearcherOpen}
+      trackId={activeTrackForCover.id}
+      albumId={activeTrackForCover.albumId || activeTrackForCover.album_id}
+      initialArtist={activeTrackForCover.artist}
+      initialAlbum={activeTrackForCover.album}
+    />
+  {/if}
 </div>
 
 <style>

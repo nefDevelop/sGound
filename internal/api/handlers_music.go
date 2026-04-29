@@ -12,6 +12,7 @@ import (
 
 	"sgound/internal/db"
 	"sgound/internal/models"
+	"sgound/internal/utils"
 )
 
 func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +31,27 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 		args = append(args, pathArgs...)
 	}
 
+	// AUTO-SYNC (Síncrono para evitar errores de carga de imagen inmediata)
+	dbase := s.getDB(r)
+	// Buscamos nombres de artistas en tracks que no estén en la tabla artists
+	repairQuery := `
+		SELECT DISTINCT artist 
+		FROM tracks 
+		WHERE artist IS NOT NULL AND artist != '' AND artist != 'Unknown'
+		  AND artist NOT IN (SELECT name FROM artists)`
+	rows, err := dbase.Conn.Query(repairQuery)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err == nil {
+				artistID := utils.GenerateID(utils.NormalizeArtist(name))
+				_, _ = dbase.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, name)
+				slog.Info("🔧 Synchronously repaired missing artist entry", "name", name)
+			}
+		}
+	}
+
 	// Pagination
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
@@ -46,20 +68,29 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	query := fmt.Sprintf(`
-		SELECT ar.id, ar.name, COUNT(DISTINCT al.id) as album_count, COALESCE(ar.image_url, '')
+	// Consulta ultra-robusta: lista todos los artistas y cuenta sus álbumes/canciones de forma independiente
+	query := `
+		SELECT 
+			ar.id, 
+			ar.name, 
+			(SELECT COUNT(*) FROM albums WHERE artist_id = ar.id) as album_count,
+			COALESCE(ar.image_url, '')
 		FROM artists ar
-		JOIN albums al ON ar.id = al.artist_id
-		JOIN tracks t ON al.id = t.album_id
-		%s
-		GROUP BY ar.id, ar.name, ar.image_url
-		ORDER BY ar.name`, whereClause)
+		WHERE EXISTS (
+			SELECT 1 FROM tracks t 
+			JOIN albums al ON t.album_id = al.id 
+			WHERE al.artist_id = ar.id AND t.status IN ('active', 'pending', 'raw')
+		) OR EXISTS (
+			/* Caso especial para canciones sin álbum formal aún */
+			SELECT 1 FROM tracks t WHERE t.artist = ar.name AND t.status IN ('active', 'pending', 'raw')
+		)
+		ORDER BY ar.name`
 
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
 	}
 
-	rows, err := s.getDB(r).Conn.Query(query, args...)
+	rows, err = s.getDB(r).Conn.Query(query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -86,14 +117,21 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleArtistActions(w http.ResponseWriter, r *http.Request) {
+	// Extraer ID base sin sufijos
+	rawID := s.extractID(r, "/api/artists/")
+
 	if strings.HasSuffix(r.URL.Path, "/albums") {
-		artistID := s.extractID(r, "/api/artists/")
+		artistID := strings.TrimSuffix(rawID, "/albums")
 		s.handleGetArtistAlbums(artistID, w, r)
 		return
 	}
+	if strings.HasSuffix(r.URL.Path, "/image") {
+		artistID := strings.TrimSuffix(rawID, "/image")
+		s.handleGetArtistImageWithID(artistID, w, r)
+		return
+	}
 	if r.Method == http.MethodGet {
-		artistID := s.extractID(r, "/api/artists/")
-		s.handleGetArtist(artistID, w, r)
+		s.handleGetArtist(rawID, w, r)
 		return
 	}
 	http.NotFound(w, r)

@@ -16,7 +16,13 @@ func GenerateID(input string) string {
 // NormalizeArtist limpia el nombre de un artista para agrupamiento
 func NormalizeArtist(name string) string {
 	name = strings.ToLower(name)
+	// Eliminar caracteres no imprimibles o corruptos (común en tags mal codificados)
+	name = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 { return -1 }
+		return r
+	}, name)
 	name = strings.TrimSpace(name)
+	
 	separators := []string{" feat.", " ft.", " feat ", " ft ", " with "}
 	for _, sep := range separators {
 		if idx := strings.Index(name, sep); idx != -1 {
@@ -26,7 +32,15 @@ func NormalizeArtist(name string) string {
 	return strings.TrimSpace(name)
 }
 
-// NormalizeString limpia una cadena general
+// SanitizeString limpia una cadena de caracteres no imprimibles o corruptos
+func SanitizeString(s string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 { return -1 }
+		return r
+	}, s))
+}
+
+// NormalizeString limpia una cadena general (mantiene compatibilidad)
 func NormalizeString(s string) string {
-	return strings.TrimSpace(s)
+	return SanitizeString(s)
 }

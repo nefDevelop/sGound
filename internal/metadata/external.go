@@ -29,57 +29,41 @@ func NewExternalMetadata(cfg *config.Config) *ExternalMetadata {
 	return &ExternalMetadata{Config: cfg}
 }
 
-// GetArtistInfo consulta Wikipedia y Last.fm para obtener info completa
 func (e *ExternalMetadata) GetArtistInfo(artistName string) (*ArtistInfo, error) {
 	artistName = strings.TrimSpace(artistName)
 	artistName = strings.TrimSuffix(artistName, ".")
 
 	slog.Info("🌐 Fetching external metadata for artist", "artist", artistName)
+	info := &ArtistInfo{}
 
-	// 1. Wikipedia para Bio e Imagen (Prioridad absoluta)
+	// 1. Deezer como fuente prioritaria y de alta calidad para imágenes
+	e.enrichWithDeezer(artistName, info)
+
+	// 2. Wikipedia para Bio y como respaldo de imagen
 	wikiTitle := strings.ReplaceAll(artistName, " ", "_")
 	
 	// Idioma configurado
 	primaryLang := e.Config.Language
-	secondaryLang := "en"
-	if primaryLang == "en" {
-		secondaryLang = "es"
-	}
 
-	info, _ := e.fetchSummary(wikiTitle, primaryLang)
-	if info == nil || info.Image == "" {
-		// Intentar buscar el título exacto en Wikipedia si el directo falló
-		bestTitle := e.searchBestTitle(artistName)
-		if bestTitle != "" && bestTitle != wikiTitle {
-			info, _ = e.fetchSummary(bestTitle, primaryLang)
-		}
-	}
-
-	if info == nil || info.Image == "" {
-		wInfo2, _ := e.fetchSummary(wikiTitle, secondaryLang)
-		if wInfo2 != nil {
-			if info == nil {
-				info = wInfo2
-			} else if info.Image == "" {
-				info.Image = wInfo2.Image
-				if info.Biography == "" {
-					info.Biography = wInfo2.Biography
-				}
+	if info.Image == "" || info.Biography == "" {
+		wInfo, _ := e.fetchSummary(wikiTitle, primaryLang)
+		if wInfo == nil || wInfo.Image == "" {
+			bestTitle := e.searchBestTitle(artistName)
+			if bestTitle != "" && bestTitle != wikiTitle {
+				wInfo, _ = e.fetchSummary(bestTitle, primaryLang)
 			}
 		}
+
+		if wInfo != nil {
+			if info.Image == "" { info.Image = wInfo.Image }
+			if info.Biography == "" { info.Biography = wInfo.Biography }
+		}
 	}
 
-	if info == nil {
-		info = &ArtistInfo{Biography: "No details found."}
-	}
-
-	// 2. Last.fm para Similares y Tags
+	// 3. Last.fm para Similares, Tags y último recurso de imagen
 	e.enrichWithLastFM(artistName, info)
 
-	// 3. Deezer como fuente de respaldo de alta calidad para imágenes
-	if info.Image == "" {
-		e.enrichWithDeezer(artistName, info)
-	}
+	if info.Biography == "" { info.Biography = "No details found." }
 
 	return info, nil
 }

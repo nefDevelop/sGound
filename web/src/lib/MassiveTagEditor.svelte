@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import Icon from './Icon.svelte';
+  import Artwork from './Artwork.svelte';
   import { showToast, coverRefreshTrigger, libraryRefreshTrigger } from './stores.js';
   import { fade } from 'svelte/transition';
   import CoverSearcher from './CoverSearcher.svelte';
@@ -484,14 +485,13 @@
       <div class="modal-header">
         <div class="header-info-wrap">
           {#if albumInfo}
-            <div class="header-cover-wrapper">
-              <button class="header-cover clickable" onclick={() => coverSearcherOpen = true} title="Click to search only cover">
-                <img src="/api/cover/{albumInfo.coverTrackId}?v={$coverRefreshTrigger}" alt="" />
-                <div class="cover-edit-hint">
-                  <Icon name="search" size={20} />
-                </div>
-              </button>
-            </div>
+            <Artwork 
+              src="/api/cover/{albumInfo.coverTrackId}" 
+              size="60px" 
+              borderRadius="12px"
+              showSearchOverlay={true}
+              onclick={() => (coverSearcherOpen = true)}
+            />
           {/if}
           <div class="header-info">
             <h2>{albumInfo ? 'Album Editor' : 'Bulk Edit Tags'}</h2>
@@ -803,6 +803,25 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
+  @media (max-width: 768px) {
+    .bulk-layout { grid-template-columns: 1fr; overflow-y: auto; display: block; }
+    .modal { border-radius: 24px; height: 95vh; }
+    .modal-header { padding: 1rem 1.5rem; flex-shrink: 0; }
+    .footer-actions { padding: 1rem 1.5rem; flex-direction: column-reverse; }
+    .save-btn { width: 100%; }
+    .bulk-sidebar { border-right: none; border-bottom: 1px solid var(--border-color); overflow: visible; padding: 1.5rem; }
+    .tracks-list-area { min-height: 400px; overflow: visible; }
+    .tracks-scroll { overflow-x: auto; padding: 0; width: 100%; display: block; }
+    
+    /* Ocultar columnas secundarias en móvil para ahorrar espacio */
+    .mini-tracks-table th:nth-child(4), 
+    .mini-tracks-table td:nth-child(4),
+    .mini-tracks-table th:nth-child(5),
+    .mini-tracks-table td:nth-child(5) {
+      display: none;
+    }
+  }
+
   .bulk-layout { display: grid; grid-template-columns: 340px 1fr; gap: 0; flex: 1; overflow: hidden; position: relative; }
 
   .bulk-sidebar { 
@@ -821,16 +840,16 @@
 
   .tag-form { display: flex; flex-direction: column; gap: 1rem; }
 
-  .tag-form label { display: flex; flex-direction: column; gap: 0.4rem; color: var(--text-muted); font-size: 0.8rem; font-weight: 700; }
-
+  .tag-form label { 
+    display: flex; flex-direction: column; gap: 0.5rem; 
+    color: var(--text-muted); font-size: 0.8rem; font-weight: 700;
+    min-width: 0;
+  }
   .tag-form input {
-    background: var(--surface-container); 
-    border: 1px solid var(--border-color);
-    color: white; 
-    padding: 0.6rem 1rem; 
-    border-radius: 12px; 
-    outline: none;
-    transition: all 0.2s;
+    background: var(--surface-container); border: 1px solid var(--border-color);
+    color: white; padding: 0.7rem 1rem; border-radius: 12px; outline: none; transition: all 0.2s;
+    width: 100%;
+    box-sizing: border-box;
     font-size: 0.9rem;
   }
   .tag-form input:focus { border-color: var(--primary); background: var(--surface); }
@@ -941,12 +960,23 @@
   
   .mini-tracks-table .bold { font-weight: 700; color: white; }
   .mini-tracks-table .muted { color: var(--text-muted); opacity: 0.8; }
+  .tracks-list-area { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; overflow: hidden; }
+  .tracks-scroll { flex: 1; overflow-y: auto; padding: 0; }
 
-  .drag-handle { width: 30px; cursor: grab; opacity: 0.5; transition: opacity 0.2s; }
-  .track-row:hover .drag-handle { opacity: 1; }
-  
-  .is-dragging { opacity: 0.4; background: var(--surface-container-highest) !important; }
-  .drag-over { border-bottom: 2px solid var(--primary); }
+  .mini-tracks-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .mini-tracks-table th { 
+    text-align: left; padding: 1rem 1.5rem; color: var(--text-muted); 
+    font-weight: 700; text-transform: uppercase; letter-spacing: 1px; 
+    font-size: 0.7rem; border-bottom: 1px solid var(--border-color);
+    position: sticky; top: 0; background: var(--surface-container-highest); z-index: 5;
+  }
+  .track-row { border-bottom: 1px solid var(--border-color); transition: background 0.2s; }
+  .track-row:hover { background: rgba(var(--primary-rgb), 0.05); }
+  .track-row.is-dragging { opacity: 0.5; background: var(--primary-10); }
+  .track-row.drag-over { border-top: 2px solid var(--primary); }
+
+  .mini-tracks-table td { padding: 1rem 1.5rem; color: var(--text-main); }
+  .drag-handle { width: 30px; cursor: move; }
 
   .track-num-cell { width: 40px; }
   .slot-num { font-weight: 900; color: var(--primary); font-size: 1rem; opacity: 0.8; }
@@ -971,9 +1001,10 @@
     display: flex; 
     justify-content: flex-end; 
     gap: 1.5rem;
-    padding: 2rem 2.5rem; 
+    padding: 1.5rem 2.5rem; 
     border-top: 1px solid var(--border-color);
-    background: rgba(0,0,0,0.1);
+    background: rgba(0,0,0,0.15);
+    flex-shrink: 0;
   }
 
   .save-btn {
@@ -993,7 +1024,7 @@
   .save-btn:hover { transform: translateY(-3px); box-shadow: 0 15px 40px var(--primary-30); }
   .save-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
 
-  .cancel-btn { background: transparent; border: none; color: #64748b; font-weight: 600; cursor: pointer; }
+  .cancel-btn { background: transparent; border: none; color: #64748b; font-weight: 600; cursor: pointer; padding: 0.8rem; }
 
   /* Hide number input spinners */
   input::-webkit-outer-spin-button,

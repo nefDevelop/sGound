@@ -174,7 +174,7 @@ func WritePersistentID(path string, id string) error {
 	})
 }
 
-func updateMP3(path string, trackID string, data map[string]interface{}) error {
+func updateMP3(path string, _ string, data map[string]interface{}) error {
 	return SafeSave(path, func(tempPath string) error {
 		args := []string{"-i", path}
 		
@@ -198,7 +198,7 @@ func updateMP3(path string, trackID string, data map[string]interface{}) error {
 	})
 }
 
-func updateFLAC(path string, trackID string, data map[string]interface{}) error {
+func updateFLAC(path string, _ string, data map[string]interface{}) error {
 	return SafeSave(path, func(tempPath string) error {
 		args := []string{"-i", path}
 		

@@ -311,8 +311,8 @@ func (s *Server) handleMetadataSearchAlbum(w http.ResponseWriter, r *http.Reques
 	artist := r.URL.Query().Get("artist")
 	album := r.URL.Query().Get("album")
 
-	if artist == "" || album == "" {
-		http.Error(w, "Artist and album are required", http.StatusBadRequest)
+	if artist == "" && album == "" {
+		http.Error(w, "Artist or album are required", http.StatusBadRequest)
 		return
 	}
 
