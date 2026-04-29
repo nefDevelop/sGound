@@ -33,8 +33,14 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	absMusicPath, _ := filepath.Abs(s.Config.MusicPath)
 	absTrackPath, _ := filepath.Abs(fpath)
-	if !strings.HasPrefix(absTrackPath, absMusicPath) {
-		slog.Error("Unauthorized file access attempt", "path", fpath, "user", user.Username)
+	
+	rel, err := filepath.Rel(absMusicPath, absTrackPath)
+	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		slog.Error("Unauthorized file access attempt", 
+			"path", fpath, 
+			"absPath", absTrackPath,
+			"musicPath", absMusicPath,
+			"user", user.Username)
 		http.Error(w, "Unauthorized", http.StatusForbidden)
 		return
 	}
@@ -45,7 +51,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	bitrate := r.URL.Query().Get("bitrate")
 	useFFmpeg := false
-	ffmpegArgs := []string{"-i", fpath}
+	ffmpegArgs := []string{"-i", absTrackPath}
 
 	if s.Config.ReplayGainEnabled && rg != 0 {
 		useFFmpeg = true
@@ -65,24 +71,25 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	if useFFmpeg {
 		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Header().Set("Transfer-Encoding", "chunked")
 		ffmpegArgs = append(ffmpegArgs, "-f", "mp3", "-map_metadata", "-1", "pipe:1")
 
 		cmd := exec.CommandContext(r.Context(), "ffmpeg", ffmpegArgs...)
 		cmd.Stdout = w
 		if err := cmd.Start(); err != nil {
-			slog.Error("FFmpeg streaming failed", "error", err, "args", ffmpegArgs)
-			http.Error(w, "Streaming failed", http.StatusInternalServerError)
+			slog.Error("FFmpeg streaming failed to start", "error", err, "path", absTrackPath, "args", ffmpegArgs)
+			http.Error(w, "Streaming failed: conversion engine error", http.StatusInternalServerError)
 			return
 		}
 
 		err := cmd.Wait()
 		if err != nil && r.Context().Err() == nil {
-			slog.Error("FFmpeg process finished with error", "error", err)
+			slog.Error("FFmpeg process finished with error", "error", err, "path", absTrackPath)
 		}
 		return
 	}
 
-	http.ServeFile(w, r, fpath)
+	http.ServeFile(w, r, absTrackPath)
 }
 
 func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {

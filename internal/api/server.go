@@ -275,10 +275,6 @@ func (s *Server) extractID(r *http.Request, prefix string) string {
 	id = strings.TrimSuffix(id, "/cover-url")
 	id = strings.TrimSuffix(id, "/cover")
 
-	if decoded, err := url.PathUnescape(id); err == nil {
-		id = decoded
-	}
-
 	return id
 }
 

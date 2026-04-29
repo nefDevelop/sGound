@@ -223,10 +223,14 @@ func (s *Server) internalApproveBatch(ids []string) {
 	processedAlbums := make(map[string]bool)
 
 	for _, oldID := range ids {
-		var path string
-		var albumID string
-		err := dbase.Conn.QueryRow("SELECT path, album_id FROM tracks WHERE id = ?", oldID).Scan(&path, &albumID)
+		var path, albumID, artistName, title, albumTitle string
+		err := dbase.Conn.QueryRow(`
+			SELECT t.path, t.album_id, t.artist, t.title, al.title 
+			FROM tracks t 
+			JOIN albums al ON t.album_id = al.id 
+			WHERE t.id = ?`, oldID).Scan(&path, &albumID, &artistName, &title, &albumTitle)
 		if err != nil {
+			slog.Error("Failed to fetch track for approval", "id", oldID, "error", err)
 			continue
 		}
 
@@ -234,74 +238,41 @@ func (s *Server) internalApproveBatch(ids []string) {
 			s.Watcher.MutePath(path, 15*time.Second)
 		}
 
-		newID := oldID
-
 		editor := tags.NewEditor(dbase)
 
+		// 1. Asegurar consistencia de Artista y Álbum
+		// Durante el escaneo 'raw' o 'pending', estos registros podrían ser genéricos.
+		// Al aprobar, los consolidamos.
+		artistID := utils.GenerateID(utils.NormalizeArtist(artistName))
+		_ = dbase.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, artistName)
+		
+		// Regenerar albumID basado en el artista real y título para evitar colisiones genéricas
+		groupingKey := "AA:" + utils.NormalizeArtist(artistName)
+		newAlbumID := utils.GenerateID(groupingKey + "|" + utils.NormalizeString(albumTitle))
+		
+		if newAlbumID != albumID {
+			_ = dbase.Conn.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES (?, ?, ?)", newAlbumID, artistID, albumTitle)
+			_ = dbase.Conn.Exec("UPDATE tracks SET album_id = ? WHERE id = ?", newAlbumID, oldID)
+			albumID = newAlbumID
+		}
+
+		// 2. Procesar Carátula (solo una vez por álbum en el lote)
 		if !processedAlbums[albumID] {
-			func(p string, tid string, albID string) {
-				metadata, _ := tags.Open(p)
-				var imgData []byte
-				var mime string
-
-				// 1. Try to find cover if missing in file but present in folder
-				if metadata == nil || metadata.Picture() == nil {
-					dir := filepath.Dir(p)
-					common := []string{"cover", "folder", "front", "album", "artwork"}
-					entries, _ := os.ReadDir(dir)
-					for _, ent := range entries {
-						name := strings.ToLower(ent.Name())
-						ext := filepath.Ext(name)
-						if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
-							continue
-						}
-						base := strings.TrimSuffix(name, ext)
-						found := false
-						for _, c := range common {
-							if strings.HasPrefix(base, c) {
-								found = true
-								break
-							}
-						}
-						if found {
-							imgData, _ = os.ReadFile(filepath.Join(dir, ent.Name()))
-							mime = "image/jpeg"
-							if ext == ".png" {
-								mime = "image/png"
-							}
-							editor.EmbedCover(tid, imgData, mime)
-							break
-						}
-					}
-				}
-
-				// 2. RE-READ dimensions to sync database
-				metadata, _ = tags.Open(p) // Re-open to get fresh state
-				if metadata != nil && metadata.Picture() != nil {
-					pic := metadata.Picture()
-					src, _, err := image.Decode(bytes.NewReader(pic.Data))
-					if err == nil {
-						w := src.Bounds().Dx()
-						h := src.Bounds().Dy()
-						s.MasterDB.Conn.Exec(`
-							UPDATE albums 
-							SET cover_width = ?, cover_height = ?, cover_size = ?, cover_format = ?
-							WHERE id = ?`,
-							w, h, len(pic.Data), pic.MIME, albID)
-					}
-				}
-				processedAlbums[albID] = true
-			}(path, newID, albumID)
+			s.ensureAlbumMetadata(path, oldID, albumID, editor)
+			processedAlbums[albumID] = true
 		}
 
-		if err := tags.WritePersistentID(path, newID); err != nil {
-			slog.Error("⚠️ Non-fatal: Failed to write physical SGOUND_ID", "path", path, "err", err)
+		// 3. Persistencia física del ID
+		// Intentamos escribir el ID en el archivo para que sea "inmune" a movimientos manuales futuros
+		if err := tags.WritePersistentID(path, oldID); err != nil {
+			slog.Warn("Could not write physical SGOUND_ID", "path", path, "error", err)
 		}
 
+		// 4. Activación en BD
 		dbSuccess := false
-		for i := 0; i < 5; i++ {
+		for i := 0; i < 3; i++ {
 			errTx := s.executeTransaction(func(tx *sql.Tx) error {
-				_, err := tx.Exec("UPDATE tracks SET id = ?, status = 'active' WHERE id = ?", newID, oldID)
+				_, err := tx.Exec("UPDATE tracks SET status = 'active' WHERE id = ?", oldID)
 				return err
 			})
 			if errTx == nil {
@@ -311,12 +282,68 @@ func (s *Server) internalApproveBatch(ids []string) {
 			time.Sleep(100 * time.Millisecond)
 		}
 
+		// 5. Renombrado y Organización
 		if dbSuccess && s.Config.AutoRename {
-			editor.OrganizeFile(newID, s.Config.MusicPath, s.Config.RenamePattern)
+			newPath, err := editor.OrganizeFile(oldID, s.Config.MusicPath, s.Config.RenamePattern)
+			if err != nil {
+				slog.Error("Failed to organize file during approval", "id", oldID, "error", err)
+			} else if newPath != "" {
+				slog.Debug("File organized", "old", path, "new", newPath)
+			}
 		}
 
-		// Actualizar contadores atómicos para que el polling del frontend vea el progreso
 		s.updateInboxCount()
+	}
+}
+
+func (s *Server) ensureAlbumMetadata(p string, tid string, albID string, editor *tags.Editor) {
+	metadata, _ := tags.Open(p)
+	var imgData []byte
+	var mime string
+
+	// 1. Intentar encontrar carátula si el archivo no tiene pero la carpeta sí
+	if metadata == nil || metadata.Picture() == nil {
+		dir := filepath.Dir(p)
+		common := []string{"cover", "folder", "front", "album", "artwork"}
+		entries, _ := os.ReadDir(dir)
+		for _, ent := range entries {
+			name := strings.ToLower(ent.Name())
+			ext := filepath.Ext(name)
+			if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+				continue
+			}
+			base := strings.TrimSuffix(name, ext)
+			found := false
+			for _, c := range common {
+				if strings.HasPrefix(base, c) {
+					found = true
+					break
+				}
+			}
+			if found {
+				imgData, _ = os.ReadFile(filepath.Join(dir, ent.Name()))
+				mime = "image/jpeg"
+				if ext == ".png" { mime = "image/png" }
+				_ = editor.EmbedCover(tid, imgData, mime)
+				break
+			}
+		}
+	}
+
+	// 2. Sincronizar dimensiones en la base de datos
+	metadata, _ = tags.Open(p)
+	if metadata != nil && metadata.Picture() != nil {
+		pic := metadata.Picture()
+		src, _, err := image.Decode(bytes.NewReader(pic.Data))
+		if err == nil {
+			w := src.Bounds().Dx()
+			h := src.Bounds().Dy()
+			s.MasterDB.Conn.Exec(`
+				UPDATE albums 
+				SET cover_width = ?, cover_height = ?, cover_size = ?, cover_format = ?
+				WHERE id = ?`,
+				w, h, len(pic.Data), pic.MIME, albID)
+		}
 	}
 }
 
