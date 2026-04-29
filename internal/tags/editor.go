@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,7 +17,6 @@ import (
 	"github.com/bogem/id3v2/v2"
 	"github.com/go-flac/flacvorbis"
 	"github.com/go-flac/go-flac"
-	"github.com/go-flac/flacpicture"
 	"sgound/internal/db"
 )
 
@@ -91,69 +91,135 @@ func ReadPersistentID(path string) string {
 	return ""
 }
 
-// WritePersistentID escribe el SGOUND_ID en el archivo físico
-func WritePersistentID(path string, id string) error {
-	ext := strings.ToLower(filepath.Ext(path))
-	if ext == ".mp3" {
-		// Abrimos con opciones por defecto que permiten la expansión
-		tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
-		if err != nil {
-			return err
-		}
-		defer tag.Close()
-
-		// Eliminamos TXXX (User defined text) que coincidan con nuestra descripción
-		// para no acumular basura si se llama varias veces.
-		frames := tag.GetFrames("TXXX")
-		for _, f := range frames {
-			if tf, ok := f.(id3v2.UserDefinedTextFrame); ok && tf.Description == "SGOUND_ID" {
-				tag.DeleteFrames("TXXX") // Borramos todos los TXXX por simplicidad si hay conflicto
-				break
-			}
-		}
-
-		tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
-			Encoding:    id3v2.EncodingUTF8,
-			Description: "SGOUND_ID",
-			Value:       id,
-		})
-
-		// Intentar guardar. id3v2 debería manejar el crecimiento del archivo si el padding es insuficiente.
-		return tag.Save()
-	} else if ext == ".flac" {
-		f, err := ParseFLAC(path)
-		if err != nil {
-			return err
-		}
-		var cm *flacvorbis.MetaDataBlockVorbisComment
-		var cmIdx = -1
-		for i, block := range f.Meta {
-			if block.Type == flac.VorbisComment {
-				cm, _ = flacvorbis.ParseFromMetaDataBlock(*block)
-				cmIdx = i
-				break
-			}
-		}
-		if cm == nil {
-			cm = flacvorbis.New()
-		}
-		// Limpiar duplicados previos de SGOUND_ID
-		newComments := []string{}
-		for _, c := range cm.Comments {
-			if !strings.HasPrefix(c, "SGOUND_ID=") {
-				newComments = append(newComments, c)
-			}
-		}
-		cm.Comments = append(newComments, "SGOUND_ID="+id)
-		block := cm.Marshal()
-		if cmIdx != -1 {
-			f.Meta[cmIdx] = &block
-		} else {
-			f.Meta = append(f.Meta, &block)
-		}
-		return f.Save(path)
+// SafeSave realiza un guardado atómico con verificación de integridad
+func SafeSave(path string, saveFn func(tempPath string) error) error {
+	slog.Info("Starting SafeSave", "path", path)
+	// 1. Obtener tamaño original
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("could not stat original file: %w", err)
 	}
+	originalSize := info.Size()
+
+	// 2. Crear archivo temporal en la misma carpeta
+	tempPath := path + ".tmp"
+	
+	// Verificar permisos de escritura en el directorio
+	dir := filepath.Dir(path)
+	testFile := filepath.Join(dir, ".sgound_perm_test")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		return fmt.Errorf("no write permission in directory %s: %w", dir, err)
+	}
+	os.Remove(testFile)
+
+	// Limpiar temporal si ya existe
+	os.Remove(tempPath)
+
+	// 3. Ejecutar la función de guardado sobre el temporal
+	slog.Debug("Executing save function", "tempPath", tempPath)
+	if err := saveFn(tempPath); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("save function failed: %w", err)
+	}
+
+	// 4. VERIFICACIÓN DE INTEGRIDAD
+	tempInfo, err := os.Stat(tempPath)
+	if err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("could not stat temporary file: %w", err)
+	}
+	
+	slog.Info("SafeSave integrity check", "originalSize", originalSize, "newSize", tempInfo.Size())
+
+	if tempInfo.Size() < originalSize/2 && originalSize > 1024*1024 {
+		os.Remove(tempPath)
+		return fmt.Errorf("integrity check failed: file truncated from %d to %d bytes", originalSize, tempInfo.Size())
+	}
+
+	// 5. Reemplazo atómico
+	if err := os.Rename(tempPath, path); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("atomic rename failed: %w", err)
+	}
+
+	slog.Info("SafeSave completed successfully", "path", path)
 	return nil
+}
+
+// WritePersistentID escribe el SGOUND_ID de forma segura usando FFmpeg para preservar el audio
+func WritePersistentID(path string, id string) error {
+	return SafeSave(path, func(tempPath string) error {
+		// Detectar formato
+		format := "mp3"
+		if strings.ToLower(filepath.Ext(path)) == ".flac" { format = "flac" }
+
+		args := []string{
+			"-i", path,
+			"-metadata", "SGOUND_ID=" + id,
+			"-codec", "copy",
+			"-map_metadata", "0",
+			"-f", format,
+			"-y",
+			tempPath,
+		}
+		
+		slog.Debug("Executing FFmpeg (ID write)", "args", args)
+		cmd := exec.Command("ffmpeg", args...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			slog.Error("FFmpeg ID write failed", "error", err, "output", string(output))
+			return fmt.Errorf("ffmpeg error: %v", err)
+		}
+		return nil
+	})
+}
+
+func updateMP3(path string, trackID string, data map[string]interface{}) error {
+	return SafeSave(path, func(tempPath string) error {
+		args := []string{"-i", path}
+		
+		if title := getString(data, "title"); title != "" { args = append(args, "-metadata", "title="+title) }
+		if artist := getString(data, "artist"); artist != "" { args = append(args, "-metadata", "artist="+artist) }
+		if album := getString(data, "album"); album != "" { args = append(args, "-metadata", "album="+album) }
+		if genre := getString(data, "genre"); genre != "" { args = append(args, "-metadata", "genre="+genre) }
+		if year := getString(data, "year"); year != "" { args = append(args, "-metadata", "date="+year) }
+		if aa := getString(data, "albumArtist"); aa != "" { args = append(args, "-metadata", "album_artist="+aa) }
+		
+		// Forzar formato mp3 para el temporal (.tmp)
+		args = append(args, "-codec", "copy", "-map_metadata", "0", "-f", "mp3", "-y", tempPath)
+		
+		slog.Debug("Executing FFmpeg (MP3 tag update)", "args", args)
+		cmd := exec.Command("ffmpeg", args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			slog.Error("FFmpeg MP3 update failed", "error", err, "output", string(out))
+			return fmt.Errorf("ffmpeg mp3 update failed (%v): %s", err, string(out))
+		}
+		return nil
+	})
+}
+
+func updateFLAC(path string, trackID string, data map[string]interface{}) error {
+	return SafeSave(path, func(tempPath string) error {
+		args := []string{"-i", path}
+		
+		if title := getString(data, "title"); title != "" { args = append(args, "-metadata", "TITLE="+title) }
+		if artist := getString(data, "artist"); artist != "" { args = append(args, "-metadata", "ARTIST="+artist) }
+		if album := getString(data, "album"); album != "" { args = append(args, "-metadata", "ALBUM="+album) }
+		if aa := getString(data, "albumArtist"); aa != "" { args = append(args, "-metadata", "ALBUMARTIST="+aa) }
+		if genre := getString(data, "genre"); genre != "" { args = append(args, "-metadata", "GENRE="+genre) }
+		if year := getString(data, "year"); year != "" { args = append(args, "-metadata", "DATE="+year) }
+		
+		// Forzar formato flac para el temporal (.tmp)
+		args = append(args, "-codec", "copy", "-map_metadata", "0", "-f", "flac", "-y", tempPath)
+		
+		slog.Debug("Executing FFmpeg (FLAC tag update)", "args", args)
+		cmd := exec.Command("ffmpeg", args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			slog.Error("FFmpeg FLAC update failed", "error", err, "output", string(out))
+			return fmt.Errorf("ffmpeg flac update failed (%v): %s", err, string(out))
+		}
+		return nil
+	})
 }
 // ReadTagsFromFile lee todos los metadatos soportados de un archivo
 func ReadTagsFromFile(path string) (map[string]string, error) {
@@ -320,7 +386,7 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) ([]TagC
 		fmt.Printf("Physical tag editing not yet supported for format %s, only DB will be updated\n", ext)
 	}
 
-	WritePersistentID(path, trackID)
+	// WritePersistentID(path, trackID) // DESACTIVADO POR SEGURIDAD
 
 	// 3. Validar cambios
 	actualTags, _ := ReadTagsFromFile(path)
@@ -678,62 +744,63 @@ func moveSidecars(oldPath, newPath string) {
 func (e *Editor) EmbedCover(trackID string, imgData []byte, mimeType string) error {
 	var path string
 	err := e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
-	if err != nil || path == "" {
-		return fmt.Errorf("track not found or has no path: %s", trackID)
-	}
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("physical file not found: %s", path)
-	}
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".mp3":
-		tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
-		if err != nil { return err }
-		defer tag.Close()
-		tag.AddAttachedPicture(id3v2.PictureFrame{
-			Encoding: id3v2.EncodingUTF8, MimeType: mimeType,
-			PictureType: id3v2.PTFrontCover, Description: "Front Cover", Picture: imgData,
-		})
-		err = tag.Save()
-		if err == nil {
-			now := time.Now()
-			_ = os.Chtimes(path, now, now)
+	if err != nil || path == "" { return fmt.Errorf("track not found") }
+
+	return SafeSave(path, func(tempPath string) error {
+		// Escribir la imagen a un temporal para dársela a FFmpeg
+		tempImgPath := path + ".img.tmp"
+		if err := os.WriteFile(tempImgPath, imgData, 0644); err != nil { return err }
+		defer os.Remove(tempImgPath)
+
+		// Detectar formato
+		format := "mp3"
+		if strings.ToLower(filepath.Ext(path)) == ".flac" { format = "flac" }
+
+		args := []string{
+			"-i", path,
+			"-i", tempImgPath,
+			"-map", "0:a",
+			"-map", "1:v",
+			"-c", "copy",
+			"-disposition:v:0", "attached_pic",
+			"-f", format,
+			"-y", tempPath,
 		}
-		return err
-	case ".flac":
-		f, err := ParseFLAC(path)
-		if err != nil { return err }
-		var newMeta []*flac.MetaDataBlock
-		for _, block := range f.Meta { if block.Type != flac.Picture { newMeta = append(newMeta, block) } }
-		f.Meta = newMeta
-		picture, _ := flacpicture.NewFromImageData(flacpicture.PictureTypeFrontCover, "Front Cover", imgData, mimeType)
-		pictureMeta := picture.Marshal()
-		f.Meta = append(f.Meta, &pictureMeta)
-		err = f.Save(path)
-		if err == nil {
-			now := time.Now()
-			_ = os.Chtimes(path, now, now)
+
+		cmd := exec.Command("ffmpeg", args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("ffmpeg cover embed failed: %v, output: %s", err, string(out))
 		}
-		return err
-	}
-	return fmt.Errorf("unsupported format for cover embedding: %s", ext)
+		return nil
+	})
 }
 
 func (e *Editor) UpdateLyrics(trackID string, lyrics string) error {
 	var path string
 	err := e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
-	if err != nil || path == "" {
-		return fmt.Errorf("track not found or has no path: %s", trackID)
-	}
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("physical file not found: %s", path)
-	}
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".mp3": return updateMP3Lyrics(path, lyrics)
-	case ".flac", ".ogg": return updateVorbisLyrics(path, lyrics)
-	}
-	return nil
+	if err != nil || path == "" { return fmt.Errorf("track not found") }
+
+	return SafeSave(path, func(tempPath string) error {
+		// FFmpeg puede insertar letras en el campo LYRICS (Vorbis) o USLT (ID3v2)
+		// Detectar formato
+		format := "mp3"
+		if strings.ToLower(filepath.Ext(path)) == ".flac" { format = "flac" }
+
+		args := []string{
+			"-i", path,
+			"-metadata", "LYRICS=" + lyrics,
+			"-metadata", "UNSYNCEDLYRICS=" + lyrics,
+			"-codec", "copy",
+			"-map_metadata", "0",
+			"-f", format,
+			"-y", tempPath,
+		}
+		cmd := exec.Command("ffmpeg", args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("ffmpeg lyrics update failed: %v, output: %s", err, string(out))
+		}
+		return nil
+	})
 }
 
 func (e *Editor) ReadLyrics(trackID string) (string, error) {
@@ -762,103 +829,4 @@ func (e *Editor) ReadLyrics(trackID string) (string, error) {
 	}
 
 	return "", nil
-}
-
-func updateVorbisLyrics(path string, lyrics string) error {
-	f, _ := ParseFLAC(path)
-	var cm *flacvorbis.MetaDataBlockVorbisComment
-	var cmIdx = -1
-	for i, block := range f.Meta { if block.Type == flac.VorbisComment { cm, _ = flacvorbis.ParseFromMetaDataBlock(*block); cmIdx = i; break } }
-	if cm == nil { cm = flacvorbis.New() }
-	cm.Add("LYRICS", lyrics)
-	block := cm.Marshal()
-	if cmIdx != -1 { f.Meta[cmIdx] = &block } else { f.Meta = append(f.Meta, &block) }
-	return f.Save(path)
-}
-
-func updateMP3Lyrics(path string, lyrics string) error {
-	tag, _ := id3v2.Open(path, id3v2.Options{Parse: true})
-	defer tag.Close()
-	tag.AddUnsynchronisedLyricsFrame(id3v2.UnsynchronisedLyricsFrame{Encoding: id3v2.EncodingUTF8, Language: "eng", Lyrics: lyrics})
-	return tag.Save()
-}
-
-func updateMP3(path string, trackID string, data map[string]interface{}) error {
-	tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
-	if err != nil { return err }
-	defer tag.Close()
-
-	tag.SetTitle(getString(data, "title"))
-	tag.SetArtist(getString(data, "artist"))
-	tag.SetAlbum(getString(data, "album"))
-	tag.SetGenre(getString(data, "genre"))
-	if y := getString(data, "year"); y != "" { tag.SetYear(y) }
-	
-	// ALBUM ARTIST (TPE2)
-	if aa := getString(data, "albumArtist"); aa != "" {
-		tag.AddTextFrame("TPE2", id3v2.EncodingUTF8, aa)
-	}
-
-	trck := getString(data, "trackNum")
-	if tt := getString(data, "trackTotal"); tt != "" { trck = trck + "/" + tt }
-	tag.AddTextFrame("TRCK", id3v2.EncodingUTF8, trck)
-
-	tpos := getString(data, "discNum")
-	if dt := getString(data, "discTotal"); dt != "" { tpos = tpos + "/" + dt }
-	tag.AddTextFrame("TPOS", id3v2.EncodingUTF8, tpos)
-	
-	tag.AddTextFrame("TCOM", id3v2.EncodingUTF8, getString(data, "composer"))
-	tag.AddCommentFrame(id3v2.CommentFrame{Encoding: id3v2.EncodingUTF8, Language: "eng", Text: getString(data, "comment")})
-
-	rating := getInt(data, "rating")
-	if rating > 0 {
-		tag.AddTextFrame("Rating", id3v2.EncodingUTF8, fmt.Sprintf("%d", rating))
-		popmVal := byte(0)
-		switch rating { case 1: popmVal = 1; case 2: popmVal = 64; case 3: popmVal = 128; case 4: popmVal = 196; case 5: popmVal = 255 }
-		tag.AddFrame("POPM", id3v2.UnknownFrame{Body: append([]byte("sgound\x00"), popmVal)})
-	}
-
-	instr := "0"
-	if v, ok := data["instrumental"].(bool); ok && v { instr = "1" }
-	tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{Encoding: id3v2.EncodingUTF8, Description: "INSTRUMENTAL", Value: instr})
-	tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{Encoding: id3v2.EncodingUTF8, Description: "SGOUND_ID", Value: trackID})
-
-	return tag.Save()
-}
-
-func updateFLAC(path string, trackID string, data map[string]interface{}) error {
-	f, err := ParseFLAC(path)
-	if err != nil { return err }
-	var cm *flacvorbis.MetaDataBlockVorbisComment
-	var cmIdx = -1
-	for i, block := range f.Meta { if block.Type == flac.VorbisComment { cm, _ = flacvorbis.ParseFromMetaDataBlock(*block); cmIdx = i; break } }
-	if cm == nil { cm = flacvorbis.New() }
-
-	setField := func(field string, value string) {
-		if value == "" { return }
-		var newComments []string
-		for _, c := range cm.Comments { if !strings.HasPrefix(strings.ToUpper(c), field+"=") { newComments = append(newComments, c) } }
-		cm.Comments = newComments
-		cm.Add(field, value)
-	}
-
-	setField("TITLE", getString(data, "title"))
-	setField("ARTIST", getString(data, "artist"))
-	setField("ALBUM", getString(data, "album"))
-	setField("ALBUMARTIST", getString(data, "albumArtist"))
-	setField("GENRE", getString(data, "genre"))
-	setField("DATE", getString(data, "year"))
-	setField("TRACKNUMBER", getString(data, "trackNum"))
-	setField("TRACKTOTAL", getString(data, "trackTotal"))
-	setField("DISCNUMBER", getString(data, "discNum"))
-	setField("DISCTOTAL", getString(data, "discTotal"))
-	setField("COMPOSER", getString(data, "composer"))
-	setField("COMMENT", getString(data, "comment"))
-	if r := getInt(data, "rating"); r > 0 { setField("RATING", fmt.Sprintf("%d", r)) }
-	instr := "0"; if v, ok := data["instrumental"].(bool); ok && v { instr = "1" }; setField("INSTRUMENTAL", instr)
-	setField("SGOUND_ID", trackID)
-
-	block := cm.Marshal()
-	if cmIdx != -1 { f.Meta[cmIdx] = &block } else { f.Meta = append(f.Meta, &block) }
-	return f.Save(path)
 }

@@ -23,27 +23,42 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	trackID := s.extractID(r, "/api/stream/")
 	user, _ := r.Context().Value(userKey).(*db.User)
 
+	slog.Info("Incoming stream request", "trackID", trackID, "user", user.Username, "range", r.Header.Get("Range"))
+
 	var fpath, format string
 	var rg float64
-	// Intentar buscar por ID, y si no existe (posible cambio durante escaneo), buscar por hash o ruta si el ID parece un hash
+	// Intentar buscar por ID
 	err := s.MasterDB.Conn.QueryRow("SELECT path, format, COALESCE(replay_gain, 0.0) FROM tracks WHERE id = ?", trackID).Scan(&fpath, &format, &rg)
 	if err != nil {
-		slog.Warn("Track ID not found, attempting fallback", "id", trackID)
-		// Fallback: Si el ID no existe, podría ser que el scanner lo cambió. 
-		// Pero sin más info, devolvemos 404.
+		slog.Warn("Track ID not found in database", "id", trackID)
 		http.Error(w, "Track not found", http.StatusNotFound)
 		return
 	}
 
-	absMusicPath, _ := filepath.Abs(s.Config.MusicPath)
 	absTrackPath, _ := filepath.Abs(fpath)
 	
-	rel, err := filepath.Rel(absMusicPath, absTrackPath)
-	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		slog.Error("Unauthorized file access attempt", "path", fpath, "user", user.Username)
-		http.Error(w, "Unauthorized", http.StatusForbidden)
+	// Si el archivo no existe en la ruta absoluta, podría ser un desajuste de Docker/Host
+	if _, err := os.Stat(absTrackPath); os.IsNotExist(err) {
+		slog.Warn("File not found at DB path, attempting correction", "db_path", fpath)
+		if strings.Contains(fpath, "Música/") {
+			parts := strings.Split(fpath, "Música/")
+			if len(parts) > 1 {
+				tryPath := filepath.Join(s.Config.MusicPath, parts[1])
+				if _, err := os.Stat(tryPath); err == nil {
+					absTrackPath = tryPath
+					slog.Info("Path corrected successfully", "new_path", absTrackPath)
+				}
+			}
+		}
+	}
+
+	info, err := os.Stat(absTrackPath)
+	if err != nil {
+		slog.Error("File truly missing on disk", "path", absTrackPath, "error", err)
+		http.Error(w, "File not found on disk", http.StatusNotFound)
 		return
 	}
+	slog.Info("File info", "path", absTrackPath, "size", info.Size(), "mode", info.Mode())
 
 	go func() {
 		s.MasterDB.UpdateTrackUserData(user.Username, trackID, -1, true)
@@ -53,12 +68,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	useFFmpeg := false
 	ffmpegArgs := []string{"-i", absTrackPath}
 
-	// FORZAR FFmpeg si no es MP3 para asegurar compatibilidad en el navegador (Inbox/Stream)
-	ext := strings.ToLower(filepath.Ext(fpath))
-	if ext != ".mp3" {
-		useFFmpeg = true
-	}
-
+	// SOLO usar FFmpeg si es estrictamente necesario
 	if s.Config.ReplayGainEnabled && rg != 0 {
 		useFFmpeg = true
 		ffmpegArgs = append(ffmpegArgs, "-af", fmt.Sprintf("volume=%.2fdB", rg))
@@ -76,21 +86,31 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if useFFmpeg {
+		slog.Info("Streaming via FFmpeg (transcoding required)", "path", absTrackPath, "bitrate", bitrate)
 		w.Header().Set("Content-Type", "audio/mpeg")
-		w.Header().Set("Transfer-Encoding", "chunked")
-		// Forzar salida MP3 compatible
 		ffmpegArgs = append(ffmpegArgs, "-f", "mp3", "-map_metadata", "-1", "pipe:1")
 
 		cmd := exec.CommandContext(r.Context(), "ffmpeg", ffmpegArgs...)
 		cmd.Stdout = w
 		if err := cmd.Start(); err != nil {
-			slog.Error("FFmpeg streaming failed to start", "error", err, "path", absTrackPath)
+			slog.Error("FFmpeg failed to start", "error", err)
 			http.Error(w, "Streaming failed", http.StatusInternalServerError)
 			return
 		}
-
 		_ = cmd.Wait()
 		return
+	}
+
+	// REPRODUCCIÓN NATIVA
+	ext := strings.ToLower(filepath.Ext(absTrackPath))
+	if ext == ".flac" {
+		w.Header().Set("Content-Type", "audio/flac")
+		slog.Info("Serving native FLAC", "path", absTrackPath)
+	} else if ext == ".mp3" {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		slog.Info("Serving native MP3", "path", absTrackPath)
+	} else {
+		slog.Info("Serving native file (auto-detect type)", "path", absTrackPath, "ext", ext)
 	}
 
 	http.ServeFile(w, r, absTrackPath)
