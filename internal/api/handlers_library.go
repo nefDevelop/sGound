@@ -234,12 +234,7 @@ func (s *Server) internalApproveBatch(ids []string) {
 			s.Watcher.MutePath(path, 15*time.Second)
 		}
 
-		// Solo generar nuevo ID si el actual es un hash temporal (40 chars hex) y no un UUID
 		newID := oldID
-		if !strings.Contains(oldID, "-") || len(oldID) != 36 {
-			newID = tags.GenerateUUID()
-			slog.Info("🆕 Assigning new UUID to track", "oldID", oldID, "newID", newID)
-		}
 
 		editor := tags.NewEditor(dbase)
 
@@ -683,24 +678,29 @@ func (s *Server) handleLibraryResyncIndex(w http.ResponseWriter, r *http.Request
 		return
 	}
 	
-	dbase := s.getDB(r)
-	// Clear search index
-	_, err := dbase.Conn.Exec("DELETE FROM search_idx")
+	err := s.executeTransaction(func(tx *sql.Tx) error {
+		// Clear search index
+		if _, err := tx.Exec("DELETE FROM search_idx"); err != nil {
+			return fmt.Errorf("failed to clear index: %w", err)
+		}
+		
+		// Re-insert all active tracks
+		_, err := tx.Exec(`
+			INSERT INTO search_idx(id, title, artist, album, genre)
+			SELECT t.id, t.title, COALESCE(t.artist, 'Unknown'), COALESCE(al.title, 'Unknown'), COALESCE(t.genre, 'Unknown')
+			FROM tracks t
+			LEFT JOIN albums al ON t.album_id = al.id
+			WHERE t.status = 'active'
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to re-insert tracks: %w", err)
+		}
+		return nil
+	})
+
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	
-	// Re-insert all tracks
-	_, err = dbase.Conn.Exec(`
-		INSERT INTO search_idx(id, title, artist, album, genre)
-		SELECT t.id, t.title, COALESCE(t.artist, ar.name, 'Unknown'), al.title, t.genre
-		FROM tracks t
-		JOIN albums al ON t.album_id = al.id
-		JOIN artists ar ON al.artist_id = ar.id
-	`)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Error("Search index resync failed", "error", err)
+		http.Error(w, "Resync failed: " + err.Error(), http.StatusInternalServerError)
 		return
 	}
 	

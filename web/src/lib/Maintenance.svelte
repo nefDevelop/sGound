@@ -414,6 +414,15 @@
         <button class="bento-btn" onclick={runCleanPlaylists}>Clean Playlists</button>
       </div>
 
+      <div class="bento-card highlight">
+        <div class="card-header">
+          <Icon name="refreshCw" size={32} />
+          <span class="lbl">App State</span>
+        </div>
+        <p class="card-desc">Clear browser memory and reload all data.</p>
+        <button class="bento-btn" onclick={() => window.location.reload()}>Force Reload</button>
+      </div>
+
       <div class="bento-card highlight terminal">
         <div class="card-header">
           <Icon name="terminal" size={32} />
