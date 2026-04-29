@@ -80,9 +80,13 @@ func NewServer(masterDB *db.MasterDatabase, cfg *config.Config) *Server {
 
 func (s *Server) updateInboxCount() {
 	var pending, raw int64
-	_ = s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&pending)
-	_ = s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'raw'").Scan(&raw)
+	errP := s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&pending)
+	errR := s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'raw'").Scan(&raw)
 	
+	if errP != nil || errR != nil {
+		slog.Error("Failed to update inbox counts", "error_pending", errP, "error_raw", errR)
+	}
+
 	s.inboxCount.Store(pending)
 	s.rawCount.Store(raw)
 	slog.Info("📥 Inbox counts updated", "pending", pending, "raw", raw, "total", pending+raw)

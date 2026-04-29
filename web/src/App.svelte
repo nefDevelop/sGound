@@ -223,15 +223,37 @@
     } catch (e) { console.error(e); }
   }
 
+  let statusInterval;
   onMount(() => {
     checkAuthStatus();
     loadTheme();
-    if (get(isLoggedIn)) { fetchTracks(); fetchPlaylists(); checkScanStatus(); }
-    setInterval(checkScanStatus, 5000);
+    if (get(isLoggedIn)) { 
+      fetchTracks(); 
+      fetchPlaylists(); 
+      checkScanStatus(); 
+    }
+    
+    // Polling dinámico: más rápido si está escaneando
+    const updateInterval = () => {
+      if (statusInterval) clearInterval(statusInterval);
+      const delay = (scanStatus && scanStatus.scanning) ? 1000 : 5000;
+      statusInterval = setInterval(checkScanStatus, delay);
+    };
+
+    // Primera activación
+    statusInterval = setInterval(checkScanStatus, 5000);
+
+    // Reaccionar a cambios en scanStatus para ajustar el ritmo
+    $effect(() => {
+      if (scanStatus?.scanning) updateInterval();
+      else if (statusInterval && !scanStatus?.scanning) updateInterval();
+    });
 
     window.addEventListener('popstate', (e) => {
       if (e.state?.view) { currentView.set(e.state.view); viewParams.set(e.state.params || {}); }
     });
+    
+    return () => clearInterval(statusInterval);
   });
 
   let pageTitle = $derived($isLoggedIn ? `${$currentView} | Sgound` : "Login | Sgound");

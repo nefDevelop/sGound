@@ -89,8 +89,21 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 		isPaused, ramUsed = s.activeScanner.GetStatus()
 	}
 
-	ic := s.inboxCount.Load()
-	rc := s.rawCount.Load()
+	// Re-check counts directly from DB to ensure real-time accuracy in the UI
+	var ic, rc int64
+	err1 := s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'pending'").Scan(&ic)
+	err2 := s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'raw'").Scan(&rc)
+
+	if err1 != nil || err2 != nil {
+		slog.Error("Database error fetching real-time counts", "err1", err1, "err2", err2)
+		// Fallback to cached values if DB is locked
+		ic = s.inboxCount.Load()
+		rc = s.rawCount.Load()
+	} else {
+		// Sincronizar los contadores atómicos internos
+		s.inboxCount.Store(ic)
+		s.rawCount.Store(rc)
+	}
 
 	// También chequear si hay aprobación en curso
 	approvalProcessed := 0
@@ -106,7 +119,7 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 		"scanning":          scanning || approvalScanning,
 		"processed":         processed,
 		"approvalProcessed": approvalProcessed,
-		"rawCount":           rc,
+		"rawCount":          rc,
 		"inboxCount":        ic,
 		"isPaused":          isPaused,
 		"ramUsedMB":         ramUsed,
