@@ -234,7 +234,13 @@ func (s *Server) internalApproveBatch(ids []string) {
 			s.Watcher.MutePath(path, 15*time.Second)
 		}
 
-		newID := tags.GenerateUUID()
+		// Solo generar nuevo ID si el actual es un hash temporal (40 chars hex) y no un UUID
+		newID := oldID
+		if !strings.Contains(oldID, "-") || len(oldID) != 36 {
+			newID = tags.GenerateUUID()
+			slog.Info("🆕 Assigning new UUID to track", "oldID", oldID, "newID", newID)
+		}
+
 		editor := tags.NewEditor(dbase)
 
 		if !processedAlbums[albumID] {
@@ -290,7 +296,7 @@ func (s *Server) internalApproveBatch(ids []string) {
 					}
 				}
 				processedAlbums[albID] = true
-			}(path, oldID, albumID)
+			}(path, newID, albumID)
 		}
 
 		if err := tags.WritePersistentID(path, newID); err != nil {
