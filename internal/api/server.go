@@ -131,6 +131,8 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/api/library/organize", auth(s.handleOrganizeLibrary))
 	mux.HandleFunc("/api/library/organize/preview", auth(s.handleOrganizeLibraryPreview))
 	mux.HandleFunc("/api/library/organize/status", auth(s.handleOrganizeStatus))
+	mux.HandleFunc("/api/library/resync-index", auth(s.handleLibraryResyncIndex))
+	mux.HandleFunc("/api/library/clean-playlists", auth(s.handleLibraryCleanPlaylists))
 	mux.HandleFunc("/api/library/status", auth(s.handleScanStatus))
 	mux.HandleFunc("/api/library/inbox", auth(s.handleGetInbox))
 	mux.HandleFunc("/api/library/inbox/prioritize", auth(s.handlePrioritizeTrack))

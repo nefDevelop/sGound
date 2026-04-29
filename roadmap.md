@@ -14,7 +14,7 @@
 - [ ] **Internacionalización (i18n):** Soporte multi-idioma (ES/EN inicialmente).
 
 ## 🔮 Futuro (Backlog)
-- [ ] **Multi-usuario:** Gestión avanzada de permisos y bibliotecas compartidas.
+
 - [ ] **Scrobbling:** Integración con Last.fm / ListenBrainz.
 - [ ] **Ecualizador:** DSP en el frontend para personalización del audio.
 

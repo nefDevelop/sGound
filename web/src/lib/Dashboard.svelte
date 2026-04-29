@@ -65,6 +65,8 @@
     };
   }
 
+  let wasScanning = $state(false);
+
   export async function refresh() {
     try {
       const [sRes, hRes] = await Promise.all([
@@ -83,6 +85,14 @@
     finally { loading = false; }
   }
 
+  // Auto-refresh when scan finishes
+  $effect(() => {
+    if (wasScanning && scanStatus && !scanStatus.scanning) {
+      refresh();
+    }
+    wasScanning = !!scanStatus?.scanning;
+  });
+
   onMount(() => {
     refresh();
   });
@@ -98,11 +108,6 @@
           <button class="inbox-notification-badge" onclick={onselectInbox} title="View pending tracks">
             <Icon name="inbox" size={24} />
             <span class="badge-number">{$inboxCount + $rawCount}</span>
-          </button>
-        {:else if stats.inboxCount > 0}
-          <button class="inbox-notification-badge" onclick={onselectInbox} title="View pending tracks">
-            <Icon name="inbox" size={24} />
-            <span class="badge-number">{stats.inboxCount}</span>
           </button>
         {/if}
       </div>

@@ -272,6 +272,47 @@
     };
   }
 
+  async function runResyncIndex() {
+    confirmState = {
+      isOpen: true,
+      title: "Rebuild Search Index",
+      message: "Are you sure you want to rebuild the entire search index? This is useful if search results point to tracks that no longer exist or if IDs were recently updated.",
+      confirmLabel: "Rebuild Now",
+      type: "info",
+      icon: "refreshCw",
+      onconfirm: async () => {
+        try {
+          const res = await fetch('/api/library/resync-index', { method: 'POST' });
+          if (res.ok) {
+            showToast("Search index rebuilt successfully", "success");
+          }
+        } catch (e) {
+          showToast("Rebuild failed", "error");
+        }
+      }
+    };
+  }
+
+  async function runCleanPlaylists() {
+    confirmState = {
+      isOpen: true,
+      title: "Clean Playlists",
+      message: "This will remove all broken track references from your playlists. Only tracks that exist in your library will remain.",
+      confirmLabel: "Clean Now",
+      type: "warning",
+      icon: "list",
+      onconfirm: async () => {
+        try {
+          const res = await fetch('/api/library/clean-playlists', { method: 'POST' });
+          const data = await res.json();
+          showToast(`Removed ${data.removed} broken tracks from playlists`, "success");
+        } catch (e) {
+          showToast("Cleanup failed", "error");
+        }
+      }
+    };
+  }
+
   // Expose refresh function to parent
   refresh = () => {
     fetchHealth();
@@ -353,6 +394,24 @@
           <button class="bento-btn" onclick={() => loadDetail('missing-tags')}>Inspect</button>
           <button class="bento-btn primary" onclick={() => onfixTags?.()}>Batch Fix</button>
         </div>
+      </div>
+
+      <div class="bento-card highlight">
+        <div class="card-header">
+          <Icon name="refreshCw" size={32} />
+          <span class="lbl">Search Index</span>
+        </div>
+        <p class="card-desc">Sync search database with actual track IDs.</p>
+        <button class="bento-btn primary" onclick={runResyncIndex}>Rebuild Index</button>
+      </div>
+
+      <div class="bento-card highlight">
+        <div class="card-header">
+          <Icon name="list" size={32} />
+          <span class="lbl">Playlists</span>
+        </div>
+        <p class="card-desc">Remove orphaned tracks from all playlists.</p>
+        <button class="bento-btn" onclick={runCleanPlaylists}>Clean Playlists</button>
       </div>
 
       <div class="bento-card highlight terminal">
@@ -721,6 +780,7 @@
   }
 
   .title-wrap { display: flex; flex-direction: column; gap: 0.5rem; }
+  .card-desc { font-size: 0.85rem; color: var(--text-muted); line-height: 1.4; margin: -0.5rem 0 0.5rem; }
   .card-actions-row { display: flex; gap: 1rem; width: 100%; }
 
   .groups-container { display: flex; flex-direction: column; gap: 3rem; }

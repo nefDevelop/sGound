@@ -319,6 +319,9 @@ func (s *Server) internalApproveBatch(ids []string) {
 		if dbSuccess && s.Config.AutoRename {
 			editor.OrganizeFile(newID, s.Config.MusicPath, s.Config.RenamePattern)
 		}
+
+		// Actualizar contadores atómicos para que el polling del frontend vea el progreso
+		s.updateInboxCount()
 	}
 }
 
@@ -368,9 +371,9 @@ func (s *Server) handleRejectTracks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	s.updateInboxCount()
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
-	s.updateInboxCount()
 }
 
 func (s *Server) handleAnalyzeInbox(w http.ResponseWriter, r *http.Request) {
@@ -672,6 +675,55 @@ func (s *Server) handleLibraryCleanup(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(fmt.Sprintf(`{"status":"success", "removed": %d}`, len(ids))))
+}
+
+func (s *Server) handleLibraryResyncIndex(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	dbase := s.getDB(r)
+	// Clear search index
+	_, err := dbase.Conn.Exec("DELETE FROM search_idx")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	// Re-insert all tracks
+	_, err = dbase.Conn.Exec(`
+		INSERT INTO search_idx(id, title, artist, album, genre)
+		SELECT t.id, t.title, COALESCE(t.artist, ar.name, 'Unknown'), al.title, t.genre
+		FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists ar ON al.artist_id = ar.id
+	`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success", "message":"Search index rebuilt"}`))
+}
+
+func (s *Server) handleLibraryCleanPlaylists(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	dbase := s.getDB(r)
+	res, err := dbase.Conn.Exec("DELETE FROM playlist_tracks WHERE track_id NOT IN (SELECT id FROM tracks)")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	removed, _ := res.RowsAffected()
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(fmt.Sprintf(`{"status":"success", "removed":%d}`, removed)))
 }
 
 func (s *Server) handleLibraryDuplicates(w http.ResponseWriter, r *http.Request) {

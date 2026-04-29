@@ -36,17 +36,15 @@
   let totalServer = $state(0);
   let totalFromHeader = $state(0);
 
-  // Lógica de conteo definitiva: Header > Store > Scanner > Local
-  let totalTracks = $derived(
-    Math.max(
-      totalFromHeader,
-      totalServer,
-      $inboxCount + $rawCount,
-      tracks.length,
-      (scanStatus?.inboxCount || 0) + (scanStatus?.rawCount || 0),
-      (scanStatus?.approvalProcessed || 0) + ($inboxCount + $rawCount), // Considerar lo que se está procesando
-    ),
-  );
+  // Lógica de conteo: Priorizar scanStatus durante escaneo/aprobación, si no, usar stores
+  let totalTracks = $derived.by(() => {
+    // Si hay un escaneo o aprobación en curso, fiarse de lo que diga el servidor en tiempo real
+    if (scanStatus?.scanning) {
+      return (scanStatus.inboxCount || 0) + (scanStatus.rawCount || 0);
+    }
+    // Si no, usar los stores globales que App.svelte mantiene actualizados
+    return Math.max($inboxCount + $rawCount, tracks.length);
+  });
 
   let displayApprovingCount = $derived(
     scanStatus?.approvalProcessed > 0 ? (totalTracks - scanStatus.approvalProcessed) : approvingCount
