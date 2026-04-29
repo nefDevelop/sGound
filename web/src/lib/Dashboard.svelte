@@ -104,10 +104,12 @@
     <section class="bento-item welcome-tile">
       <div class="welcome-header">
         <h1>Welcome back, <span>User</span></h1>
-        {#if ($inboxCount > 0 || $rawCount > 0)}
+        {#if ($inboxCount > 0 || $rawCount > 0 || scanStatus?.scanning)}
           <button class="inbox-notification-badge" onclick={onselectInbox} title="View pending tracks">
             <Icon name="inbox" size={24} />
-            <span class="badge-number">{$inboxCount + $rawCount}</span>
+            {#if ($inboxCount + $rawCount) > 0}
+              <span class="badge-number">{$inboxCount + $rawCount}</span>
+            {/if}
           </button>
         {/if}
       </div>
@@ -138,6 +140,10 @@
             <span class="label">Indexando...</span>
             <span class="count"><b>{scanStatus.processed}</b> canciones</span>
           </div>
+          <button class="scan-inbox-link" onclick={onselectInbox}>
+            Ver Inbox
+            <Icon name="chevronRight" size={14} />
+          </button>
         </div>
       {/if}
     </section>
@@ -576,6 +582,26 @@
     font-size: 0.85rem;
     font-weight: 700;
     color: var(--text-main);
+  }
+
+  .scan-inbox-link {
+    margin-left: auto;
+    background: rgba(255,255,255,0.08);
+    border: none;
+    color: var(--primary);
+    padding: 0.4rem 0.8rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 800;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    transition: all 0.2s;
+  }
+  .scan-inbox-link:hover {
+    background: var(--primary);
+    color: white;
   }
 
   .genre-bars { display: flex; flex-direction: column; gap: 0.8rem; }
