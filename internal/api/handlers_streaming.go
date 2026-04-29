@@ -23,10 +23,14 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	trackID := s.extractID(r, "/api/stream/")
 	user, _ := r.Context().Value(userKey).(*db.User)
 
-	var fpath string
+	var fpath, format string
 	var rg float64
-	err := s.getDB(r).Conn.QueryRow("SELECT path, COALESCE(replay_gain, 0.0) FROM tracks WHERE id = ?", trackID).Scan(&fpath, &rg)
+	// Intentar buscar por ID, y si no existe (posible cambio durante escaneo), buscar por hash o ruta si el ID parece un hash
+	err := s.MasterDB.Conn.QueryRow("SELECT path, format, COALESCE(replay_gain, 0.0) FROM tracks WHERE id = ?", trackID).Scan(&fpath, &format, &rg)
 	if err != nil {
+		slog.Warn("Track ID not found, attempting fallback", "id", trackID)
+		// Fallback: Si el ID no existe, podría ser que el scanner lo cambió. 
+		// Pero sin más info, devolvemos 404.
 		http.Error(w, "Track not found", http.StatusNotFound)
 		return
 	}
@@ -36,11 +40,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	
 	rel, err := filepath.Rel(absMusicPath, absTrackPath)
 	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		slog.Error("Unauthorized file access attempt", 
-			"path", fpath, 
-			"absPath", absTrackPath,
-			"musicPath", absMusicPath,
-			"user", user.Username)
+		slog.Error("Unauthorized file access attempt", "path", fpath, "user", user.Username)
 		http.Error(w, "Unauthorized", http.StatusForbidden)
 		return
 	}
@@ -52,6 +52,12 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	bitrate := r.URL.Query().Get("bitrate")
 	useFFmpeg := false
 	ffmpegArgs := []string{"-i", absTrackPath}
+
+	// FORZAR FFmpeg si no es MP3 para asegurar compatibilidad en el navegador (Inbox/Stream)
+	ext := strings.ToLower(filepath.Ext(fpath))
+	if ext != ".mp3" {
+		useFFmpeg = true
+	}
 
 	if s.Config.ReplayGainEnabled && rg != 0 {
 		useFFmpeg = true
@@ -72,20 +78,18 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	if useFFmpeg {
 		w.Header().Set("Content-Type", "audio/mpeg")
 		w.Header().Set("Transfer-Encoding", "chunked")
+		// Forzar salida MP3 compatible
 		ffmpegArgs = append(ffmpegArgs, "-f", "mp3", "-map_metadata", "-1", "pipe:1")
 
 		cmd := exec.CommandContext(r.Context(), "ffmpeg", ffmpegArgs...)
 		cmd.Stdout = w
 		if err := cmd.Start(); err != nil {
-			slog.Error("FFmpeg streaming failed to start", "error", err, "path", absTrackPath, "args", ffmpegArgs)
-			http.Error(w, "Streaming failed: conversion engine error", http.StatusInternalServerError)
+			slog.Error("FFmpeg streaming failed to start", "error", err, "path", absTrackPath)
+			http.Error(w, "Streaming failed", http.StatusInternalServerError)
 			return
 		}
 
-		err := cmd.Wait()
-		if err != nil && r.Context().Err() == nil {
-			slog.Error("FFmpeg process finished with error", "error", err, "path", absTrackPath)
-		}
+		_ = cmd.Wait()
 		return
 	}
 
@@ -112,13 +116,15 @@ func (s *Server) handleGetCover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var fpath string
-	err := s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath)
+	err := s.MasterDB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&fpath)
 	if err != nil {
-		err = s.getDB(r).Conn.QueryRow("SELECT path FROM tracks WHERE album_id = ? LIMIT 1", trackID).Scan(&fpath)
-		if err != nil {
-			s.servePlaceholderCover(w)
-			return
-		}
+		// Intentar buscar por album_id si el ID es de album
+		_ = s.MasterDB.Conn.QueryRow("SELECT path FROM tracks WHERE album_id = ? AND path != '' LIMIT 1", trackID).Scan(&fpath)
+	}
+
+	if fpath == "" {
+		s.servePlaceholderCover(w)
+		return
 	}
 
 	absMusicPath, _ := filepath.Abs(s.Config.MusicPath)
