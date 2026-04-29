@@ -17,3 +17,6 @@
 - [ ] **Multi-usuario:** Gestión avanzada de permisos y bibliotecas compartidas.
 - [ ] **Scrobbling:** Integración con Last.fm / ListenBrainz.
 - [ ] **Ecualizador:** DSP en el frontend para personalización del audio.
+
+
+SUBSONIC API

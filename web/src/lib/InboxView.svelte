@@ -3,7 +3,7 @@
   import Icon from "./Icon.svelte";
   import TracksView from "./TracksView.svelte";
   import { fade } from "svelte/transition";
-  import { inboxCount, rawCount, apiFetch } from "./stores.js";
+  import { inboxCount, rawCount, apiFetch, showToast } from "./stores.js";
 
   let {
     onplay,
@@ -44,8 +44,25 @@
       $inboxCount + $rawCount,
       tracks.length,
       (scanStatus?.inboxCount || 0) + (scanStatus?.rawCount || 0),
+      (scanStatus?.approvalProcessed || 0) + ($inboxCount + $rawCount), // Considerar lo que se está procesando
     ),
   );
+
+  let displayApprovingCount = $derived(
+    scanStatus?.approvalProcessed > 0 ? (totalTracks - scanStatus.approvalProcessed) : approvingCount
+  );
+
+  let isAnyApproving = $derived(isApprovingAll || (scanStatus?.approvalProcessed > 0 && scanStatus?.scanning));
+
+  // Sincronizar fin de aprobación en segundo plano
+  $effect(() => {
+    if (!scanStatus?.scanning && isApprovingAll && scanStatus?.approvalProcessed > 0) {
+      isApprovingAll = false;
+      fetchInbox();
+      onapproved?.();
+      showToast("Aprobación masiva completada", "success");
+    }
+  });
 
   onMount(() => {
     fetchInbox();
@@ -131,15 +148,35 @@
   }
 
   async function approveAll() {
+    if (isApprovingAll) return;
+    
+    // Si hay más de 500 pistas, usamos el modo background del servidor para mayor fiabilidad
+    if (totalTracks > 500) {
+      isApprovingAll = true;
+      try {
+        const res = await apiFetch("/api/tracks/approve-all", { method: "POST" });
+        if (res.ok) {
+          showToast("Proceso de aprobación masiva iniciado en segundo plano", "info");
+          // El progreso se actualizará vía scanStatus (prop)
+        } else {
+          showToast("Error al iniciar aprobación masiva", "error");
+          isApprovingAll = false;
+        }
+      } catch (e) {
+        showToast("Error de conexión", "error");
+        isApprovingAll = false;
+      }
+      return;
+    }
+
     isApprovingAll = true;
-    approvingCount = totalTracks; // Iniciar inmediatamente con el total conocido
+    approvingCount = totalTracks;
     try {
       let ids = tracks.map((t) => t.id);
 
-      // Si sabemos que hay más pistas de las que se ven, las pedimos todas al servidor antes de aprobar
       if (totalTracks > tracks.length || hasMore) {
         try {
-          const fetchLimit = Math.max(totalTracks + 100, 2000);
+          const fetchLimit = Math.max(totalTracks + 200, 5000);
           const res = await apiFetch(
             `/api/tracks?status=pending,raw&limit=${fetchLimit}&minimal=true`,
           );
@@ -153,14 +190,27 @@
       }
 
       if (ids.length > 0) {
-        approvingCount = ids.length; // Ajustar al total real obtenido
+        approvingCount = ids.length;
+        const initialCount = ids.length;
         const batchSize = 100;
+        let successfulCount = 0;
+
         for (let i = 0; i < ids.length; i += batchSize) {
           const batch = ids.slice(i, i + batchSize);
-          await approveIds(batch, false);
-          approvingCount = Math.max(0, approvingCount - batch.length);
+          const ok = await approveIds(batch, false);
+          if (ok) {
+            successfulCount += batch.length;
+          }
+          approvingCount = ids.length - (i + batch.length);
           await tick();
         }
+        
+        if (successfulCount === ids.length) {
+          showToast(`Successfully approved ${successfulCount} tracks`, "success");
+        } else {
+          showToast(`Approved ${successfulCount} of ${ids.length} tracks. Some failed.`, "warning");
+        }
+
         await fetchInbox();
         selectedTracks = [];
         onapproved?.();
@@ -194,13 +244,26 @@
 
       if (ids.length > 0) {
         rejectingCount = ids.length;
+        const initialCount = ids.length;
         const batchSize = 100;
+        let successfulCount = 0;
+
         for (let i = 0; i < ids.length; i += batchSize) {
           const batch = ids.slice(i, i + batchSize);
-          await rejectIds(batch, false);
-          rejectingCount = Math.max(0, rejectingCount - batch.length);
+          const ok = await onbulkReject?.(batch, false);
+          if (ok !== false) { // Assuming onbulkReject returns true or undefined if OK
+            successfulCount += batch.length;
+          }
+          rejectingCount = ids.length - (i + batch.length);
           await tick();
         }
+
+        if (successfulCount === ids.length) {
+          showToast(`Successfully rejected ${successfulCount} tracks`, "success");
+        } else {
+          showToast(`Rejected ${successfulCount} of ${ids.length} tracks`, "warning");
+        }
+
         await fetchInbox();
         selectedTracks = [];
         onrejected?.();
@@ -392,12 +455,13 @@
         <button
           class="btn ghost"
           onclick={approveAll}
-          disabled={totalTracks === 0 || isApprovingAll || isRejectingAll}
+          disabled={totalTracks === 0 || isAnyApproving || isRejectingAll}
         >
-          {#if isApprovingAll}
+          {#if isAnyApproving}
             <Icon name="loader" size={18} class="spin" />
-            Approve All ({approvingCount})
+            Approve All ({displayApprovingCount})
           {:else}
+            <Icon name="zap" size={18} />
             Approve All ({totalTracks})
           {/if}
         </button>

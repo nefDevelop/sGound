@@ -137,6 +137,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	mux.HandleFunc("/api/library/inbox/analyze", auth(s.handleAnalyzeInbox))
 	mux.HandleFunc("/api/library/inbox/apply-suggestions", auth(s.handleApplyInboxSuggestions))
 	mux.HandleFunc("/api/tracks/approve", auth(s.handleApproveTracks))
+	mux.HandleFunc("/api/tracks/approve-all", auth(s.handleApproveAllTracks))
 	mux.HandleFunc("/api/tracks/reject", auth(s.handleRejectTracks))
 	mux.HandleFunc("/api/tracks/rate", auth(s.handleRateTrack))
 	mux.HandleFunc("/api/lyrics", auth(s.handleLyrics))

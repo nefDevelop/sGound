@@ -1,5 +1,5 @@
 <script>
-  import { inboxCount, rawCount, apiFetch } from './stores.js';
+  import { inboxCount, rawCount, apiFetch, coverRefreshTrigger } from './stores.js';
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade } from 'svelte/transition';
@@ -29,7 +29,7 @@
   });
 
   function getAvatarUrl(artist) {
-    return `/api/artists/${encodeURIComponent(artist.id)}/image`; 
+    return `/api/artists/${encodeURIComponent(artist.id)}/image?v=${$coverRefreshTrigger}`; 
   }
 
   function handleImageError(e, artist) {

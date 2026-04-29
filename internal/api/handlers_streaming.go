@@ -213,7 +213,9 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 	cachePath := filepath.Join(s.Config.CachePath, "artists", artistID+".jpg")
 	os.MkdirAll(filepath.Dir(cachePath), 0755)
 
-	if _, err := os.Stat(cachePath); err == nil {
+	// Bypass cache if version parameter is present
+	forceRefresh := r.URL.Query().Get("v") != ""
+	if _, err := os.Stat(cachePath); err == nil && !forceRefresh {
 		w.Header().Set("Cache-Control", "public, max-age=604800")
 		w.Header().Set("Content-Type", "image/jpeg")
 		http.ServeFile(w, r, cachePath)
@@ -233,21 +235,18 @@ func (s *Server) handleGetArtistImage(w http.ResponseWriter, r *http.Request) {
 		// 1. Intentar buscar por ID exacto
 		err := s.getDB(r).Conn.QueryRow("SELECT image_url, name FROM artists WHERE id = ?", artistID).Scan(&imageURL, &name)
 		if err != nil {
-			// (Lógica de auto-repair que ya teníamos...)
 			var foundName string
-			errScan := s.getDB(r).Conn.QueryRow("SELECT artist FROM tracks WHERE status = 'active' AND (artist IS NOT NULL AND artist != '') AND ? = ?", artistID, artistID).Scan(&foundName)
-			
-			if errScan != nil {
-				rows, _ := s.getDB(r).Conn.Query("SELECT DISTINCT artist FROM tracks WHERE status = 'active'")
-				if rows != nil {
-					defer rows.Close()
-					for rows.Next() {
-						var aName string
-						if err := rows.Scan(&aName); err == nil {
-							if utils.GenerateID(aName) == artistID {
-								foundName = aName
-								break
-							}
+			// (Lógica de auto-repair que ya teníamos...)
+			// Intentar encontrar qué nombre de artista genera este ID recorriendo los artistas únicos en tracks
+			rows, _ := s.getDB(r).Conn.Query("SELECT DISTINCT artist FROM tracks WHERE status = 'active' AND artist IS NOT NULL AND artist != ''")
+			if rows != nil {
+				defer rows.Close()
+				for rows.Next() {
+					var aName string
+					if err := rows.Scan(&aName); err == nil {
+						if utils.GenerateID(aName) == artistID {
+							foundName = aName
+							break
 						}
 					}
 				}

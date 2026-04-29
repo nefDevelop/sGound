@@ -92,14 +92,24 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	ic := s.inboxCount.Load()
 	rc := s.rawCount.Load()
 
+	// También chequear si hay aprobación en curso
+	approvalProcessed := 0
+	approvalScanning := false
+	if val, ok := s.scanStatuses.Load("approval"); ok {
+		sStatus := val.(*ScanStatus)
+		approvalScanning = sStatus.Scanning
+		approvalProcessed = sStatus.Processed
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"scanning":   scanning,
-		"processed":  processed,
-		"rawCount":    rc,
-		"inboxCount": ic,
-		"isPaused":   isPaused,
-		"ramUsedMB":  ramUsed,
+		"scanning":          scanning || approvalScanning,
+		"processed":         processed,
+		"approvalProcessed": approvalProcessed,
+		"rawCount":           rc,
+		"inboxCount":        ic,
+		"isPaused":          isPaused,
+		"ramUsedMB":         ramUsed,
 	})
 }
 
@@ -141,29 +151,82 @@ func (s *Server) handleGetInbox(w http.ResponseWriter, r *http.Request) {
 	s.handleGetTracks(w, r)
 }
 
-func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+func (s *Server) handleApproveAllTracks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var data struct {
-		IDs []string `json:"ids"`
+	// Verificar si ya hay un proceso en curso
+	if val, ok := s.scanStatuses.Load("approval"); ok {
+		if val.(*ScanStatus).Scanning {
+			http.Error(w, "Approval already in progress", http.StatusConflict)
+			return
+		}
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+
+	// Obtener todos los IDs de una vez para procesar
+	rows, err := s.MasterDB.Conn.Query("SELECT id FROM tracks WHERE status IN ('pending', 'raw')")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+
+	if len(ids) == 0 {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success", "message":"No tracks to approve"}`))
 		return
 	}
 
-	approvedCount := 0
-	failedCount := 0
-	dbase := s.getDB(r)
+	status := &ScanStatus{Scanning: true, Processed: 0}
+	s.scanStatuses.Store("approval", status)
 
-	for _, oldID := range data.IDs {
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(fmt.Sprintf(`{"status":"started", "total":%d}`, len(ids))))
+
+	go func(ids []string) {
+		defer func() {
+			status.Scanning = false
+			s.scanStatuses.Store("approval", status)
+			s.updateInboxCount()
+		}()
+
+		batchSize := 100
+		for i := 0; i < len(ids); i += batchSize {
+			end := i + batchSize
+			if end > len(ids) {
+				end = len(ids)
+			}
+			batch := ids[i:end]
+
+			// Para no duplicar lógica, extraemos el núcleo de handleApproveTracks o lo llamamos internamente
+			// Pero como handleApproveTracks requiere http.ResponseWriter, mejor refactorizamos el núcleo
+			s.internalApproveBatch(batch)
+
+			status.Processed = end
+			s.scanStatuses.Store("approval", status)
+		}
+	}(ids)
+}
+
+func (s *Server) internalApproveBatch(ids []string) {
+	dbase := s.MasterDB
+	processedAlbums := make(map[string]bool)
+
+	for _, oldID := range ids {
 		var path string
-		err := dbase.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", oldID).Scan(&path)
+		var albumID string
+		err := dbase.Conn.QueryRow("SELECT path, album_id FROM tracks WHERE id = ?", oldID).Scan(&path, &albumID)
 		if err != nil {
-			failedCount++
 			continue
 		}
 
@@ -174,57 +237,64 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 		newID := tags.GenerateUUID()
 		editor := tags.NewEditor(dbase)
 
-		// Deep Scan for covers during approval
-		func(p string, tid string, albID string) {
-			metadata, _ := tags.Open(p)
-			var imgData []byte
-			var mime string
+		if !processedAlbums[albumID] {
+			func(p string, tid string, albID string) {
+				metadata, _ := tags.Open(p)
+				var imgData []byte
+				var mime string
 
-			// 1. Try to find cover if missing
-			if metadata == nil || metadata.Picture() == nil {
-				dir := filepath.Dir(p)
-				common := []string{"cover", "folder", "front", "album", "artwork"}
-				entries, _ := os.ReadDir(dir)
-				for _, ent := range entries {
-					name := strings.ToLower(ent.Name())
-					ext := filepath.Ext(name)
-					if ext != ".jpg" && ext != ".jpeg" && ext != ".png" { continue }
-					base := strings.TrimSuffix(name, ext)
-					found := false
-					for _, c := range common {
-						if strings.HasPrefix(base, c) { found = true; break }
-					}
-					if found {
-						imgData, _ = os.ReadFile(filepath.Join(dir, ent.Name()))
-						mime = "image/jpeg"
-						if ext == ".png" { mime = "image/png" }
-						editor.EmbedCover(tid, imgData, mime)
-						break
+				// 1. Try to find cover if missing in file but present in folder
+				if metadata == nil || metadata.Picture() == nil {
+					dir := filepath.Dir(p)
+					common := []string{"cover", "folder", "front", "album", "artwork"}
+					entries, _ := os.ReadDir(dir)
+					for _, ent := range entries {
+						name := strings.ToLower(ent.Name())
+						ext := filepath.Ext(name)
+						if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+							continue
+						}
+						base := strings.TrimSuffix(name, ext)
+						found := false
+						for _, c := range common {
+							if strings.HasPrefix(base, c) {
+								found = true
+								break
+							}
+						}
+						if found {
+							imgData, _ = os.ReadFile(filepath.Join(dir, ent.Name()))
+							mime = "image/jpeg"
+							if ext == ".png" {
+								mime = "image/png"
+							}
+							editor.EmbedCover(tid, imgData, mime)
+							break
+						}
 					}
 				}
-			}
 
-			// 2. REGARDLESS of whether we just embedded it or it was already there, 
-			// RE-READ dimensions to sync database
-			metadata, _ = tags.Open(p) // Re-open to get fresh state
-			if metadata != nil && metadata.Picture() != nil {
-				pic := metadata.Picture()
-				src, _, err := image.Decode(bytes.NewReader(pic.Data))
-				if err == nil {
-					w := src.Bounds().Dx()
-					h := src.Bounds().Dy()
-					s.MasterDB.Conn.Exec(`
-						UPDATE albums 
-						SET cover_width = ?, cover_height = ?, cover_size = ?, cover_format = ?
-						WHERE id = (SELECT album_id FROM tracks WHERE id = ?)`, 
-						w, h, len(pic.Data), pic.MIME, tid)
-					slog.Info("📸 Cover metadata synchronized during approval", "track", tid, "dims", fmt.Sprintf("%dx%d", w, h))
+				// 2. RE-READ dimensions to sync database
+				metadata, _ = tags.Open(p) // Re-open to get fresh state
+				if metadata != nil && metadata.Picture() != nil {
+					pic := metadata.Picture()
+					src, _, err := image.Decode(bytes.NewReader(pic.Data))
+					if err == nil {
+						w := src.Bounds().Dx()
+						h := src.Bounds().Dy()
+						s.MasterDB.Conn.Exec(`
+							UPDATE albums 
+							SET cover_width = ?, cover_height = ?, cover_size = ?, cover_format = ?
+							WHERE id = ?`,
+							w, h, len(pic.Data), pic.MIME, albID)
+					}
 				}
-			}
-		}(path, oldID, "")
+				processedAlbums[albID] = true
+			}(path, oldID, albumID)
+		}
 
 		if err := tags.WritePersistentID(path, newID); err != nil {
-			slog.Error("⚠️ Non-fatal: Failed to write physical SGOUND_ID, but approving in DB anyway", "path", path, "err", err)
+			slog.Error("⚠️ Non-fatal: Failed to write physical SGOUND_ID", "path", path, "err", err)
 		}
 
 		dbSuccess := false
@@ -240,26 +310,36 @@ func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(100 * time.Millisecond)
 		}
 
-		if dbSuccess {
-			approvedCount++
-			if s.Config.AutoRename {
-				editor := tags.NewEditor(dbase)
-				editor.OrganizeFile(newID, s.Config.MusicPath, s.Config.RenamePattern)
-			}
-		} else {
-			slog.Error("❌ Critical: Failed to update track status in DB", "path", path)
-			failedCount++
+		if dbSuccess && s.Config.AutoRename {
+			editor.OrganizeFile(newID, s.Config.MusicPath, s.Config.RenamePattern)
 		}
 	}
+}
+
+func (s *Server) handleApproveTracks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var data struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	s.internalApproveBatch(data.IDs)
 
 	var totalActive int
 	s.MasterDB.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active'").Scan(&totalActive)
-	slog.Info("✅ Batch approval completed", "approved", approvedCount, "failed", failedCount, "total_active", totalActive)
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf(`{"status":"success", "approved":%d, "total":%d}`, approvedCount, totalActive)))
+	w.Write([]byte(fmt.Sprintf(`{"status":"success", "approved":%d, "total":%d}`, len(data.IDs), totalActive)))
 	s.updateInboxCount()
 }
+
 
 func (s *Server) handleRejectTracks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost && r.Method != http.MethodDelete {
