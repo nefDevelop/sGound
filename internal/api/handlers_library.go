@@ -244,15 +244,15 @@ func (s *Server) internalApproveBatch(ids []string) {
 		// Durante el escaneo 'raw' o 'pending', estos registros podrían ser genéricos.
 		// Al aprobar, los consolidamos.
 		artistID := utils.GenerateID(utils.NormalizeArtist(artistName))
-		_ = dbase.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, artistName)
+		_ , _ = dbase.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, artistName)
 		
 		// Regenerar albumID basado en el artista real y título para evitar colisiones genéricas
 		groupingKey := "AA:" + utils.NormalizeArtist(artistName)
 		newAlbumID := utils.GenerateID(groupingKey + "|" + utils.NormalizeString(albumTitle))
 		
 		if newAlbumID != albumID {
-			_ = dbase.Conn.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES (?, ?, ?)", newAlbumID, artistID, albumTitle)
-			_ = dbase.Conn.Exec("UPDATE tracks SET album_id = ? WHERE id = ?", newAlbumID, oldID)
+			_ , _ = dbase.Conn.Exec("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES (?, ?, ?)", newAlbumID, artistID, albumTitle)
+			_ , _ = dbase.Conn.Exec("UPDATE tracks SET album_id = ? WHERE id = ?", newAlbumID, oldID)
 			albumID = newAlbumID
 		}
 
