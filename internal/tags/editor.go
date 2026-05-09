@@ -13,7 +13,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"log/slog"
-
+	"strconv"
 	"github.com/bogem/id3v2/v2"
 	"github.com/go-flac/flacvorbis"
 	"github.com/go-flac/go-flac"
@@ -495,11 +495,16 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) ([]TagC
 
 func getString(data map[string]interface{}, k string) string {
 	if v, ok := data[k].(string); ok { return v }
+	if v, ok := data[k].(int); ok { return fmt.Sprintf("%d", v) }
+	if v, ok := data[k].(float64); ok { return fmt.Sprintf("%d", int(v)) }
 	return ""
 }
 func getInt(data map[string]interface{}, k string) int {
 	if v, ok := data[k].(float64); ok { return int(v) }
 	if v, ok := data[k].(int); ok { return v }
+	if v, ok := data[k].(string); ok {
+		if i, err := strconv.Atoi(v); err == nil { return i }
+	}
 	return 0
 }
 func getBoolInt(data map[string]interface{}, k string) int {
@@ -628,6 +633,14 @@ func (e *Editor) organizeFileInternal(trackID string, musicRoot string, pattern 
 	newRelPath = strings.ReplaceAll(newRelPath, "{bitrate}", fmt.Sprintf("%dk", bitrate/1000))
 
 	newPath := filepath.Join(musicRoot, newRelPath+"."+format)
+
+	// Security: Prevent path traversal outside of musicRoot
+	cleanRoot := filepath.Clean(musicRoot)
+	cleanNewPath := filepath.Clean(newPath)
+	if !strings.HasPrefix(cleanNewPath, cleanRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("security violation: path traversal attempt outside music root")
+	}
+
 	if _, err := os.Stat(newPath); err == nil && newPath != oldPath {
 		ext := "." + format
 		base := strings.TrimSuffix(newPath, ext)
