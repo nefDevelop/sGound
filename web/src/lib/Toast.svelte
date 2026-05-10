@@ -7,7 +7,7 @@
 </script>
 
 {#if data}
-  <div class="toast-wrapper" in:fly={{ y: 20, duration: 300 }} out:fade>
+  <div class="toast-wrapper" in:fly={{ y: 10, duration: 200, easing: (t) => t * (2 - t) }} out:fade={{ duration: 150 }}>
     <div class="toast glass {data.type}">
       <div class="icon-section">
         {#if data.type === 'error'}

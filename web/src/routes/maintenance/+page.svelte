@@ -10,7 +10,7 @@
 
 <Maintenance 
   {subview} 
-  onviewchange={(v) => goto(`/maintenance?subview=${v}`)}
+  onviewchange={(/** @type {any} */ v) => goto(`/maintenance?subview=${v}`)}
   onfixTags={handlers.handleFixTags} 
   onedit={handlers.openEditor}
 />

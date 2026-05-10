@@ -54,7 +54,7 @@
   function handleInput() {
     isOpen = true;
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(performSearch, 300);
+    debounceTimer = setTimeout(performSearch, 200);
   }
 
   function handleSelect(type, item) {
@@ -303,7 +303,8 @@
 <style>
   .search-container {
     position: relative;
-    width: 320px;
+    width: 100%;
+    max-width: 320px;
     z-index: 500;
   }
 
@@ -323,7 +324,7 @@
     background: var(--surface-container-high, #fff);
     border-color: var(--primary);
     box-shadow: 0 4px 12px var(--primary-20);
-    width: 400px;
+    max-width: 400px;
   }
 
   input {
@@ -401,7 +402,8 @@
     top: calc(100% + 8px);
     left: 0;
     width: 100%;
-    min-width: 400px;
+    min-width: 280px;
+    max-width: 400px;
     max-height: 450px;
     background: var(--surface);
     border-radius: 16px;

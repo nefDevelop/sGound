@@ -307,3 +307,28 @@ input[type="checkbox"]:focus {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* View Transitions Optimization */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.2s;
+  animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+::view-transition-old(main-content) {
+  animation: 0.2s cubic-bezier(0.4, 0, 1, 1) both fade-out;
+}
+
+::view-transition-new(main-content) {
+  animation: 0.25s cubic-bezier(0, 0, 0.2, 1) both fade-in-up;
+}
+
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

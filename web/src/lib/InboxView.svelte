@@ -8,12 +8,15 @@
   let {
     onplay,
     onedit,
-    onapproved,
-    onrejected,
+    onapproved = undefined,
+    onrejected = undefined,
     onhide,
-    onbulkReject,
+    onqueue,
+    onbulkReject = undefined,
     ondeletePhysical,
-    scanStatus,
+    onshuffle = undefined,
+    scanStatus = null,
+    currentPlaying = null,
   } = $props();
 
   let tracks = $state([]);
@@ -481,13 +484,15 @@
     {:else}
       <TracksView
         {tracks}
+        {currentPlaying}
         onselectionChange={(sel) => (selectedTracks = sel)}
         {onplay}
         {onedit}
-        onqueue={(track) => {}}
+        {onqueue}
         onhide={(track) => rejectIds([track.id])}
         {onbulkReject}
         ondeletePhysical={(track) => ondeletePhysical(track, fetchInbox)}
+        {onshuffle}
         onapplySuggestions={applySingleSuggestion}
         isInbox={true}
         showHeader={false}

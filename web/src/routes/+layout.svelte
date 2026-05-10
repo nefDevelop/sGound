@@ -2,6 +2,7 @@
   import { onMount, setContext } from "svelte";
   import { fade } from "svelte/transition";
   import { page } from "$app/stores";
+  import { onNavigate } from "$app/navigation";
   import "../app.css";
   import { 
     showToast, queue, currentIndex, isPlaying, inboxCount, rawCount, 
@@ -13,6 +14,7 @@
   import Sidebar from "$lib/Sidebar.svelte";
   import MiniPlayer from "$lib/MiniPlayer.svelte";
   import PlayerAnchorBar from "$lib/PlayerAnchorBar.svelte";
+  import FullPlayer from "$lib/FullPlayer.svelte";
   import Search from "$lib/Search.svelte";
   import Icon from "$lib/Icon.svelte";
   import QueuePanel from "$lib/QueuePanel.svelte";
@@ -47,18 +49,12 @@
   let currentTime = $state(0);
   let playerSubView = $state("cover");
   
-  let currentPlaying = $state(null);
+  // Reactive current track
+  let currentPlaying = $derived($currentIndex >= 0 && $currentIndex < $queue.length ? $queue[$currentIndex] : null);
+  
   let pollingInterval = null;
   let confirmState = $state({ isOpen: false, title: "", message: "", confirmLabel: "Confirm", type: "info", icon: null, onconfirm: null, oncancel: null });
-
   let isQueueOpen = $state(false);
-
-  // Sync currentPlaying
-  $effect(() => {
-    const q = $queue;
-    const idx = $currentIndex;
-    if (idx >= 0 && idx < q.length) currentPlaying = q[idx];
-  });
 
   // Dynamic Favicon
   $effect(() => {
@@ -244,7 +240,29 @@
       else if (statusInterval && !scanStatus?.scanning) updateInterval();
     });
 
-    return () => clearInterval(statusInterval);
+    const handlePopState = () => {
+      if (history.state?.view !== 'fullplayer') {
+        syncViewWithRoute();
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      clearInterval(statusInterval);
+      window.removeEventListener("popstate", handlePopState);
+    };
+  });
+
+  // --- View Transitions ---
+  onNavigate((navigation) => {
+    if (!document.startViewTransition) return;
+
+    return new Promise((resolve) => {
+      document.startViewTransition(async () => {
+        resolve();
+        await navigation.complete;
+      });
+    });
   });
 
   // Route mapping for SvelteKit compatibility
@@ -258,7 +276,7 @@
     '/maintenance': 'maintenance'
   };
 
-  $effect(() => {
+  function syncViewWithRoute() {
     const path = $page.url.pathname;
     if (viewMap[path]) {
       currentView.set(viewMap[path]);
@@ -267,6 +285,10 @@
     } else if (path.startsWith('/artist/')) {
       currentView.set('artist-detail');
     }
+  }
+
+  $effect(() => {
+    syncViewWithRoute();
   });
 
   let isFullPlayerActive = $derived($currentView === 'fullplayer');
@@ -298,31 +320,56 @@
         </div>
       {/if}
       
-      <header class="top-bar">
-        <div class="search-box">
-          <Search 
-            onselect={handlers.handleSearchResultSelect} 
-            onplay={handlers.handleSearchResultPlay}
-            onsearch={handlers.handleSearch}
-          />
-        </div>
-        <div class="actions">
-          {#if selectedTracks.length > 1}
-            <button class="bulk-btn" onclick={() => (isMassiveEditorOpen = true)}>
-              Edit ({selectedTracks.length})
-            </button>
-          {/if}
-        </div>
-      </header>
+      {#if !isFullPlayerActive}
+        <header class="top-bar">
+          <div class="search-box">
+            <Search 
+              onselect={handlers.handleSearchResultSelect} 
+              onplay={handlers.handleSearchResultPlay}
+              onsearch={handlers.handleSearch}
+            />
+          </div>
+          <div class="actions">
+            {#if selectedTracks.length > 1}
+              <button class="bulk-btn" onclick={() => (isMassiveEditorOpen = true)}>
+                Edit ({selectedTracks.length})
+              </button>
+            {/if}
+          </div>
+        </header>
+      {/if}
 
       <div class="scroll-view" class:is-fullplayer={isFullPlayerActive}>
         {#if error}
           <div class="error-state">
             <Icon name="alertCircle" size={48} color="var(--primary)" />
             <p class="error-msg">{error}</p>
-            <button class="retry-btn" onclick={handlers.fetchTracks}>
+            <button class="retry-btn" onclick={() => handlers.fetchTracks()}>
               <Icon name="refreshCw" size={16} /> Reintentar carga
             </button>
+          </div>
+        {:else if isFullPlayerActive && currentPlaying}
+          <FullPlayer 
+            {currentPlaying}
+            {audioRef}
+            isOpen={true}
+            bind:progress
+            bind:duration
+            bind:currentTime
+            bind:subView={playerSubView}
+            onedit={handlers.openEditor}
+            onhide={handlers.handleReject}
+            ondeletePhysical={handlers.handleDeletePhysical}
+            onskipNext={handlers.handleSkipNext}
+            onskipBack={handlers.handleSkipBack}
+          />
+        {:else if isFullPlayerActive && !currentPlaying}
+          <div class="empty-player-state">
+            <div style="opacity: 0.2">
+              <Icon name="music" size={64} />
+            </div>
+            <p>No hay ninguna pista en reproducción</p>
+            <button class="subtle-btn" onclick={() => { syncViewWithRoute(); history.back(); }}>Volver</button>
           </div>
         {:else}
           {@render children()}
@@ -333,15 +380,18 @@
     <div class="player-area" class:is-fullplayer={isFullPlayerActive}>
       <div class="player-stack">
         {#if isFullPlayerActive}
-          <div in:fade={{duration: 250, delay: 250}} out:fade={{duration: 250}}>
+          <div in:fade={{duration: 150, delay: 100}} out:fade={{duration: 150}}>
             <PlayerAnchorBar
               {currentPlaying}
               bind:view={playerSubView}
-              oncloseFull={() => history.back()}
+              oncloseFull={() => {
+                syncViewWithRoute();
+                history.back();
+              }}
             />
           </div>
         {:else}
-          <div in:fade={{duration: 250, delay: 250}} out:fade={{duration: 250}}>
+          <div in:fade={{duration: 150, delay: 100}} out:fade={{duration: 150}}>
             <MiniPlayer
               {currentPlaying}
               bind:audioRef
@@ -403,6 +453,8 @@
     background: var(--surface);
     color: var(--text-main);
     overflow: hidden;
+    width: 100%;
+    view-transition-name: app-layout;
   }
 
   .content {
@@ -410,12 +462,14 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-width: 0;
     background: var(--surface-container);
     margin: 1rem 1rem 0.5rem 1rem;
     border-radius: 28px;
     border: 1px solid var(--border-color);
     box-shadow: 0 8px 32px rgba(0,0,0,0.12);
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    view-transition-name: main-content;
   }
 
   .content.full-player-view {
@@ -448,6 +502,7 @@
     border: 1px solid var(--border-color);
     z-index: 10;
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    view-transition-name: player-bar;
   }
 
   .player-area.is-fullplayer {
@@ -482,7 +537,10 @@
     border-bottom: 1px solid var(--white-05);
   }
 
-  .search-box { width: 400px; }
+  .search-box { 
+    flex: 1;
+    max-width: 400px; 
+  }
   
   .ram-warning-banner {
     background: var(--primary);
@@ -518,6 +576,40 @@
     margin: 2rem;
   }
   
+  .empty-player-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 2rem;
+  }
+
+  .empty-player-state p {
+    font-size: 1.1rem;
+    font-weight: 500;
+    max-width: 250px;
+    line-height: 1.4;
+  }
+
+  .subtle-btn {
+    background: var(--surface-container-high);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    padding: 0.6rem 1.4rem;
+    border-radius: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .subtle-btn:hover {
+    background: var(--surface-container-highest);
+    border-color: var(--text-muted);
+  }
+
   .retry-btn {
     background: var(--primary);
     color: white;
@@ -539,7 +631,7 @@
   @media (max-width: 768px) {
     .app-layout {
       grid-template-areas: "content" "player" "sidebar";
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
       grid-template-rows: 1fr auto auto;
     }
     .content {
@@ -551,6 +643,10 @@
     }
     .player-stack {
       height: 72px;
+    }
+    .top-bar {
+      padding: 0 1rem;
+      gap: 1rem;
     }
   }
 </style>

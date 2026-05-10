@@ -2,18 +2,23 @@
   import Dashboard from "$lib/Dashboard.svelte";
   import { goto } from "$app/navigation";
   import { currentView } from "$lib/stores.js";
+  import { getContext } from "svelte";
 
   let { data } = $props();
-  // We can get handlers and state from layout via a store or context
-  // For now, let's assume we use stores or the components handle their own state
+  const { handlers, currentPlaying } = getContext("app");
 </script>
 
 <Dashboard 
+  onplay={handlers.handlePlay}
+  onqueue={handlers.handleQueue}
+  onedit={handlers.openEditor}
+  onhide={handlers.handleReject}
+  ondeletePhysical={handlers.handleDeletePhysical}
   onselectInbox={() => goto("/inbox")}
   onselectMaintenance={() => goto("/maintenance")}
-  onselectPlaylist={(pl) => goto(`/playlist/${pl.id}`)}
+  onselectPlaylist={(/** @type {any} */ pl) => goto(`/playlist/${pl.id}`)}
   onsmartAlbums={() => goto("/albums")}
-  onselectView={(view, id) => {
+  onselectView={(/** @type {any} */ view, /** @type {any} */ id) => {
     if (view === 'tracks') goto('/library');
     else if (view === 'albums' && id) goto(`/album/${id}`);
     else goto(`/${view}`);

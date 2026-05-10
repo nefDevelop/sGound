@@ -8,7 +8,9 @@
 </script>
 
 <SmartPlaylistView 
-  id={smartId}
+  type={smartId}
+  name={smartId.charAt(0).toUpperCase() + smartId.slice(1)}
+  icon={smartId === 'recent' ? 'clock' : smartId === 'frequent' ? 'activity' : smartId === 'forgotten' ? 'archive' : 'list'}
   currentPlaying={currentPlaying}
   onback={() => history.back()}
   onplay={handlers.handlePlay}

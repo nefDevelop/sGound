@@ -931,6 +931,19 @@
 
   @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
+  @media (max-width: 768px) {
+    .maintenance-view { padding: 1rem; }
+    .bento-grid { grid-template-columns: 1fr; gap: 1rem; }
+    .bento-card { padding: 1.5rem; border-radius: 24px; }
+    .bento-card .val { font-size: 2.5rem; }
+    .detail-container { padding: 1.5rem; border-radius: 24px; }
+    .card-actions-row { flex-direction: column; }
+    .m-table th:nth-child(2), .m-table td:nth-child(2),
+    .m-table th:nth-child(3), .m-table td:nth-child(3) { display: none; }
+    .path-col { display: none; }
+    .duplicate-group { padding: 1rem; border-radius: 20px; }
+  }
+
   @media (max-width: 900px) {
     .bento-grid { grid-template-columns: repeat(2, 1fr); gap: 1rem; }
     .bento-card { padding: 1.5rem; border-radius: 24px; gap: 1rem; }

@@ -4,6 +4,6 @@
 </script>
 
 <Playlists 
-  on:selectPlaylist={(e) => goto(`/playlist/${e.detail.id}`)} 
-  on:selectSmart={(e) => goto(`/smart-playlist/${e.detail.id}`)}
+  on:selectPlaylist={(/** @type {any} */ e) => goto(`/playlist/${e.detail.id}`)} 
+  on:selectSmart={(/** @type {any} */ e) => goto(`/smart-playlist/${e.detail.id}`)}
 />

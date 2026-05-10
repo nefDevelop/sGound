@@ -9,8 +9,7 @@
 - [x] **Rendimiento:** Validado benchmark de API (>500 RPS) y Transcodificación (<500ms TTFB).
 
 ## 🚀 Próximamente (En Desarrollo)
-- [ ] **Folder Browsing:** Vista de navegación por estructura de carpetas real para bibliotecas desorganizadas.
-- [ ] **Optimización de UI:** Transiciones fluidas entre vistas y mejora del scroll de letras.
+- [x] **Optimización de UI:** Transiciones fluidas entre vistas y mejora del scroll de letras.
 - [ ] **Internacionalización (i18n):** Soporte multi-idioma (ES/EN inicialmente).
 
 ## 🔮 Futuro (Backlog)

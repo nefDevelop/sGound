@@ -132,6 +132,7 @@
     z-index: 100;
     height: 100%;
     overflow: hidden;
+    view-transition-name: sidebar;
   }
 
   .brand {

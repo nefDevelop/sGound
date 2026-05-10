@@ -14,10 +14,10 @@
     onselectView, 
     onselectPlaylist, 
     onselectMaintenance,
-    onsmartAlbums,
-    onsmartSearch,
-    onCleanupLibrary,
-    scanStatus
+    onsmartAlbums = undefined,
+    onsmartSearch = undefined,
+    onCleanupLibrary = undefined,
+    scanStatus = null
   } = $props();
 
   let stats = $state({
@@ -351,7 +351,7 @@
     align-items: center; 
     justify-content: space-between;
     width: 100%;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     gap: 1.5rem; 
     margin-bottom: 2.5rem;
     position: relative; 
@@ -511,7 +511,7 @@
   .chip.secondary { background: var(--secondary-10); color: var(--secondary); }
   .chip.tertiary { background: var(--tertiary-10); color: var(--tertiary); }
 
-  .welcome-chips { margin-top: auto; padding-top: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap; position: relative; z-index: 1; padding-right: 180px; }
+  .welcome-chips { margin-top: auto; padding-top: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap; position: relative; z-index: 1; }
 
   .welcome-scan-status {
     position: absolute;
@@ -600,8 +600,29 @@
     .welcome-tile { grid-column: span 2; }
   }
   @media (max-width: 768px) {
-    .bento-grid { grid-template-columns: 1fr; }
-    .welcome-tile { grid-column: span 1; }
-    .bento-item { padding: 1.2rem; border-radius: 24px; }
+    .bento-grid { 
+      grid-template-columns: 1fr; 
+      grid-auto-rows: auto;
+      gap: 1rem;
+    }
+    .bento-item { 
+      grid-column: span 1 !important; 
+      grid-row: span 1 !important;
+      padding: 1.5rem; 
+      border-radius: 24px; 
+      min-height: auto;
+    }
+    .welcome-header h1 { font-size: 1.8rem; }
+    .welcome-scan-status {
+      position: relative;
+      bottom: 0;
+      right: 0;
+      margin-top: 1.5rem;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .mosaic-grid { grid-template-columns: repeat(2, 1fr); }
+    .mosaic-item.i0, .mosaic-item.i5 { grid-column: span 1; grid-row: span 1; }
+    .gems-grid { grid-template-columns: repeat(2, 1fr); }
   }
 </style>
