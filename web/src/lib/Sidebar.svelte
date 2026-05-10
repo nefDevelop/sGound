@@ -1,24 +1,16 @@
 <script>
   import Icon from './Icon.svelte';
-  import { currentView, viewParams, inboxCount, rawCount, isLoggedIn } from './stores.js';
+  import { inboxCount, rawCount } from './stores.js';
+  import { page } from '$app/stores';
 
   let { playlists = [], onLogout } = $props();
 
-  function navigate(view, params = {}) {
-    currentView.set(view);
-    viewParams.set(params);
-    
-    // Manage history
-    const state = { view, params };
-    if (!history.state || history.state.view !== view || JSON.stringify(history.state.params) !== JSON.stringify(params)) {
-      history.pushState(state, "");
-    }
-
-    const scrollView = document.querySelector('.scroll-view');
-    if (scrollView) scrollView.scrollTop = 0;
-  }
-
   let hasPendingMusic = $derived($inboxCount > 0 || $rawCount > 0);
+  
+  function isActive(path) {
+    if (path === '/') return $page.url.pathname === '/';
+    return $page.url.pathname.startsWith(path);
+  }
 </script>
 
 <aside class="sidebar">
@@ -31,10 +23,10 @@
 
   <nav>
     <div class="nav-label">General</div>
-    <button
+    <a
+      href="/"
       class="nav-item"
-      class:active={$currentView === "dashboard"}
-      onclick={() => navigate("dashboard")}
+      class:active={isActive('/')}
     >
       <div class="nav-icon-wrap">
         <Icon name="grid" size={18} />
@@ -43,70 +35,69 @@
         {/if}
       </div>
       <span>Dashboard</span>
-    </button>
+    </a>
 
     <div class="nav-label">Library</div>
-    <button
+    <a
+      href="/library"
       class="nav-item"
-      class:active={$currentView === "library" || $currentView === "tracks"}
-      onclick={() => navigate("library")}
+      class:active={isActive('/library')}
     >
       <Icon name="music" size={18} />
       <span>Tracks</span>
-    </button>
-    <button
+    </a>
+    <a
+      href="/albums"
       class="nav-item"
-      class:active={$currentView === "albums" || $currentView === "album"}
-      onclick={() => navigate("albums")}
+      class:active={isActive('/albums') || isActive('/album/')}
     >
       <Icon name="disc" size={18} />
       <span>Albums</span>
-    </button>
-    <button
+    </a>
+    <a
+      href="/artists"
       class="nav-item"
-      class:active={$currentView === "artists" || $currentView === "artist-detail"}
-      onclick={() => navigate("artists")}
+      class:active={isActive('/artists') || isActive('/artist/')}
     >
       <Icon name="users" size={18} />
       <span>Artists</span>
-    </button>
-    <button
+    </a>
+    <a
+      href="/playlists"
       class="nav-item"
-      class:active={$currentView === "playlists" || $currentView === "playlist"}
-      onclick={() => navigate("playlists")}
+      class:active={isActive('/playlists') || isActive('/playlist/') || isActive('/smart-playlist/')}
     >
       <Icon name="list" size={18} />
       <span>Playlists</span>
-    </button>
+    </a>
 
     <div class="nav-label">Tools</div>
-    <button
+    <a
+      href="/maintenance"
       class="nav-item"
-      class:active={$currentView === "maintenance"}
-      onclick={() => navigate("maintenance")}
+      class:active={isActive('/maintenance')}
     >
       <Icon name="shield" size={18} />
       <span>Maintenance</span>
-    </button>
-    <button
+    </a>
+    <a
+      href="/settings"
       class="nav-item"
-      class:active={$currentView === "settings"}
-      onclick={() => navigate("settings")}
+      class:active={isActive('/settings')}
     >
       <Icon name="settings" size={18} />
       <span>Settings</span>
-    </button>
+    </a>
 
     <div class="nav-divider"></div>
     <div class="nav-label">Your Playlists</div>
 
     <div class="playlists-scroll">
       {#each playlists as pl}
-        {@const currentPlId = $viewParams && $viewParams['playlist'] ? $viewParams['playlist'].id : null}
-        <button
+        <a
+          href="/playlist/{pl.id}"
           class="nav-item playlist-item"
-          class:active={$currentView === "playlist" && currentPlId === pl.id}
-          onclick={() => navigate("playlist", { playlist: pl })}
+          class:active={$page.url.pathname === `/playlist/${pl.id}`}
         >
           <div class="nav-icon-wrap">
             <Icon name={pl.isSmart ? "zap" : "list"} size={17} />
@@ -115,7 +106,7 @@
           {#if pl.trackCount > 0}
             <span class="nav-badge">{pl.trackCount}</span>
           {/if}
-        </button>
+        </a>
       {/each}
     </div>
 
@@ -195,6 +186,7 @@
   }
 
   .nav-item {
+    text-decoration: none;
     position: relative;
     display: flex;
     align-items: center;
@@ -211,6 +203,7 @@
     font-weight: 700;
     font-size: 0.92rem;
     transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+    box-sizing: border-box;
   }
 
   .nav-item:hover { background: var(--surface-container); color: var(--text-main); }

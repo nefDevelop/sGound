@@ -10,6 +10,7 @@ cover.out
 web/node_modules/
 web/dist/
 web/.temp/
+web/.svelte-kit/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
