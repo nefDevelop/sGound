@@ -13,6 +13,7 @@
   import Settings from "./Settings.svelte";
   import FullPlayer from "./FullPlayer.svelte";
   import Icon from "./Icon.svelte";
+  import { fade } from "svelte/transition";
   import { currentView, viewParams, isPlaying } from "./stores.js";
 
   let { 
@@ -54,7 +55,7 @@
   }
 </script>
 
-<div class="scroll-view" onscroll={handlers.handleTracksScroll}>
+<div class="scroll-view" class:is-fullplayer={$currentView === 'fullplayer'} onscroll={handlers.handleTracksScroll}>
   {#if error}
     <div class="error-state">
       <Icon name="alertCircle" size={48} color="var(--primary)" />
@@ -185,20 +186,22 @@
       bind:refresh={maintenanceRefresh}
     />
   {:else if $currentView === "fullplayer"}
-    <FullPlayer
-      {currentPlaying}
-      {audioRef}
-      isOpen={true}
-      bind:progress
-      bind:duration
-      bind:currentTime
-      bind:subView={playerSubView}
-      onedit={handlers.openEditor}
-      onhide={handlers.handleReject}
-      ondeletePhysical={handlers.handleDeletePhysical}
-      onskipNext={handlers.handleSkipNext}
-      onskipBack={handlers.handleSkipBack}
-    />
+    <div in:fade={{duration: 400}} out:fade={{duration: 200}}>
+      <FullPlayer
+        {currentPlaying}
+        {audioRef}
+        isOpen={true}
+        bind:progress
+        bind:duration
+        bind:currentTime
+        bind:subView={playerSubView}
+        onedit={handlers.openEditor}
+        onhide={handlers.handleReject}
+        ondeletePhysical={handlers.handleDeletePhysical}
+        onskipNext={handlers.handleSkipNext}
+        onskipBack={handlers.handleSkipBack}
+      />
+    </div>
   {/if}
 </div>
 
@@ -212,6 +215,7 @@
     scrollbar-width: none;
     -ms-overflow-style: none;
   }
+  .scroll-view.is-fullplayer { padding: 0; }
   .scroll-view::-webkit-scrollbar { display: none; }
   
   .error-state {

@@ -1,4 +1,5 @@
 <script>
+  import { fade } from "svelte/transition";
   import Sidebar from "./Sidebar.svelte";
   import MainContent from "./MainContent.svelte";
   import MiniPlayer from "./MiniPlayer.svelte";
@@ -74,32 +75,37 @@
     />
   </section>
 
-  <div class="player-area">
-    <div style="display: {$currentView === 'fullplayer' ? 'contents' : 'none'}">
-      <PlayerAnchorBar
-        {currentPlaying}
-        bind:view={playerSubView}
-        oncloseFull={() => history.back()}
-      />
-    </div>
-    <div style="display: {$currentView !== 'fullplayer' ? 'contents' : 'none'}">
-      <MiniPlayer
-        {currentPlaying}
-        bind:audioRef
-        bind:progress
-        bind:duration
-        bind:currentTime
-        skipNext={handlers.handleSkipNext}
-        skipBack={handlers.handleSkipBack}
-        onopenFull={() => {
-          currentView.set("fullplayer");
-          history.pushState({ view: "fullplayer", params: {} }, "");
-        }}
-        onedit={handlers.openEditor}
-        onhide={handlers.handleReject}
-        ondeletePhysical={handlers.handleDeletePhysical}
-        ontoggleQueue={() => isQueueOpen = !isQueueOpen}
-      />
+  <div class="player-area" class:is-fullplayer={$currentView === 'fullplayer'}>
+    <div class="player-stack">
+      {#if $currentView === 'fullplayer'}
+        <div in:fade={{duration: 250, delay: 250}} out:fade={{duration: 250}}>
+          <PlayerAnchorBar
+            {currentPlaying}
+            bind:view={playerSubView}
+            oncloseFull={() => history.back()}
+          />
+        </div>
+      {:else}
+        <div in:fade={{duration: 250, delay: 250}} out:fade={{duration: 250}}>
+          <MiniPlayer
+            {currentPlaying}
+            bind:audioRef
+            bind:progress
+            bind:duration
+            bind:currentTime
+            skipNext={handlers.handleSkipNext}
+            skipBack={handlers.handleSkipBack}
+            onopenFull={() => {
+              currentView.set("fullplayer");
+              history.pushState({ view: "fullplayer", params: {} }, "");
+            }}
+            onedit={handlers.openEditor}
+            onhide={handlers.handleReject}
+            ondeletePhysical={handlers.handleDeletePhysical}
+            ontoggleQueue={() => isQueueOpen = !isQueueOpen}
+          />
+        </div>
+      {/if}
     </div>
   </div>
 </main>
@@ -130,6 +136,7 @@
     border-radius: 28px;
     border: 1px solid var(--border-color);
     box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .content.full-player-view {
@@ -149,6 +156,28 @@
     background: var(--surface-container-highest);
     border: 1px solid var(--border-color);
     z-index: 10;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .player-area.is-fullplayer {
+    margin-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-top: none;
+    background: var(--surface-container-highest);
+  }
+
+  .player-stack {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+    height: 100px;
+  }
+
+  .player-stack > div {
+    grid-column: 1;
+    grid-row: 1;
+    height: 100px;
   }
 
   .top-bar {

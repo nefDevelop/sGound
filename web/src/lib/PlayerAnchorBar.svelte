@@ -92,7 +92,7 @@
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
     padding: 0 1rem;
-    height: 110px;
+    height: 100px;
     cursor: pointer;
     z-index: 1000;
   }

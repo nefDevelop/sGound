@@ -141,7 +141,7 @@
     audioRef = activeAudio === 'A' ? audioA : audioB;
     
     prevAudio.pause();
-    audioRef.play().catch(e => console.error("Play failed", e));
+    audioRef.play().catch((e) => console.error("Play failed", e));
     
     const q = get(queue);
     const idx = get(currentIndex);
@@ -251,12 +251,13 @@
   }
 </script>
 
-<footer class="player">
+<footer class="player-wrapper">
+  <div class="player" onclick={onopenFull} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && onopenFull?.()}>
   <div class="player-bg-clip">
     <div class="progress-bg" style="width: {progress}%"></div>
   </div>
   
-  <div class="now-playing" onclick={onopenFull} oncontextmenu={showContextMenu} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && onopenFull?.()}>
+  <div class="now-playing" oncontextmenu={showContextMenu}>
     <div class="cover-container">
       {#if currentPlaying?.id}
         <Artwork 
@@ -280,7 +281,7 @@
     </div>
   </div>
 
-  <div class="right-actions">
+  <div class="right-actions" onclick={(e) => e.stopPropagation()} role="presentation">
     <div class="playback-btns">
       <button class="sub-btn" class:active={$isShuffle} onclick={() => isShuffle.update(v => !v)} title="Aleatorio">
         <Icon name="shuffle" size={18} />
@@ -336,9 +337,14 @@
 
   <audio bind:this={audioA} style="display:none"></audio>
   <audio bind:this={audioB} style="display:none"></audio>
+  </div>
 </footer>
 
 <style>
+  .player-wrapper {
+    margin: 0;
+    padding: 0;
+  }
   .player {
     display: flex;
     justify-content: space-between;
@@ -350,6 +356,7 @@
     position: relative;
     overflow: visible;
     z-index: 1000;
+    cursor: pointer;
   }
 
   .player-bg-clip {
@@ -375,7 +382,6 @@
     gap: 1.2rem;
     min-width: 0; /* Essential for text trimming */
     flex: 1;
-    cursor: pointer;
   }
 
   .info {
