@@ -1,11 +1,10 @@
 <script>
-  import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { queue, currentIndex, audioQuality, effectiveQuality, isPlaying, showToast, volume, isShuffle, repeatMode, coverRefreshTrigger } from './stores.js';
-  import { get } from 'svelte/store';
+  import { isPlaying, showToast, volume, isShuffle, repeatMode, coverRefreshTrigger } from './stores.js';
   import Artwork from './Artwork.svelte';
+  import { getContext } from 'svelte';
   
   let { 
     currentPlaying = $bindable(null), 
@@ -17,24 +16,12 @@
     onedit,
     onhide,
     ondeletePhysical,
-    ontoggleQueue,
-    skipNext: skipNextBound = $bindable(),
-    skipBack: skipBackBound = $bindable()
+    ontoggleQueue
   } = $props();
 
-  $effect(() => {
-    skipNextBound = skipNext;
-    skipBackBound = skipBack;
-  });
+  const { handlers } = getContext('app');
 
-  let isMuted = $state(false);
   let showVolume = $state(false);
-
-  // Dual audio elements for gapless
-  let audioA = $state(), audioB = $state();
-  let activeAudio = $state('A');
-  
-  let preloadedId = $state(null);
 
   let contextMenu = $state({
     visible: false,
@@ -60,187 +47,27 @@
     };
   }
 
-  onMount(() => {
-    audioRef = audioA;
-    setupAudio(audioA);
-    setupAudio(audioB);
-    audioA.volume = $volume;
-    audioB.volume = $volume;
-  });
-
-  function setupAudio(el) {
-    el.onended = handleTrackEnded;
-    el.ontimeupdate = () => {
-      if (el === audioRef) {
-        currentTime = el.currentTime;
-        duration = el.duration;
-        progress = (currentTime / duration) * 100;
-        checkPreload();
-      }
-    };
-    el.onplay = () => isPlaying.set(true);
-    el.onpause = () => isPlaying.set(false);
-  }
-
-  function checkPreload() {
-    if (duration > 0 && currentTime / duration > 0.85) {
-      const q = get(queue);
-      const idx = get(currentIndex);
-      if (idx < q.length - 1) {
-        const next = q[idx + 1];
-        if (next && next.id !== preloadedId) {
-          const nextEl = activeAudio === 'A' ? audioB : audioA;
-          const quality = get(effectiveQuality);
-          const url = `/api/stream/${next.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
-          nextEl.src = url;
-          nextEl.load();
-          preloadedId = next.id;
-        }
-      }
-    }
-  }
-
-  function handleTrackEnded() {
-     const q = get(queue);
-     const idx = get(currentIndex);
-     const mode = get(repeatMode);
-     const shuffle = get(isShuffle);
-
-     if (mode === 'one') {
-        audioRef.currentTime = 0;
-        audioRef.play().catch(() => {});
-        return;
-     }
-
-     if (shuffle && q.length > 1) {
-        let nextIdx;
-        do {
-          nextIdx = Math.floor(Math.random() * q.length);
-        } while (nextIdx === idx);
-        currentIndex.set(nextIdx);
-        switchAudio();
-        return;
-     }
-
-     if (idx < q.length - 1) {
-        currentIndex.set(idx + 1);
-        switchAudio();
-     } else {
-        if (mode === 'all') {
-           currentIndex.set(0);
-           switchAudio();
-        } else {
-           isPlaying.set(false);
-        }
-     }
-  }
-
-  function switchAudio() {
-    const prevAudio = activeAudio === 'A' ? audioA : audioB;
-    activeAudio = activeAudio === 'A' ? 'B' : 'A';
-    audioRef = activeAudio === 'A' ? audioA : audioB;
-    
-    prevAudio.pause();
-    audioRef.play().catch((e) => console.error("Play failed", e));
-    
-    const q = get(queue);
-    const idx = get(currentIndex);
-    currentPlaying = q[idx];
-    preloadedId = null;
-  }
-
-  $effect(() => {
-    if (currentPlaying && audioRef && audioRef.src.indexOf(currentPlaying.id) === -1 && !preloadedId) {
-      const quality = get(effectiveQuality);
-      const url = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
-      audioRef.src = url;
-      audioRef.play().catch(() => {});
-    }
-  });
-
-  function handleSeek(e) {
-    const seekTime = (e.target.value / 100) * duration;
-    audioRef.currentTime = seekTime;
-  }
-
   function toggleMute() {
-    isMuted = !isMuted;
-    audioA.muted = isMuted;
-    audioB.muted = isMuted;
+    if ($volume > 0) {
+      localStorage.setItem('lastVolume', $volume.toString());
+      volume.set(0);
+    } else {
+      const lastV = parseFloat(localStorage.getItem('lastVolume')) || 0.5;
+      volume.set(lastV);
+    }
   }
 
   function handleVolume(e) {
     const v = parseFloat(e.target.value);
     volume.set(v);
-    audioA.volume = v;
-    audioB.volume = v;
+    if (audioRef) audioRef.volume = v;
   }
 
   function toggleRepeat() {
     const modes = ['none', 'all', 'one'];
-    const current = get(repeatMode);
+    const current = $repeatMode;
     const next = modes[(modes.indexOf(current) + 1) % modes.length];
     repeatMode.set(next);
-  }
-
-  function skipNext() {
-    const q = get(queue);
-    const idx = get(currentIndex);
-    const shuffle = get(isShuffle);
-
-    let nextIdx = idx + 1;
-    if (shuffle && q.length > 1) {
-       do {
-         nextIdx = Math.floor(Math.random() * q.length);
-       } while (nextIdx === idx);
-    }
-
-    if (nextIdx < q.length && nextIdx >= 0) {
-      currentIndex.set(nextIdx);
-      const next = q[nextIdx];
-      currentPlaying = next;
-      if (preloadedId === next.id) {
-         switchAudio();
-      } else {
-         const quality = get(effectiveQuality);
-         audioRef.src = `/api/stream/${next.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
-         audioRef.play().catch(() => {});
-         preloadedId = null;
-      }
-    } else if (get(repeatMode) === 'all' && q.length > 0) {
-      currentIndex.set(0);
-      switchAudio();
-    }
-  }
-
-  function skipBack() {
-    const idx = get(currentIndex);
-    if (idx > 0) {
-      currentIndex.set(idx - 1);
-      const q = get(queue);
-      currentPlaying = q[idx-1];
-      const quality = get(effectiveQuality);
-      audioRef.src = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
-      audioRef.play().catch(() => {});
-      preloadedId = null;
-    }
-  }
-
-  async function handleRate(track, rating) {
-    try {
-      const res = await fetch(`/api/tracks/${track.id}/rate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rating }),
-      });
-      if (res.ok) {
-        track.rating = rating;
-        showToast(`Valorado con ${rating} estrellas`, "success");
-      }
-    } catch (e) {
-      console.error(e);
-      showToast("Error al valorar", "error");
-    }
   }
 
   function formatTime(secs) {
@@ -253,90 +80,87 @@
 
 <footer class="player-wrapper">
   <div class="player" onclick={onopenFull} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && onopenFull?.()}>
-  <div class="player-bg-clip">
-    <div class="progress-bg" style="width: {progress}%"></div>
-  </div>
-  
-  <div class="now-playing" oncontextmenu={showContextMenu}>
-    <div class="cover-container">
-      {#if currentPlaying?.id}
-        <Artwork 
-          src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" 
-          alt="Cover" 
-          size="60px" 
-          borderRadius="12px" 
-        />
-      {:else}
-        <div class="cover-placeholder"></div>
-      {/if}
+    <div class="player-bg-clip">
+      <div class="progress-bg" style="width: {progress}%"></div>
     </div>
-    <div class="info">
-      <div class="album-name">{currentPlaying?.album || 'Sgound Player'}</div>
-      <div class="track-meta">
-        <span class="track-title">{currentPlaying?.title || 'No track playing'}</span>
-        {#if currentPlaying?.format}
-          <span class="quality-chip">{currentPlaying.format.toUpperCase()}</span>
+    
+    <div class="now-playing" oncontextmenu={showContextMenu}>
+      <div class="cover-container">
+        {#if currentPlaying?.id}
+          <Artwork 
+            src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" 
+            alt="Cover" 
+            size="60px" 
+            borderRadius="12px" 
+          />
+        {:else}
+          <div class="cover-placeholder"></div>
         {/if}
       </div>
-    </div>
-  </div>
-
-  <div class="right-actions" onclick={(e) => e.stopPropagation()} role="presentation">
-    <div class="playback-btns">
-      <button class="sub-btn" class:active={$isShuffle} onclick={() => isShuffle.update(v => !v)} title="Aleatorio">
-        <Icon name="shuffle" size={18} />
-      </button>
-      <button class="icon-btn" onclick={skipBack} title="Previous">
-        <Icon name="skipBack" size={22} />
-      </button>
-      <button class="main-play-btn" onclick={() => audioRef?.paused ? audioRef.play().catch(() => {}) : audioRef?.pause()} title={$isPlaying ? 'Pause' : 'Play'}>
-        <Icon name={$isPlaying ? 'pause' : 'play'} size={24} />
-      </button>
-      <button class="icon-btn" onclick={skipNext} title="Next">
-        <Icon name="skipForward" size={22} />
-      </button>
-      <button class="sub-btn" class:repeat-one={$repeatMode === 'one'} class:active={$repeatMode !== 'none'} onclick={toggleRepeat} title="Repetir">
-        <Icon name="repeat" size={18} />
-        {#if $repeatMode === 'one'}<span class="repeat-badge">1</span>{/if}
-      </button>
+      <div class="info">
+        <div class="album-name">{currentPlaying?.album || 'Sgound Player'}</div>
+        <div class="track-meta">
+          <span class="track-title">{currentPlaying?.title || 'No track playing'}</span>
+          {#if currentPlaying?.format}
+            <span class="quality-chip">{currentPlaying.format.toUpperCase()}</span>
+          {/if}
+        </div>
+      </div>
     </div>
 
-    <div class="extra-controls">
-      <button class="icon-btn" class:active={false} onclick={ontoggleQueue} title="Mostrar cola">
-        <Icon name="list" size={20} />
-      </button>
-      <div class="volume-container">
-        <button class="icon-btn" onclick={() => showVolume = !showVolume} title="Volume">
-          <Icon name={isMuted ? 'volumeX' : 'volume2'} size={20} />
+    <div class="right-actions" onclick={(e) => e.stopPropagation()} role="presentation">
+      <div class="playback-btns">
+        <button class="sub-btn" class:active={$isShuffle} onclick={() => isShuffle.update(v => !v)} title="Aleatorio">
+          <Icon name="shuffle" size={18} />
         </button>
-        {#if showVolume}
-          <div class="volume-popover" transition:fade={{duration: 150}}>
-            <div class="vol-slider-wrap">
-              <input 
-                type="range" 
-                class="vol-slider-vertical" 
-                min="0" max="1" step="0.01" 
-                value={$volume} 
-                oninput={handleVolume}
-              />
-              <div class="v-fill" style="height: {$volume * 100}%"></div>
+        <button class="icon-btn" onclick={() => handlers.handleSkipBack()} title="Previous">
+          <Icon name="skipBack" size={22} />
+        </button>
+        <button class="main-play-btn" onclick={() => audioRef?.paused ? audioRef.play().catch(() => {}) : audioRef?.pause()} title={$isPlaying ? 'Pause' : 'Play'}>
+          <Icon name={$isPlaying ? 'pause' : 'play'} size={24} />
+        </button>
+        <button class="icon-btn" onclick={() => handlers.handleSkipNext()} title="Next">
+          <Icon name="skipForward" size={22} />
+        </button>
+        <button class="sub-btn" class:repeat-one={$repeatMode === 'one'} class:active={$repeatMode !== 'none'} onclick={toggleRepeat} title="Repetir">
+          <Icon name="repeat" size={18} />
+          {#if $repeatMode === 'one'}<span class="repeat-badge">1</span>{/if}
+        </button>
+      </div>
+
+      <div class="extra-controls">
+        <button class="icon-btn" class:active={false} onclick={ontoggleQueue} title="Mostrar cola">
+          <Icon name="list" size={20} />
+        </button>
+        <div class="volume-container">
+          <button class="icon-btn" onclick={() => showVolume = !showVolume} title="Volume">
+            <Icon name={$volume === 0 ? 'volumeX' : 'volume2'} size={20} />
+          </button>
+          {#if showVolume}
+            <div class="volume-popover" transition:fade={{duration: 150}}>
+              <div class="vol-slider-wrap">
+                <input 
+                  type="range" 
+                  class="vol-slider-vertical" 
+                  min="0" max="1" step="0.01" 
+                  value={$volume} 
+                  oninput={handleVolume}
+                />
+                <div class="v-fill" style="height: {$volume * 100}%"></div>
+              </div>
             </div>
-          </div>
-        {/if}
+          {/if}
+        </div>
       </div>
     </div>
-  </div>
 
-  <ContextMenu 
-    bind:visible={contextMenu.visible}
-    x={contextMenu.x}
-    y={contextMenu.y}
-    items={contextMenu.items}
-    onclose={() => contextMenu.visible = false}
-  />
-
-  <audio bind:this={audioA} style="display:none"></audio>
-  <audio bind:this={audioB} style="display:none"></audio>
+    <ContextMenu 
+      bind:visible={contextMenu.visible}
+      x={contextMenu.x}
+      y={contextMenu.y}
+      items={contextMenu.items}
+      onclose={() => contextMenu.visible = false}
+    />
   </div>
 </footer>
 

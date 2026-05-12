@@ -2,7 +2,7 @@
   import { onMount, setContext } from "svelte";
   import { fade } from "svelte/transition";
   import { page } from "$app/stores";
-  import { onNavigate } from "$app/navigation";
+  import { onNavigate, goto } from "$app/navigation";
   import "../app.css";
   import { 
     showToast, queue, currentIndex, isPlaying, inboxCount, rawCount, 
@@ -24,6 +24,7 @@
   import MassiveTagEditor from "$lib/MassiveTagEditor.svelte";
   import Toast from "$lib/Toast.svelte";
   import ConfirmModal from "$lib/ConfirmModal.svelte";
+  import AudioEngine from "$lib/AudioEngine.svelte";
 
   let { children } = $props();
 
@@ -48,6 +49,9 @@
   let duration = $state(0);
   let currentTime = $state(0);
   let playerSubView = $state("cover");
+  
+  let skipNext = $state();
+  let skipBack = $state();
   
   // Reactive current track
   let currentPlaying = $derived($currentIndex >= 0 && $currentIndex < $queue.length ? $queue[$currentIndex] : null);
@@ -194,6 +198,51 @@
       if (res.ok && refresh) { fetchTracks(); callback?.(); }
       return res.ok;
     },
+    handlePlayAlbum: async (albumId) => {
+      try {
+        const res = await apiFetch(`/api/albums/${albumId}/tracks`);
+        if (res.ok) {
+          const tracks = await res.json();
+          if (tracks.length > 0) handlers.handlePlay({ track: tracks[0], tracks });
+        }
+      } catch (e) { showToast("Error al reproducir álbum", "error"); }
+    },
+    handleQueueAlbum: async (albumId) => {
+      try {
+        const res = await apiFetch(`/api/albums/${albumId}/tracks`);
+        if (res.ok) {
+          const tracks = await res.json();
+          if (tracks.length > 0) {
+            queue.update(q => [...q, ...tracks]);
+            showToast(`Añadidas ${tracks.length} canciones a la cola`, "success");
+          }
+        }
+      } catch (e) { showToast("Error al añadir álbum a la cola", "error"); }
+    },
+    handleQueue: (track) => {
+      queue.update(q => [...q, track]);
+      showToast(`Añadida "${track.title}" a la cola`, "success");
+    },
+    handleSkipNext: () => {
+      const q = get(queue);
+      if (q.length === 0) return;
+      currentIndex.update(n => (n + 1) % q.length);
+      isPlaying.set(true);
+    },
+    handleSkipBack: () => {
+      const q = get(queue);
+      if (q.length === 0) return;
+      currentIndex.update(n => (n - 1 + q.length) % q.length);
+      isPlaying.set(true);
+    },
+    handleSearchResultSelect: (type, item) => {
+      if (type === 'album') goto(`/album/${item.id}`);
+      else if (type === 'artist') goto(`/artist/${item.id}`);
+      else if (type === 'track') handlers.handlePlay(item);
+    },
+    handleSearchResultPlay: (item) => handlers.handlePlay(item),
+    handleSearch: () => {},
+    handleFixTags: (track) => handlers.openEditor(track),
     fetchTracks,
     checkScanStatus
   };
@@ -206,6 +255,9 @@
     get loadingTracks() { return loadingTracks; },
     get currentPlaying() { return currentPlaying; }
   });
+
+  handlers.handleSkipNext = () => skipNext?.();
+  handlers.handleSkipBack = () => skipBack?.();
 
   async function checkAuthStatus() {
     try {
@@ -309,6 +361,14 @@
     on:setup={(e) => { setupUsername = e.detail.username; setupRequired.set(true); }}
   />
 {:else}
+  <AudioEngine 
+    bind:audioRef 
+    bind:progress 
+    bind:duration 
+    bind:currentTime 
+    bind:onSkipNext={skipNext}
+    bind:onSkipBack={skipBack}
+  />
   <main class="app-layout" class:is-cinema={isFullPlayerActive && playerSubView === 'cinema'}>
     <Sidebar {playlists} onLogout={handlers.handleLogout} />
 
@@ -379,38 +439,33 @@
 
     <div class="player-area" class:is-fullplayer={isFullPlayerActive}>
       <div class="player-stack">
-        {#if isFullPlayerActive}
-          <div in:fade={{duration: 150, delay: 100}} out:fade={{duration: 150}}>
-            <PlayerAnchorBar
-              {currentPlaying}
-              bind:view={playerSubView}
-              oncloseFull={() => {
-                syncViewWithRoute();
-                history.back();
-              }}
-            />
-          </div>
-        {:else}
-          <div in:fade={{duration: 150, delay: 100}} out:fade={{duration: 150}}>
-            <MiniPlayer
-              {currentPlaying}
-              bind:audioRef
-              bind:progress
-              bind:duration
-              bind:currentTime
-              skipNext={handlers.handleSkipNext}
-              skipBack={handlers.handleSkipBack}
-              onopenFull={() => {
-                currentView.set("fullplayer");
-                history.pushState({ view: "fullplayer", params: {} }, "");
-              }}
-              onedit={handlers.openEditor}
-              onhide={handlers.handleReject}
-              ondeletePhysical={handlers.handleDeletePhysical}
-              ontoggleQueue={() => isQueueOpen = !isQueueOpen}
-            />
-          </div>
-        {/if}
+        <div class:hidden={!isFullPlayerActive} in:fade={{duration: 150, delay: 100}} out:fade={{duration: 150}}>
+          <PlayerAnchorBar
+            {currentPlaying}
+            bind:view={playerSubView}
+            oncloseFull={() => {
+              syncViewWithRoute();
+              history.back();
+            }}
+          />
+        </div>
+        <div class:hidden={isFullPlayerActive} in:fade={{duration: 150, delay: 100}} out:fade={{duration: 150}}>
+          <MiniPlayer
+            {currentPlaying}
+            bind:audioRef
+            bind:progress
+            bind:duration
+            bind:currentTime
+            onopenFull={() => {
+              currentView.set("fullplayer");
+              history.pushState({ view: "fullplayer", params: {} }, "");
+            }}
+            onedit={handlers.openEditor}
+            onhide={handlers.handleReject}
+            ondeletePhysical={handlers.handleDeletePhysical}
+            ontoggleQueue={() => isQueueOpen = !isQueueOpen}
+          />
+        </div>
       </div>
     </div>
   </main>
@@ -648,5 +703,9 @@
       padding: 0 1rem;
       gap: 1rem;
     }
+  }
+
+  .hidden {
+    display: none !important;
   }
 </style>
