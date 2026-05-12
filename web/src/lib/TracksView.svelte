@@ -3,7 +3,7 @@
   import ContextMenu from './ContextMenu.svelte';
   import StarRating from './StarRating.svelte';
   import { get } from 'svelte/store';
-  import { showToast, coverRefreshTrigger } from './stores.js';
+  import { showToast, coverRefreshTrigger, showContextMenu as triggerContextMenu } from './stores.js';
   import { copyToClipboard } from './utils.js';
   import Artwork from './Artwork.svelte';
   import CoverSearcher from './CoverSearcher.svelte';
@@ -82,13 +82,7 @@
   let suggestions = $state([]);
   let suggestionIdx = $state(-1);
 
-  let contextMenu = $state({
-    visible: false,
-    x: 0,
-    y: 0,
-    track: null,
-    items: []
-  });
+
 
   async function prioritizeTrack(id) {
     try {
@@ -104,24 +98,18 @@
     // Si es un track 'raw', pedimos prioridad al servidor
     if (track.status === 'raw') prioritizeTrack(track.id);
 
-    contextMenu = {
-      visible: true,
-      x: e.clientX,
-      y: e.clientY,
-      track,
-      items: [
-        { label: 'Play', icon: 'play', action: () => onplay?.(track), disabled: track.status === 'raw' },
-        { label: 'Add to queue', icon: 'plus', action: () => onqueue?.(track), disabled: track.status === 'raw' },
-        { divider: true },
-        { label: 'Edit tags', icon: 'edit', action: () => onedit?.(track), disabled: track.status === 'raw' },
-        ...(!isInbox ? [{ label: 'Organize file', icon: 'folder', action: () => handleOrganize(track.id) }] : []),
-        { divider: true },
-        { label: 'Copy title', icon: 'fileText', action: () => copyToClipboard(track.title).then(ok => ok && showToast("Title copied", "info")) },
-        { divider: true },
-        { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(track) },
-        { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(track) }
-      ]
-    };
+    triggerContextMenu(e.clientX, e.clientY, [
+      { label: 'Play', icon: 'play', action: () => onplay?.(track), disabled: track.status === 'raw' },
+      { label: 'Add to queue', icon: 'plus', action: () => onqueue?.(track), disabled: track.status === 'raw' },
+      { divider: true },
+      { label: 'Edit tags', icon: 'edit', action: () => onedit?.(track), disabled: track.status === 'raw' },
+      ...(!isInbox ? [{ label: 'Organize file', icon: 'folder', action: () => handleOrganize(track.id) }] : []),
+      { divider: true },
+      { label: 'Copy title', icon: 'fileText', action: () => copyToClipboard(track.title).then(ok => ok && showToast("Title copied", "info")) },
+      { divider: true },
+      { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(track) },
+      { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(track) }
+    ]);
   }
 
   function handleRowClick(track, e) {
@@ -602,13 +590,7 @@
     </table>
   </div>
 
-  <ContextMenu 
-    bind:visible={contextMenu.visible}
-    x={contextMenu.x}
-    y={contextMenu.y}
-    items={contextMenu.items}
-    onclose={() => contextMenu.visible = false}
-  />
+
 
   {#if activeTrackForCover}
     <CoverSearcher 

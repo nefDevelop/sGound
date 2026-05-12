@@ -1,5 +1,5 @@
 <script>
-  import { inboxCount, rawCount, coverRefreshTrigger, showToast } from './stores.js';
+  import { inboxCount, rawCount, coverRefreshTrigger, showToast, showContextMenu as triggerContextMenu } from './stores.js';
   import { copyToClipboard } from './utils.js';
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
@@ -12,29 +12,17 @@
   let albums = $state([]);
   let loading = $state(true);
 
-  let contextMenu = $state({
-    visible: false,
-    x: 0,
-    y: 0,
-    album: null,
-    items: []
-  });
+
 
   function showContextMenu(album, e) {
     e.preventDefault();
-    contextMenu = {
-      visible: true,
-      x: e.clientX,
-      y: e.clientY,
-      album,
-      items: [
-        { label: 'Play Album', icon: 'play', action: () => onplayAlbum?.(album.id) },
-        { label: 'Queue Album', icon: 'plus', action: () => onqueueAlbum?.(album.id) },
-        { divider: true },
-        { label: 'Edit Tags', icon: 'edit', action: () => oneditAlbum?.(album) },
-        { label: 'Copy Title', icon: 'fileText', action: () => copyToClipboard(album.title).then(ok => ok && showToast("Title copied", "info")) }
-      ]
-    };
+    triggerContextMenu(e.clientX, e.clientY, [
+      { label: 'Play Album', icon: 'play', action: () => onplayAlbum?.(album.id) },
+      { label: 'Queue Album', icon: 'plus', action: () => onqueueAlbum?.(album.id) },
+      { divider: true },
+      { label: 'Edit Tags', icon: 'edit', action: () => oneditAlbum?.(album) },
+      { label: 'Copy Title', icon: 'fileText', action: () => copyToClipboard(album.title).then(ok => ok && showToast("Title copied", "info")) }
+    ]);
   }
 
   $effect(() => {
@@ -148,13 +136,7 @@
     </div>
   {/if}
 
-  <ContextMenu 
-    bind:visible={contextMenu.visible}
-    x={contextMenu.x}
-    y={contextMenu.y}
-    items={contextMenu.items}
-    onclose={() => contextMenu.visible = false}
-  />
+
 </div>
 
 <style>

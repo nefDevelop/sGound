@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -105,11 +106,17 @@ func (s *Server) generateRuleSQL(rules struct {
 }
 
 func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
+	user, _ := r.Context().Value(userKey).(*db.User)
+	if user == nil {
+		http.Error(w, "User not found in context", http.StatusUnauthorized)
+		return
+	}
+	
 	typeStr := s.extractID(r, "/api/smart-playlists/")
 
 	baseQuery := `
 		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''),
-		       a.name as artist, al.title as album, al.year as year,
+		       a.name as artist, al.title as album, COALESCE(al.year, 0) as year,
 		       t.size, t.format, t.bit_rate, t.sample_rate,
 		       t.composer, t.comment, t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0)
 		FROM tracks t
@@ -122,8 +129,10 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 
 	switch typeStr {
 	case "recently-played":
-		whereClause += " AND t.last_played IS NOT NULL"
-		orderClause = "ORDER BY t.last_played DESC LIMIT 50"
+		baseQuery += " JOIN user_tracks ut ON t.id = ut.track_id AND ut.username = ?"
+		args = append(args, user.Username)
+		whereClause += " AND ut.last_played IS NOT NULL"
+		orderClause = "ORDER BY ut.last_played DESC LIMIT 50"
 	case "high-quality":
 		whereClause += " AND (t.bit_rate >= 320000 OR t.format = 'flac' OR t.format = 'wav')"
 		orderClause = "ORDER BY t.bit_rate DESC"
@@ -152,7 +161,8 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf("%s %s %s", baseQuery, whereClause, orderClause)
 	rows, err := s.getDB(r).Conn.Query(query, args...)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Error("SQL Error in handleSmartPlaylists", "type", typeStr, "error", err, "query", query, "args", args)
+		http.Error(w, "Error executing query: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -160,16 +170,22 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 	var tracks []map[string]interface{}
 	for rows.Next() {
 		var id, title, genre, artist, album, format, composer, comment string
-		var trackNum, discNum, duration, year, bitRate, sampleRate, instrumental, trackTotal, discTotal int
+		var trackNum, discNum, year, bitRate, sampleRate, instrumental, trackTotal, discTotal int
+		var duration float64
 		var size int64
+		
+		// Usamos Scan con punteros o COALESCE en el SQL para evitar errores con NULLs
 		if err := rows.Scan(&id, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &size, &format, &bitRate, &sampleRate, &composer, &comment, &instrumental, &trackTotal, &discTotal); err != nil {
+			slog.Error("Scan error in handleSmartPlaylists", "err", err)
 			continue
 		}
+		
 		tracks = append(tracks, map[string]interface{}{
 			"id": id, "title": title, "trackNum": trackNum, "discNum": discNum,
 			"duration": duration, "genre": genre, "artist": artist, "album": album, "year": year,
 			"size": size, "format": format, "bitrate": bitRate, "sampleRate": sampleRate,
 			"composer": composer, "comment": comment, "instrumental": instrumental == 1,
+			"trackTotal": trackTotal, "discTotal": discTotal,
 		})
 	}
 
@@ -221,7 +237,7 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 	}
 
 	var rows *sql.Rows
-	fields := "t.id, t.title, t.track_num, t.disc_num, t.duration, t.genre, a.name, al.title, al.year, COALESCE(ut.rating, 0), t.composer, t.comment, t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0)"
+	fields := "t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), a.name, al.title, COALESCE(al.year, 0), COALESCE(ut.rating, 0), t.composer, t.comment, t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0)"
 
 	if isSmart == 1 && ruleSQL != "" {
 		rows, err = s.getDB(r).Conn.Query(`
@@ -255,9 +271,11 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 	var list []map[string]interface{}
 	for rows.Next() {
 		var tid, title, genre, artist, album, composer, comment string
-		var trackNum, discNum, duration, year, rating, instrumental, trackTotal, discTotal int
+		var trackNum, discNum, year, rating, instrumental, trackTotal, discTotal int
+		var duration float64
 		err := rows.Scan(&tid, &title, &trackNum, &discNum, &duration, &genre, &artist, &album, &year, &rating, &composer, &comment, &instrumental, &trackTotal, &discTotal)
 		if err != nil {
+			slog.Error("Scan error in handleGetPlaylistTracks", "err", err)
 			continue
 		}
 		list = append(list, map[string]interface{}{

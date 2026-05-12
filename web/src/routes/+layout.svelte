@@ -6,12 +6,14 @@
   import "../app.css";
   import { 
     showToast, queue, currentIndex, isPlaying, inboxCount, rawCount, 
-    currentView, viewParams, isLoggedIn, setupRequired, apiFetch
+    currentView, viewParams, isLoggedIn, setupRequired, apiFetch,
+    contextMenu, hideContextMenu
   } from "$lib/stores.js";
   import { generatePalette, applyTheme } from "$lib/theme.js";
   import { get } from "svelte/store";
   
   import Sidebar from "$lib/Sidebar.svelte";
+  import ContextMenu from "$lib/ContextMenu.svelte";
   import MiniPlayer from "$lib/MiniPlayer.svelte";
   import PlayerAnchorBar from "$lib/PlayerAnchorBar.svelte";
   import FullPlayer from "$lib/FullPlayer.svelte";
@@ -475,6 +477,14 @@
   <MassiveTagEditor bind:isOpen={isMassiveEditorOpen} {selectedTracks} onclose={() => fetchTracks(false)} />
   <Toast />
   <ConfirmModal bind:isOpen={confirmState.isOpen} {...confirmState} onconfirm={confirmState.onconfirm} />
+  
+  <ContextMenu 
+    bind:visible={$contextMenu.visible}
+    x={$contextMenu.x}
+    y={$contextMenu.y}
+    items={$contextMenu.items}
+    onclose={hideContextMenu}
+  />
 {/if}
 
 <style>
@@ -509,7 +519,7 @@
     color: var(--text-main);
     overflow: hidden;
     width: 100%;
-    view-transition-name: app-layout;
+    isolation: isolate;
   }
 
   .content {
@@ -524,7 +534,6 @@
     border: 1px solid var(--border-color);
     box-shadow: 0 8px 32px rgba(0,0,0,0.12);
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    view-transition-name: main-content;
   }
 
   .content.full-player-view {
@@ -555,9 +564,8 @@
     flex-direction: column;
     background: var(--surface-container-highest);
     border: 1px solid var(--border-color);
-    z-index: 10;
+    z-index: 1; /* Explicitly low z-index */
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    view-transition-name: player-bar;
   }
 
   .player-area.is-fullplayer {

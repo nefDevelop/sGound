@@ -759,13 +759,6 @@
     border-bottom: 1px solid var(--border-color);
   }
   .header-info-wrap { display: flex; align-items: center; gap: 1.5rem; }
-  .header-cover { width: 60px; height: 60px; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.3); border: 1px solid var(--white-05); }
-  .header-cover img { width: 100%; height: 100%; object-fit: cover; }
-  
-  .header-cover.clickable { cursor: pointer; position: relative; padding: 0; background: none; transition: transform 0.2s; }
-  .header-cover.clickable:hover { transform: scale(1.05); }
-  .cover-edit-hint { position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
-  .header-cover.clickable:hover .cover-edit-hint { opacity: 1; }
 
   .result-item.with-cover { flex-direction: row; align-items: center; gap: 1rem; }
   .res-cover { width: 50px; height: 50px; border-radius: 6px; overflow: hidden; background: var(--surface-container-high); flex-shrink: 0; border: 1px solid var(--border-color); }
