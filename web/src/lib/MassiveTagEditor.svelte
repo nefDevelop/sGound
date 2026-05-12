@@ -845,7 +845,15 @@
     }
   }
 
-  .bulk-layout { display: grid; grid-template-columns: 340px 1fr; gap: 0; flex: 1; overflow: hidden; position: relative; }
+  .bulk-layout { 
+    display: grid; 
+    grid-template-columns: 340px 1fr; 
+    gap: 0; 
+    flex: 1; 
+    min-height: 0; 
+    overflow: hidden; 
+    position: relative; 
+  }
 
   .bulk-sidebar { 
     display: flex; 

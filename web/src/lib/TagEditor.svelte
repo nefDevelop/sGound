@@ -437,7 +437,14 @@
   .header-info h2 { margin: 0; font-size: 0.85rem; font-weight: 900; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1.5px; }
   .header-info .subtitle { margin: 0; font-size: 1.1rem; color: white; font-weight: 800; }
 
-  .bulk-layout { display: grid; grid-template-columns: 280px 1fr; gap: 0; flex: 1; overflow: hidden; }
+  .bulk-layout { 
+    display: grid; 
+    grid-template-columns: 280px 1fr; 
+    gap: 0; 
+    flex: 1; 
+    min-height: 0;
+    overflow: hidden; 
+  }
   
   @media (max-width: 768px) {
     .bulk-layout { grid-template-columns: 1fr; overflow-y: auto; display: block; }
@@ -503,10 +510,18 @@
     border: 1px solid var(--border-color);
   }
 
+  .tag-form {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+  }
+
   .tag-form label { 
     display: flex; flex-direction: column; gap: 0.5rem; 
     color: var(--text-muted); font-size: 0.85rem; font-weight: 700;
-    min-width: 0; /* Evita desbordamiento en flex */
+    min-width: 0; 
   }
   .tag-form input, .tag-form textarea {
     background: var(--surface-container); border: 1px solid var(--border-color);
@@ -516,6 +531,13 @@
   }
   .tag-form input:focus, .tag-form textarea:focus { border-color: var(--primary); background: var(--surface); }
   .tag-form textarea { height: 120px; font-family: inherit; }
+
+  .tracks-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2.5rem;
+    min-height: 0;
+  }
 
   .relative { position: relative; }
   .suggestions {
