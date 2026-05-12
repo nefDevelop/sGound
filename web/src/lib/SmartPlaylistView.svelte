@@ -12,7 +12,7 @@
   let options = $state([]);
 
   $effect(() => {
-    if (type) {
+    if (type && type !== "undefined") {
       if (type === 'decade' || type === 'genre') {
           fetchOptions();
       } else {

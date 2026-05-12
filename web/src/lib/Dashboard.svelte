@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { inboxCount, rawCount, showToast } from './stores.js';
+  import { inboxCount, rawCount, showToast, showContextMenu as triggerContextMenu } from './stores.js';
   import { copyToClipboard } from './utils.js';
   
   let { 
@@ -37,33 +37,21 @@
   let health = $state({ missingTags: 0, missingLyrics: 0, duplicateCount: 0, orphanCount: 0 });
   let loading = $state(true);
 
-  let contextMenu = $state({
-    visible: false,
-    x: 0,
-    y: 0,
-    track: null,
-    items: []
-  });
+
 
   function showContextMenu(track, e) {
     e.preventDefault();
-    contextMenu = {
-      visible: true,
-      x: e.clientX,
-      y: e.clientY,
-      track,
-      items: [
-        { label: 'Play', icon: 'play', action: () => onplay?.(track) },
-        { label: 'Add to queue', icon: 'plus', action: () => onqueue?.(track) },
-        { divider: true },
-        { label: 'Edit tags', icon: 'edit', action: () => onedit?.(track) },
-        { divider: true },
-        { label: 'Copiar título', icon: 'fileText', action: () => copyToClipboard(track.title).then(ok => ok && showToast("Título copiado", "info")) },
-        { divider: true },
-        { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(track) },
-        { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(track) }
-      ]
-    };
+    triggerContextMenu(e.clientX, e.clientY, [
+      { label: 'Play', icon: 'play', action: () => onplay?.(track) },
+      { label: 'Add to queue', icon: 'plus', action: () => onqueue?.(track) },
+      { divider: true },
+      { label: 'Edit tags', icon: 'edit', action: () => onedit?.(track) },
+      { divider: true },
+      { label: 'Copiar título', icon: 'fileText', action: () => copyToClipboard(track.title).then(ok => ok && showToast("Título copiado", "info")) },
+      { divider: true },
+      { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(track) },
+      { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(track) }
+    ]);
   }
 
   let wasScanning = $state(false);
@@ -283,13 +271,7 @@
     {/if}
   </div>
 
-  <ContextMenu 
-    bind:visible={contextMenu.visible}
-    x={contextMenu.x}
-    y={contextMenu.y}
-    items={contextMenu.items}
-    onclose={() => contextMenu.visible = false}
-  />
+
 </div>
 
 <style>

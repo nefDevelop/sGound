@@ -66,3 +66,18 @@ export function showToast(message, type = 'info') {
         toast.set(null);
     }, 4000);
 }
+
+export const contextMenu = writable({
+    visible: false,
+    x: 0,
+    y: 0,
+    items: []
+});
+
+export function showContextMenu(x, y, items) {
+    contextMenu.set({ visible: true, x, y, items });
+}
+
+export function hideContextMenu() {
+    contextMenu.update(c => ({ ...c, visible: false }));
+}

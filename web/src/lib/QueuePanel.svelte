@@ -159,7 +159,6 @@
     cursor: pointer;
     transition: all 0.2s;
     position: relative;
-    group: hover;
   }
 
   .queue-item:hover { background: var(--surface-container-highest); }

@@ -1,10 +1,16 @@
 <script>
-  import { onMount } from 'svelte';
-  import { fade, scale } from 'svelte/transition';
-  import Icon from './Icon.svelte';
+  import { onMount } from "svelte";
+  import { fade, scale } from "svelte/transition";
+  import Icon from "./Icon.svelte";
 
   /** @type {{ x?: number, y?: number, items?: any[], visible?: boolean, onclose?: () => void }} */
-  let { x = 0, y = 0, items = [], visible = $bindable(false), onclose } = $props();
+  let {
+    x = 0,
+    y = 0,
+    items = [],
+    visible = $bindable(false),
+    onclose,
+  } = $props();
 
   let menuElement = $state();
   let adjustedX = $state(0);
@@ -22,15 +28,15 @@
         onclose?.();
       }
     };
-    window.addEventListener('click', handleClick);
-    return () => window.removeEventListener('click', handleClick);
+    window.addEventListener("click", handleClick);
+    return () => window.removeEventListener("click", handleClick);
   });
 
   $effect(() => {
     if (visible && menuElement) {
       const rect = menuElement.getBoundingClientRect();
       const padding = 10;
-      
+
       if (x + rect.width > window.innerWidth) {
         adjustedX = window.innerWidth - rect.width - padding;
       } else {
@@ -45,6 +51,15 @@
     }
   });
 
+  function portal(node) {
+    document.body.appendChild(node);
+    return {
+      destroy() {
+        if (node.parentNode) node.parentNode.removeChild(node);
+      },
+    };
+  }
+
   function handleItemClick(item) {
     if (item.action) item.action();
     visible = false;
@@ -53,8 +68,9 @@
 </script>
 
 {#if visible}
-  <div 
+  <div
     class="context-menu"
+    use:portal
     bind:this={menuElement}
     style="left: {adjustedX}px; top: {adjustedY}px;"
     in:scale={{ duration: 150, start: 0.95 }}
@@ -66,11 +82,14 @@
           <li class="divider" role="separator"></li>
         {:else}
           <li role="none">
-            <button 
+            <button
               type="button"
-              class="menu-item" 
-              class:danger={item.color === 'danger'}
-              onclick={(e) => { e.stopPropagation(); handleItemClick(item); }}
+              class="menu-item"
+              class:danger={item.color === "danger"}
+              onclick={(e) => {
+                e.stopPropagation();
+                handleItemClick(item);
+              }}
               role="menuitem"
             >
               <div class="icon">
@@ -88,12 +107,15 @@
 <style>
   .context-menu {
     position: fixed;
-    z-index: 10000;
+    z-index: 2147483647 !important;
+    isolation: isolate;
     min-width: 240px;
     background: var(--surface-container-highest);
     border: 1px solid var(--border-color);
     border-radius: 16px;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
+    box-shadow:
+      0 20px 40px rgba(0, 0, 0, 0.4),
+      0 0 0 1px rgba(255, 255, 255, 0.05);
     overflow: hidden;
     padding: 8px;
   }

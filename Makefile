@@ -25,6 +25,7 @@ build:
 
 test:
 	@echo "=> Ejecutando set de pruebas unitarias locales..."
+	cd web && npm run check
 	go test -v ./...
 
 dev-front:
@@ -60,3 +61,4 @@ db-reset:
 db-recreate: db-reset dev
 
 dev-recreate: db-recreate
+
