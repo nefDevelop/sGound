@@ -310,6 +310,18 @@
               </label>
 
               <label class="relative">
+                <span>Album Artist</span>
+                <input type="text" bind:value={track.albumArtist} oninput={(e) => fetchSuggestions('artist', e.currentTarget.value)} />
+                {#if suggestions.length > 0 && activeSuggestionField === 'albumArtist'}
+                  <div class="suggestions">
+                    {#each suggestions as s}
+                      <button type="button" onclick={() => selectSuggestion(s)}>{s}</button>
+                    {/each}
+                  </div>
+                {/if}
+              </label>
+
+              <label class="col-span-2 relative">
                 <span>Album</span>
                 <input type="text" bind:value={track.album} oninput={(e) => fetchSuggestions('album', e.currentTarget.value)} />
                 {#if suggestions.length > 0 && activeSuggestionField === 'album'}
@@ -334,8 +346,29 @@
                 {/if}
               </label>
 
-              <label><span>Track #</span><input type="number" bind:value={track.trackNum} /></label>
-              <label><span>Disc #</span><input type="number" bind:value={track.discNum} /></label>
+              <label class="col-span-2"><span>Composer</span><input type="text" bind:value={track.composer} /></label>
+
+              <div class="row-group">
+                <label><span>Track #</span><input type="number" bind:value={track.trackNum} /></label>
+                <label><span>of</span><input type="number" bind:value={track.trackTotal} /></label>
+              </div>
+
+              <div class="row-group">
+                <label><span>Disc #</span><input type="number" bind:value={track.discNum} /></label>
+                <label><span>of</span><input type="number" bind:value={track.discTotal} /></label>
+              </div>
+
+              <label class="col-span-2">
+                <span>Comment</span>
+                <input type="text" bind:value={track.comment} placeholder="Optional comment..." />
+              </label>
+
+              <div class="col-span-2 toggle-area">
+                <label class="checkbox-label">
+                  <input type="checkbox" bind:checked={track.instrumental} />
+                  <span>Mark as Instrumental</span>
+                </label>
+              </div>
 
               <label class="col-span-2 lyrics-label">
                 <span>Lyrics</span>
@@ -459,6 +492,16 @@
 
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
   .col-span-2 { grid-column: span 2; }
+  .row-group { display: flex; align-items: flex-end; gap: 1rem; }
+  .row-group label { flex: 1; }
+  .row-group span { font-size: 0.7rem; opacity: 0.7; margin-bottom: 2px; }
+
+  .toggle-area {
+    background: rgba(0,0,0,0.1);
+    padding: 1rem;
+    border-radius: 14px;
+    border: 1px solid var(--border-color);
+  }
 
   .tag-form label { 
     display: flex; flex-direction: column; gap: 0.5rem; 

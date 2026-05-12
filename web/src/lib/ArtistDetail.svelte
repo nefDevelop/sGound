@@ -24,16 +24,36 @@
   }
 
   onMount(async () => {
+    await fetchArtist();
+  });
+
+  async function fetchArtist() {
     loading = true;
     try {
       const res = await fetch(`/api/artists/${artistId}`);
-      if (res.ok) artist = await res.json();
+      if (res.ok) {
+        artist = await res.json();
+        
+        // Si la bio está vacía, es probable que se esté enriqueciendo en background.
+        // Reintentamos una vez tras 3 segundos.
+        if (!artist.biography || artist.biography === "No details found.") {
+          setTimeout(async () => {
+            const retryRes = await fetch(`/api/artists/${artistId}`);
+            if (retryRes.ok) {
+              const newArtist = await retryRes.json();
+              if (newArtist.biography && newArtist.biography !== "No details found.") {
+                artist = newArtist;
+              }
+            }
+          }, 3000);
+        }
+      }
     } catch (e) {
       console.error(e);
     } finally {
       loading = false;
     }
-  });
+  }
 
   function getAvatarUrl(id) {
     return `/api/artists/${encodeURIComponent(id)}/image?v=${$coverRefreshTrigger}`;
@@ -141,10 +161,6 @@
 
         <div class="info-card">
           <h3>Detalles de la biblioteca</h3>
-          <div class="info-item">
-            <span class="label">ID de Artista</span>
-            <span class="value">{artist.id}</span>
-          </div>
           <div class="info-item">
             <span class="label">Tracks totales</span>
             <span class="value">{artist.trackCount}</span>
