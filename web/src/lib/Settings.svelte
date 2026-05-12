@@ -3,6 +3,7 @@
   import Icon from './Icon.svelte';
   import { audioQuality, showToast } from './stores.js';
   import { generatePalette, applyTheme } from './theme.js';
+  import { copyToClipboard } from './utils.js';
   import Modal from './Modal.svelte';
   import PatternBuilder from './PatternBuilder.svelte';
   
@@ -381,7 +382,7 @@
                   </div>
                 </div>
                 <div class="key-actions">
-                  <button class="icon-btn" onclick={() => navigator.clipboard.writeText(key.key)} title="Copy"><Icon name="copy" size={16} /></button>
+                  <button class="icon-btn" onclick={() => copyToClipboard(key.key).then(ok => ok && showToast("Key copied", "info"))} title="Copy"><Icon name="copy" size={16} /></button>
                   <button class="icon-btn {key.is_active ? '' : 'active'}" onclick={() => toggleAPIKeyStatus(key.key, key.is_active)} title={key.is_active ? "Block" : "Unblock"}>
                     <Icon name={key.is_active ? "lock" : "eye"} size={16} />
                   </button>
@@ -416,7 +417,7 @@
       <p>Please copy your new API key now. You won't be able to see it again easily.</p>
       <div class="key-box">
         <code>{newlyCreatedKey}</code>
-        <button class="icon-btn" onclick={() => { navigator.clipboard.writeText(newlyCreatedKey); showToast("Copied to clipboard", "info"); }}>
+        <button class="icon-btn" onclick={() => { copyToClipboard(newlyCreatedKey); showToast("Copied to clipboard", "info"); }}>
           <Icon name="copy" size={20} />
         </button>
       </div>

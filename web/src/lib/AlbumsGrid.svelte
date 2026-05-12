@@ -1,5 +1,6 @@
 <script>
-  import { inboxCount, rawCount, coverRefreshTrigger } from './stores.js';
+  import { inboxCount, rawCount, coverRefreshTrigger, showToast } from './stores.js';
+  import { copyToClipboard } from './utils.js';
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
@@ -31,7 +32,7 @@
         { label: 'Queue Album', icon: 'plus', action: () => onqueueAlbum?.(album.id) },
         { divider: true },
         { label: 'Edit Tags', icon: 'edit', action: () => oneditAlbum?.(album) },
-        { label: 'Copy Title', icon: 'fileText', action: () => navigator.clipboard.writeText(album.title) }
+        { label: 'Copy Title', icon: 'fileText', action: () => copyToClipboard(album.title).then(ok => ok && showToast("Title copied", "info")) }
       ]
     };
   }

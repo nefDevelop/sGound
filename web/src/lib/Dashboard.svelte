@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { inboxCount, rawCount } from './stores.js';
+  import { inboxCount, rawCount, showToast } from './stores.js';
+  import { copyToClipboard } from './utils.js';
   
   let { 
     onplay, 
@@ -57,7 +58,7 @@
         { divider: true },
         { label: 'Edit tags', icon: 'edit', action: () => onedit?.(track) },
         { divider: true },
-        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(track.title) },
+        { label: 'Copiar título', icon: 'fileText', action: () => copyToClipboard(track.title).then(ok => ok && showToast("Título copiado", "info")) },
         { divider: true },
         { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(track) },
         { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(track) }

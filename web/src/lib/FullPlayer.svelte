@@ -2,7 +2,8 @@
   import { tick } from 'svelte';
   import Icon from './Icon.svelte';
   import { fade, fly } from 'svelte/transition';
-  import { audioQuality, queue, currentIndex, volume, isShuffle, repeatMode, coverRefreshTrigger } from './stores.js';
+  import { audioQuality, queue, currentIndex, volume, isShuffle, repeatMode, coverRefreshTrigger, showToast } from './stores.js';
+  import { copyToClipboard } from './utils.js';
   import ContextMenu from './ContextMenu.svelte';
   import StarRating from './StarRating.svelte';
   import Artwork from './Artwork.svelte';
@@ -94,7 +95,7 @@
       items: [
         { label: 'Editar etiquetas', icon: 'edit', action: () => onedit?.(currentPlaying) },
         { divider: true },
-        { label: 'Copiar título', icon: 'fileText', action: () => navigator.clipboard.writeText(currentPlaying.title) },
+        { label: 'Copiar título', icon: 'fileText', action: () => copyToClipboard(currentPlaying.title).then(ok => ok && showToast("Título copiado", "info")) },
         { divider: true },
         { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(currentPlaying) },
         { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(currentPlaying) }

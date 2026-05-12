@@ -3,6 +3,7 @@
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
   import { isPlaying, showToast, volume, isShuffle, repeatMode, coverRefreshTrigger } from './stores.js';
+  import { copyToClipboard } from './utils.js';
   import Artwork from './Artwork.svelte';
   import { getContext } from 'svelte';
   
@@ -39,7 +40,7 @@
       y: e.clientY,
       items: [
         { label: 'Edit Tags', icon: 'edit', action: () => onedit?.(currentPlaying) },
-        { label: 'Copy Title', icon: 'fileText', action: () => navigator.clipboard.writeText(currentPlaying.title) },
+        { label: 'Copy Title', icon: 'fileText', action: () => copyToClipboard(currentPlaying.title).then(ok => ok && showToast("Title copied", "info")) },
         { divider: true },
         { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(currentPlaying) },
         { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(currentPlaying) }

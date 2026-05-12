@@ -4,6 +4,7 @@
   import StarRating from './StarRating.svelte';
   import { get } from 'svelte/store';
   import { showToast, coverRefreshTrigger } from './stores.js';
+  import { copyToClipboard } from './utils.js';
   import Artwork from './Artwork.svelte';
   import CoverSearcher from './CoverSearcher.svelte';
   
@@ -115,7 +116,7 @@
         { label: 'Edit tags', icon: 'edit', action: () => onedit?.(track), disabled: track.status === 'raw' },
         ...(!isInbox ? [{ label: 'Organize file', icon: 'folder', action: () => handleOrganize(track.id) }] : []),
         { divider: true },
-        { label: 'Copy title', icon: 'fileText', action: () => navigator.clipboard.writeText(track.title) },
+        { label: 'Copy title', icon: 'fileText', action: () => copyToClipboard(track.title).then(ok => ok && showToast("Title copied", "info")) },
         { divider: true },
         { label: 'Ocultar de la biblioteca', icon: 'eyeOff', action: () => onhide?.(track) },
         { label: 'Borrar físicamente (Disco)', icon: 'trash', color: 'danger', action: () => ondeletePhysical?.(track) }
