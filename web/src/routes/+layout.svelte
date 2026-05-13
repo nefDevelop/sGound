@@ -564,7 +564,8 @@
     flex-direction: column;
     background: var(--surface-container-highest);
     border: 1px solid var(--border-color);
-    z-index: 1; /* Explicitly low z-index */
+    z-index: 1000;
+    overflow: visible;
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
@@ -696,17 +697,36 @@
       grid-template-areas: "content" "player" "sidebar";
       grid-template-columns: minmax(0, 1fr);
       grid-template-rows: 1fr auto auto;
+      gap: 0;
+      padding: 0.5rem;
+      background: var(--surface);
+      overflow: visible !important;
     }
     .content {
-      margin: 0.2rem 0.2rem 0 0.2rem;
-      border-radius: 20px;
+      margin: 0;
+      border-radius: 28px 28px 0 0;
+      border: none;
+      background: var(--surface-container-highest);
+      box-shadow: none;
+    }
+    .player-area {
+      margin: 0;
+      border-radius: 0;
+      border: none;
+      background: var(--surface-container-highest);
+      box-shadow: none;
+      overflow: visible !important;
+      z-index: 2000 !important;
+    }
+    :global(.sidebar) {
+      margin: 0;
+      border-radius: 0 0 28px 28px !important;
+      border: none !important;
+      background: var(--surface-container-highest) !important;
+      box-shadow: none !important;
     }
     .scroll-view {
       padding: 1rem;
-    }
-    .player-area {
-      margin: 0.2rem;
-      border-radius: 20px;
     }
     .player-stack {
       height: 72px;

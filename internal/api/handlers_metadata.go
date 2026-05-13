@@ -168,14 +168,18 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 	}
 
 	editor := tags.NewEditor(s.getDB(r))
-	localLyrics, _ := editor.ReadLyrics(trackID)
-	if localLyrics != "" {
+	localLyrics, err := editor.ReadLyrics(trackID)
+	if err == nil && localLyrics != "" {
+		slog.Info("📖 Lyrics loaded from local file", "trackID", trackID, "title", title)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"lyrics": localLyrics})
 		return
 	}
+	slog.Debug("🔍 No local lyrics found, searching online...", "trackID", trackID, "title", title)
 
-	resp, err := http.Get(fmt.Sprintf("https://lrclib.net/api/get?artist_name=%s&track_name=%s", url.QueryEscape(artist), url.QueryEscape(title)))
+	client := &http.Client{Timeout: 5 * time.Second}
+	
+	resp, err := client.Get(fmt.Sprintf("https://lrclib.net/api/get?artist_name=%s&track_name=%s", url.QueryEscape(artist), url.QueryEscape(title)))
 	if err == nil && resp.StatusCode == 200 {
 		defer resp.Body.Close()
 		var lrcData struct {
@@ -188,14 +192,15 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 				lyricsText = lrcData.PlainLyrics
 			}
 			if lyricsText != "" {
+				slog.Info("🌐 Lyrics fetched from LRCLib", "trackID", trackID, "title", title)
 				// Auto-save to file
 				go func() {
 					if err := editor.UpdateLyrics(trackID, lyricsText); err != nil {
-						slog.Error("Failed to auto-save lyrics", "trackID", trackID, "error", err)
+						slog.Error("❌ Failed to auto-save lyrics", "trackID", trackID, "error", err)
 					} else {
 						var path string
 						s.MasterDB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
-						slog.Info("📝 Lyrics auto-saved to file", "trackID", trackID, "path", path)
+						slog.Info("💾 Lyrics auto-saved to file", "trackID", trackID, "path", path)
 					}
 				}()
 
@@ -206,12 +211,21 @@ func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.
 		}
 	}
 
-	resp, err = http.Get(fmt.Sprintf("https://api.lyrics.ovh/v1/%s/%s", url.QueryEscape(artist), url.QueryEscape(title)))
+	slog.Debug("🔍 No lyrics found on LRCLib, trying Lyrics.ovh...", "title", title)
+	resp, err = client.Get(fmt.Sprintf("https://api.lyrics.ovh/v1/%s/%s", url.QueryEscape(artist), url.QueryEscape(title)))
 	if err != nil {
+		slog.Warn("⚠️ External lyrics search failed (timeout or network)", "error", err)
 		http.Error(w, "Failed to fetch lyrics", http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		slog.Debug("❌ No lyrics found on Lyrics.ovh", "status", resp.StatusCode)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"lyrics":""}`))
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	io.Copy(w, resp.Body)

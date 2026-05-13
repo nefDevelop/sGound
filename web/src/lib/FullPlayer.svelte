@@ -103,15 +103,15 @@
     };
   }
 
-  // Sincronizar letras
+  // Sincronizar letras usando currentTime reactivo
   $effect(() => {
     if (isOpen && parsedLyrics.length > 0) {
+      const time = currentTime; // Track dependency
       const index = parsedLyrics.findIndex((l, i) => {
         const next = parsedLyrics[i + 1];
-        return currentTime >= l.time && (!next || currentTime < next.time);
+        return time >= l.time && (!next || time < next.time);
       });
       if (index !== currentLyricIndex && index !== -1) {
-        console.log("🎵 Lyric sync update:", { index, time: currentTime, text: parsedLyrics[index].text });
         currentLyricIndex = index;
         tick().then(scrollToActive);
       }
@@ -126,11 +126,17 @@
   });
 
   async function loadLyrics() {
+    lyrics = "Loading...";
+    parsedLyrics = [];
     try {
       const res = await fetch(`/api/lyrics/${currentPlaying.id}`);
       const data = await res.json();
-      lyrics = data.lyrics || "No lyrics available.";
-      parseLRC(lyrics);
+      lyrics = data.lyrics || "";
+      if (lyrics) {
+        parseLRC(lyrics);
+      } else {
+        lyrics = "No lyrics available.";
+      }
     } catch (e) {
       lyrics = "Failed to load lyrics.";
       parsedLyrics = [];
@@ -196,16 +202,9 @@
     if (!lyricContainer || !isOpen) return;
     const activeLine = lyricContainer.querySelector('.active');
     if (activeLine) {
-      // Fast centering logic
-      const containerHeight = lyricContainer.offsetHeight;
-      const lineTop = activeLine.offsetTop;
-      const lineHeight = activeLine.offsetHeight;
-      
-      const scrollPos = lineTop - (containerHeight / 2) + (lineHeight / 2);
-      
-      lyricContainer.scrollTo({
-        top: scrollPos,
-        behavior: 'smooth' 
+      activeLine.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
       });
     }
   }
@@ -233,6 +232,13 @@
 
 {#if isOpen && currentPlaying}
 <div class="full-player-view">
+  <!-- Immersive Background -->
+  <div class="immersive-bg" aria-hidden="true">
+    <div class="bg-layer layer-1" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
+    <div class="bg-layer layer-2" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
+    <div class="bg-overlay"></div>
+  </div>
+
   <div class="view-content">
     <div class="player-body" class:compact-mode={subView !== 'cover'}>
       <div class="main-content-flow">
@@ -259,105 +265,250 @@
         </header>
         
         <div class="dynamic-area">
-          {#if subView === 'cover'}
-            <div class="player-island" in:fade>
-              <div class="track-meta" oncontextmenu={showContextMenu} role="button" tabindex="0">
-                <div class="meta-texts">
-                  <div class="title-row">
-                    <h1>{currentPlaying.title}</h1>
-                  </div>
+          {#if subView !== 'cinema'}
+          <!-- Desktop Side-by-Side View (Logic handled via CSS) -->
+          <div class="desktop-split-layout" class:is-centered={subView === 'cover'} class:lyrics-mode={subView === 'lyrics'}>
+            <div class="artwork-column">
+              <div class="cover-wrapper-container">
+                <div class="cover-wrapper main-artwork">
+                   <Artwork 
+                     src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" 
+                     alt="Cover" 
+                     borderRadius="32px"
+                     onclick={() => { if(subView !== 'cover') subView = 'cover'; }}
+                   />
+                </div>
+              </div>
+              
+              <div class="desktop-meta">
+                <div class="meta-texts" oncontextmenu={showContextMenu} role="button" tabindex="0">
+                  <h1>{currentPlaying.title}</h1>
                   <p class="artist-name">{currentPlaying?.artist || 'Unknown Artist'}</p>
                 </div>
               </div>
 
-              <div class="playback-controls">
-                <div class="timeline-container">
-                  <div class="modern-slider progress-slider">
-                     <input type="range" class="knobless-range" min="0" max="100" value={progress} oninput={handleSeek} />
-                     <div class="slider-fill" style="width: {progress}%"></div>
+              <div class="desktop-controls">
+                <div class="playback-controls">
+                  <div class="timeline-container">
+                    <div class="modern-slider progress-slider">
+                       <input type="range" class="knobless-range" min="0" max="100" value={progress} oninput={handleSeek} />
+                       <div class="slider-fill" style="width: {progress}%"></div>
+                       <div class="slider-glow" style="width: {progress}%"></div>
+                    </div>
+                    <div class="time-row">
+                      <span class="time">{formatTime(currentTime)}</span>
+                      <span class="time">{formatTime(duration)}</span>
+                    </div>
                   </div>
-                  <div class="time-row">
-                    <span class="time">{formatTime(currentTime)}</span>
-                    <span class="time">{formatTime(duration)}</span>
+
+                  <div class="main-btns">
+                    <button class="sub-btn" class:active={$isShuffle} onclick={() => isShuffle.update(s => !s)} title="Aleatorio">
+                      <Icon name="shuffle" size={24} />
+                    </button>
+                    <button class="main-btn" onclick={onskipBack} title="Anterior">
+                      <Icon name="skipBack" size={42} />
+                    </button>
+                    <button class="play-btn-prominent" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()} title={audioRef?.paused ? "Reproducir" : "Pausar"}>
+                      <Icon name={audioRef?.paused ? 'play' : 'pause'} size={42} color="var(--surface)" />
+                    </button>
+                    <button class="main-btn" onclick={onskipNext} title="Siguiente">
+                      <Icon name="skipForward" size={42} />
+                    </button>
+                    <button class="sub-btn" class:active={$repeatMode !== 'none'} onclick={toggleRepeat} title="Repetición">
+                      <Icon name="repeat" size={24} />
+                      {#if $repeatMode === 'one'}<span class="repeat-one-badge">1</span>{/if}
+                    </button>
                   </div>
-                </div>
 
-                <div class="main-btns">
-                  <button class="sub-btn" class:active={$isShuffle} onclick={() => isShuffle.update(s => !s)} title="Aleatorio">
-                    <Icon name="shuffle" size={22} />
-                  </button>
-                  <button class="main-btn" onclick={onskipBack} title="Anterior">
-                    <Icon name="skipBack" size={38} />
-                  </button>
-                  <button class="play-btn" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()} title={audioRef?.paused ? "Reproducir" : "Pausar"}>
-                    <Icon name={audioRef?.paused ? 'play' : 'pause'} size={38} color="black" />
-                  </button>
-                  <button class="main-btn" onclick={onskipNext} title="Siguiente">
-                    <Icon name="skipForward" size={38} />
-                  </button>
-                  <button class="sub-btn" class:active={$repeatMode !== 'none'} onclick={toggleRepeat} title="Repetición">
-                    <Icon name="repeat" size={22} />
-                    {#if $repeatMode === 'one'}<span class="repeat-one-badge">1</span>{/if}
-                  </button>
-                </div>
-
-                <div class="bottom-controls">
-                  <div class="volume-slider-modern">
-                     <button class="mute-btn" onclick={toggleMute} title={$volume === 0 ? "Activar sonido" : "Silenciar"}>
-                        <Icon name={$volume === 0 ? 'volumeX' : ($volume < 0.5 ? 'volume1' : 'volume2')} size={20} />
-                     </button>
-                     <div class="modern-slider v-slider-large">
-                       <input type="range" class="knobless-range" min="0" max="1" step="0.01" value={$volume} oninput={handleVolume} />
-                       <div class="slider-fill volume-fill" style="width: {$volume * 100}%"></div>
-                     </div>
+                  <div class="bottom-controls">
+                    <div class="volume-slider-modern">
+                       <button class="mute-btn" onclick={toggleMute} title={$volume === 0 ? "Activar sonido" : "Silenciar"}>
+                          <Icon name={$volume === 0 ? 'volumeX' : ($volume < 0.5 ? 'volume1' : 'volume2')} size={22} />
+                       </button>
+                       <div class="modern-slider v-slider-large">
+                         <input type="range" class="knobless-range" min="0" max="1" step="0.01" value={$volume} oninput={handleVolume} />
+                         <div class="slider-fill volume-fill" style="width: {$volume * 100}%"></div>
+                       </div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          {:else if subView === 'queue'}
-            <div class="view-panel queue-panel" in:fade>
-              <div class="queue-list">
-                {#each $queue.slice($currentIndex + 1) as next, i}
-                  <div class="queue-item">
-                    <span class="q-index">{i + 1}</span>
-                    <Artwork 
-                      src="/api/cover/{next.id}?v={$coverRefreshTrigger}" 
-                      alt="" 
-                      size="44px" 
-                      borderRadius="8px" 
-                    />
-                    <div class="q-info">
-                      <span class="q-title">{next.title}</span>
-                      <span class="q-artist">{next.artist}</span>
+
+            <div class="content-column">
+              <div class="panel-content">
+                {#if subView === 'lyrics'}
+                  <div class="view-panel lyrics-panel" in:fade>
+                    {#if parsedLyrics.length > 0}
+                      <div class="lyrics-list" bind:this={lyricContainer}>
+                        {#each parsedLyrics as line, i}
+                          <button 
+                            class="lyric-line" 
+                            class:active={i === currentLyricIndex}
+                            onclick={(e) => { e.stopPropagation(); if(audioRef) audioRef.currentTime = line.time; }}
+                            in:fade={{ delay: Math.min(i * 30, 1000), duration: 600 }}
+                          >
+                            {line.text}
+                          </button>
+                        {/each}
+                      </div>
+                    {:else}
+                      <div class="no-lyrics">
+                          <Icon name="music" size={64} />
+                          <p>Instrumental</p>
+                      </div>
+                    {/if}
+                  </div>
+                {:else if subView === 'queue'}
+                  <div class="view-panel queue-panel" in:fade>
+                    <div class="queue-list">
+                      {#each $queue.slice($currentIndex + 1) as next, i}
+                        <div 
+                          class="queue-item" 
+                          in:fly={{ y: 20, delay: i * 50, duration: 400 }}
+                          onclick={() => currentIndex.set($currentIndex + 1 + i)}
+                          role="button"
+                          tabindex="0"
+                        >
+                          <span class="q-index">{i + 1}</span>
+                          <Artwork 
+                            src="/api/cover/{next.id}?v={$coverRefreshTrigger}" 
+                            alt="" 
+                            size="48px" 
+                            borderRadius="12px" 
+                          />
+                          <div class="q-info">
+                            <span class="q-title">{next.title}</span>
+                            <span class="q-artist">{next.artist}</span>
+                          </div>
+                        </div>
+                      {/each}
+                      {#if $queue.length <= $currentIndex + 1}
+                         <p class="empty-queue">Fin de la cola</p>
+                      {/if}
                     </div>
                   </div>
-                {/each}
-                {#if $queue.length <= $currentIndex + 1}
-                   <p class="empty-queue">Fin de la cola</p>
                 {/if}
               </div>
             </div>
-          {:else if subView === 'lyrics'}
-            <div class="view-panel lyrics-panel" in:fade>
-              {#if parsedLyrics.length > 0}
-                <div class="lyrics-list" bind:this={lyricContainer}>
-                  {#each parsedLyrics as line, i}
-                    <button 
-                      class="lyric-line" 
-                      class:active={i === currentLyricIndex}
-                      onclick={() => line.time >= 0 && audioRef && (audioRef.currentTime = line.time)}
-                    >
-                      {line.text}
+          </div>
+
+          <!-- Mobile/Compact View -->
+          <div class="mobile-stack-layout">
+            {#if subView === 'cover'}
+              <div class="player-island" in:fade>
+                <div class="track-meta" oncontextmenu={showContextMenu} role="button" tabindex="0">
+                  <div class="meta-texts">
+                    <div class="title-row">
+                      <h1>{currentPlaying.title}</h1>
+                    </div>
+                    <p class="artist-name">{currentPlaying?.artist || 'Unknown Artist'}</p>
+                  </div>
+                </div>
+
+                <div class="playback-controls">
+                  <div class="timeline-container">
+                    <div class="modern-slider progress-slider">
+                       <input type="range" class="knobless-range" min="0" max="100" value={progress} oninput={handleSeek} />
+                       <div class="slider-fill" style="width: {progress}%"></div>
+                       <div class="slider-glow" style="width: {progress}%"></div>
+                    </div>
+                    <div class="time-row">
+                      <span class="time">{formatTime(currentTime)}</span>
+                      <span class="time">{formatTime(duration)}</span>
+                    </div>
+                  </div>
+
+                  <div class="main-btns">
+                    <button class="sub-btn" class:active={$isShuffle} onclick={() => isShuffle.update(s => !s)} title="Aleatorio">
+                      <Icon name="shuffle" size={22} />
                     </button>
+                    <button class="main-btn" onclick={onskipBack} title="Anterior">
+                      <Icon name="skipBack" size={38} />
+                    </button>
+                    <button class="play-btn-prominent" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()} title={audioRef?.paused ? "Reproducir" : "Pausar"}>
+                      <Icon name={audioRef?.paused ? 'play' : 'pause'} size={38} color="var(--surface)" />
+                    </button>
+                    <button class="main-btn" onclick={onskipNext} title="Siguiente">
+                      <Icon name="skipForward" size={38} />
+                    </button>
+                    <button class="sub-btn" class:active={$repeatMode !== 'none'} onclick={toggleRepeat} title="Repetición">
+                      <Icon name="repeat" size={22} />
+                      {#if $repeatMode === 'one'}<span class="repeat-one-badge">1</span>{/if}
+                    </button>
+                  </div>
+
+                  <div class="bottom-controls">
+                    <div class="volume-slider-modern">
+                       <button class="mute-btn" onclick={toggleMute} title={$volume === 0 ? "Activar sonido" : "Silenciar"}>
+                          <Icon name={$volume === 0 ? 'volumeX' : ($volume < 0.5 ? 'volume1' : 'volume2')} size={20} />
+                       </button>
+                       <div class="modern-slider v-slider-large">
+                         <input type="range" class="knobless-range" min="0" max="1" step="0.01" value={$volume} oninput={handleVolume} />
+                         <div class="slider-fill volume-fill" style="width: {$volume * 100}%"></div>
+                       </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {:else if subView === 'queue'}
+              <div class="view-panel queue-panel" in:fade>
+                <div class="queue-list">
+                  {#each $queue.slice($currentIndex + 1) as next, i}
+                    <div 
+                      class="queue-item" 
+                      in:fly={{ y: 20, delay: i * 40, duration: 400 }}
+                      onclick={() => currentIndex.set($currentIndex + 1 + i)}
+                      role="button"
+                      tabindex="0"
+                    >
+                      <span class="q-index">{i + 1}</span>
+                      <Artwork 
+                        src="/api/cover/{next.id}?v={$coverRefreshTrigger}" 
+                        alt="" 
+                        size="44px" 
+                        borderRadius="8px" 
+                      />
+                      <div class="q-info">
+                        <span class="q-title">{next.title}</span>
+                        <span class="q-artist">{next.artist}</span>
+                      </div>
+                    </div>
                   {/each}
+                  {#if $queue.length <= $currentIndex + 1}
+                     <p class="empty-queue">Fin de la cola</p>
+                  {/if}
                 </div>
-              {:else}
-                <div class="no-lyrics">
-                    <Icon name="music" size={64} />
-                    <p>Instrumental</p>
-                </div>
-              {/if}
-            </div>
+              </div>
+            {:else if subView === 'lyrics'}
+              <div class="view-panel lyrics-panel" in:fade>
+                {#if parsedLyrics.length > 0}
+                  <div class="lyrics-list" bind:this={lyricContainer}>
+                    {#each parsedLyrics as line, i}
+                      <button 
+                        class="lyric-line" 
+                        class:active={i === currentLyricIndex}
+                        onclick={(e) => { e.stopPropagation(); if(audioRef) audioRef.currentTime = line.time; }}
+                        in:fade={{ delay: Math.min(i * 20, 800), duration: 500 }}
+                      >
+                        {line.text}
+                      </button>
+                    {/each}
+                  </div>
+                {:else if lyrics === "Loading..."}
+                   <div class="no-lyrics loading-state">
+                      <div class="loading-spinner"></div>
+                      <p>Buscando letra...</p>
+                   </div>
+                {:else}
+                  <div class="no-lyrics">
+                      <Icon name="music" size={64} />
+                      <p>Instrumental</p>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
           {:else if subView === 'cinema'}
             <div 
                 role="presentation"
@@ -446,13 +597,53 @@
   .full-player-view {
     position: relative;
     width: 100%;
-    min-height: 100%;
-    background: transparent;
+    height: 100%;
+    background: var(--surface);
     color: white;
-    overflow: visible;
     display: flex;
     flex-direction: column;
-    padding-bottom: 2rem;
+    overflow: hidden;
+  }
+
+  /* Immersive Background */
+  .immersive-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .bg-layer {
+    position: absolute;
+    inset: -10%;
+    width: 120%;
+    height: 120%;
+    background-size: cover;
+    background-position: center;
+    filter: blur(80px) saturate(1.5) brightness(0.3);
+    opacity: 0.5;
+  }
+
+  .bg-layer.layer-1 {
+    animation: drift 30s infinite alternate ease-in-out;
+  }
+  .bg-layer.layer-2 {
+    animation: drift 45s infinite alternate-reverse ease-in-out;
+    filter: blur(100px) saturate(2) brightness(0.2);
+    opacity: 0.3;
+  }
+
+  @keyframes drift {
+    from { transform: scale(1) translate(-2%, -2%) rotate(0deg); }
+    to { transform: scale(1.2) translate(2%, 2%) rotate(3deg); }
+  }
+
+  .bg-overlay {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at center, transparent 0%, rgba(0,0,0,0.4) 100%),
+                linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.6) 100%);
   }
 
   .view-content {
@@ -462,134 +653,383 @@
     display: flex;
     flex-direction: column;
     width: 100%;
-    padding: 1rem 0 3rem 0;
+    height: 100%;
+    overflow: hidden;
   }
 
   .player-body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
-    align-items: center;
-    justify-content: flex-start;
-    min-height: min-content;
     width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .player-body.compact-mode .player-header {
+    display: none;
   }
 
   .main-content-flow {
     width: 100%;
-    max-width: 500px;
+    height: 100%;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 1.5rem;
+    justify-content: center;
     transition: all 0.4s ease;
+  }
+
+  .player-body.compact-mode .main-content-flow {
+    justify-content: flex-start;
+  }
+
+  /* Responsive Layout Logic */
+  .desktop-split-layout {
+    display: none;
+    width: 100%;
+    height: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem 2rem 4rem 2rem;
+    gap: 4rem;
+    align-items: center;
+  }
+  @media (min-width: 1025px) {
+    .desktop-split-layout { display: flex; }
+  }
+
+  .mobile-stack-layout {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 500px;
+    margin: 0 auto;
+    padding: 1rem 1rem 6rem 1rem;
+    gap: 1.5rem;
+  }
+  @media (min-width: 1025px) {
+    .mobile-stack-layout { display: none; }
   }
 
   .player-header {
     width: 100%;
+    max-width: 500px;
+    margin: 0 auto;
+    padding: 1rem 1rem 0 1rem;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1rem;
-    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   }
 
-  .compact-mode .player-header {
-    flex-direction: row;
-    align-items: center;
-    gap: 1.5rem;
-    padding: 0 1rem;
+  /* Hide header artwork in mobile when not in cover view */
+  @media (max-width: 1024px) {
+    .player-body.compact-mode .player-header {
+       display: none;
+    }
   }
 
-  .compact-mode .cover-wrapper-container {
-    max-width: 80px;
+  .player-header .cover-wrapper {
+    width: 70vw;
+    max-width: 320px;
+    margin-bottom: 1rem;
   }
 
-  .compact-mode .cover-wrapper {
-    box-shadow: 0 10px 20px rgba(0,0,0,0.4);
-    border-radius: 12px;
-    cursor: pointer;
+  @media (min-width: 1025px) {
+    .desktop-split-layout { display: flex; }
+    .mobile-stack-layout { display: none; }
+    .player-header { display: none !important; }
   }
 
-  .compact-meta {
+  .artwork-column {
     flex: 1;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    text-align: left;
-    min-width: 0;
+    align-items: center;
+    gap: 2rem;
+    height: 100%;
   }
 
-  .compact-meta h2 {
+  .content-column {
+    flex: 1.2;
+    display: flex;
+    flex-direction: column;
+    background: rgba(255,255,255,0.03);
+    border-radius: 32px;
+    border: 1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(20px);
+    overflow: hidden;
+    height: 100%;
+    max-height: 70vh;
+  }
+
+  .desktop-split-layout.is-centered {
+    max-width: 800px;
+    justify-content: center;
+    gap: 0;
+  }
+
+  /* Lyrics Mode Desktop: Header layout */
+  .desktop-split-layout.lyrics-mode {
+    flex-direction: column;
+    justify-content: flex-start;
+    padding-top: 1rem;
+    gap: 1rem;
+    max-width: none;
+  }
+
+  .desktop-split-layout.lyrics-mode .cover-wrapper-container {
+    width: auto;
     margin: 0;
-    font-size: 1.3rem;
-    font-weight: 850;
-    letter-spacing: -0.5px;
+  }
+
+  .desktop-split-layout.lyrics-mode .artwork-column {
+    flex: none;
+    height: 80px;
+    width: 100%;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    padding: 0 1.5rem;
+    background: rgba(255,255,255,0.05);
+    border-radius: 20px;
+    backdrop-filter: blur(20px);
+    gap: 2rem;
+    margin: 0 auto;
+    max-width: 1400px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .desktop-split-layout.lyrics-mode .cover-wrapper.main-artwork {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+  }
+
+  .desktop-split-layout.lyrics-mode .desktop-meta {
+    flex: 0 1 auto;
+    text-align: left;
+    margin: 0;
+    min-width: 150px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .desktop-split-layout.lyrics-mode .desktop-meta h1 {
+    font-size: 1.1rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .compact-meta p {
+  .desktop-split-layout.lyrics-mode .desktop-meta .artist-name {
+    font-size: 0.85rem;
     margin: 0;
-    font-size: 0.95rem;
-    font-weight: 600;
-    opacity: 0.6;
   }
 
-  .dynamic-area {
-    width: 100%;
+  .desktop-split-layout.lyrics-mode .desktop-controls {
+    flex: 1;
+    max-width: none;
+  }
+
+  .desktop-split-layout.lyrics-mode .playback-controls {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    height: 100%;
     flex: 1;
   }
 
-  .cover-wrapper-container {
-    width: 100%;
-    max-width: 300px;
-    display: flex;
-    flex-direction: column;
-    gap: 1.2rem;
-    align-items: center;
-    z-index: 3;
+  .desktop-split-layout.lyrics-mode .timeline-container {
+    flex: 1;
+    margin-bottom: 0;
   }
 
-  .cover-wrapper {
-    aspect-ratio: 1;
-    width: 100%;
-    height: auto;
-    border-radius: 24px;
+  .desktop-split-layout.lyrics-mode .main-btns {
+    width: auto;
+    gap: 0.5rem;
+  }
+
+  .desktop-split-layout.lyrics-mode .play-btn-prominent {
+    width: 44px;
+    height: 44px;
+  }
+  .desktop-split-layout.lyrics-mode .play-btn-prominent :global(svg) {
+    width: 24px;
+    height: 24px;
+  }
+  .desktop-split-layout.lyrics-mode .main-btn :global(svg) {
+    width: 28px;
+    height: 28px;
+  }
+  .desktop-split-layout.lyrics-mode .sub-btn { display: none; }
+  .desktop-split-layout.lyrics-mode .time-row { display: none; }
+  .desktop-split-layout.lyrics-mode .bottom-controls { display: none; }
+
+  .desktop-split-layout.lyrics-mode .content-column {
+    flex: 1;
+    max-height: none;
+    background: none;
+    border: none;
+    backdrop-filter: none;
+    display: flex;
+    padding: 0;
+  }
+  .desktop-split-layout.is-centered .content-column {
+    display: none;
+  }
+
+  .artwork-column {
+    flex: 1;
     overflow: hidden;
-    box-shadow: 0 40px 80px -10px rgba(0,0,0,0.9);
-    background: var(--surface-container-high);
-    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    border: 1px solid rgba(255,255,255,0.1);
   }
 
-  .player-island {
+  .desktop-meta {
+    text-align: center;
+    width: 100%;
+  }
+
+  .desktop-meta h1 {
+    font-size: 3rem;
+    font-weight: 900;
+    letter-spacing: -1.5px;
+    margin: 0;
+    line-height: 1;
+  }
+
+  .desktop-meta .artist-name {
+    font-size: 1.4rem;
+    opacity: 0.6;
+    margin-top: 0.5rem;
+  }
+
+  .desktop-controls {
+    width: 100%;
+    max-width: 500px;
+  }
+
+  /* Common UI Elements */
+  .cover-wrapper.main-artwork {
+    width: 40vh;
+    height: 40vh;
+    max-width: 450px;
+    max-height: 450px;
+    box-shadow: 0 50px 100px -20px rgba(0,0,0,0.8);
+    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .cover-wrapper.main-artwork:hover {
+    transform: scale(1.02) translateY(-10px);
+  }
+
+  .play-btn-prominent {
+    width: 84px;
+    height: 84px;
+    background: white;
+    border: none;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 10px 30px rgba(255,255,255,0.2);
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+  .play-btn-prominent:hover {
+    transform: scale(1.1);
+    box-shadow: 0 15px 40px rgba(255,255,255,0.3);
+  }
+  .play-btn-prominent:active {
+    transform: scale(0.95);
+  }
+
+  .slider-glow {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: white;
+    filter: blur(8px);
+    opacity: 0.3;
+    z-index: 0;
+    border-radius: 20px;
+  }
+
+  .progress-slider:hover .slider-glow {
+    opacity: 0.6;
+  }
+
+  .playback-controls {
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 2.5rem;
+    gap: 2rem;
   }
 
-  .track-meta { display: flex; justify-content: center; width: 100%; }
-  .meta-texts h1 { 
-    font-size: 2.2rem; font-weight: 800; letter-spacing: -1px; margin: 0; text-align: center; line-height: 1.1; 
+  .timeline-container {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
   }
-  .artist-name { font-size: 1.1rem; font-weight: 700; opacity: 0.6; text-align: center; width: 100%; margin: 0.2rem 0 0 0; }
 
+  .time-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    font-weight: 600;
+    opacity: 0.5;
+    font-variant-numeric: tabular-nums;
+  }
 
-  .timeline-container { width: 100%; display: flex; flex-direction: column; gap: 0.8rem; }
-  .time-row { display: flex; justify-content: space-between; font-size: 0.8rem; opacity: 0.6; font-variant-numeric: tabular-nums; }
+  .main-btns {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+  }
 
-  .playback-controls { width: 100%; display: flex; flex-direction: column; gap: 2rem; }
-  .main-btns { display: flex; justify-content: space-between; align-items: center; }
-  .play-btn { width: 72px; height: 72px; background: white; border: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-  .main-btn { color: white; opacity: 0.8; background: none; border: none; cursor: pointer; transition: all 0.2s; }
-  .main-btn:hover { opacity: 1; transform: scale(1.1); }
-  .sub-btn { color: white; opacity: 0.4; background: none; border: none; cursor: pointer; transition: all 0.2s; position: relative; }
-  .sub-btn:hover { opacity: 0.7; }
-  .sub-btn.active { opacity: 1; color: var(--primary); }
+  .main-btn {
+    color: white;
+    opacity: 0.6;
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .main-btn:hover {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+  .main-btn:active {
+    transform: scale(0.9);
+  }
+
+  .sub-btn {
+    color: white;
+    opacity: 0.3;
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .sub-btn:hover {
+    opacity: 0.6;
+  }
+  .sub-btn.active {
+    opacity: 1;
+    color: var(--primary);
+  }
+
   .repeat-one-badge {
     position: absolute;
     top: -5px;
@@ -606,14 +1046,129 @@
     justify-content: center;
   }
 
-  .volume-slider-modern { display: flex; align-items: center; gap: 1rem; width: 100%; justify-content: center; }
-  .mute-btn { background: none; border: none; color: white; opacity: 0.6; cursor: pointer; padding: 0.5rem; display: flex; align-items: center; transition: all 0.2s; }
-  .mute-btn:hover { opacity: 1; transform: scale(1.1); }
+  .volume-slider-modern {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    width: 100%;
+    justify-content: center;
+  }
 
-  .modern-slider { position: relative; width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 20px; cursor: pointer; }
-  .slider-fill { position: absolute; top: 0; left: 0; height: 100%; background: white; border-radius: 20px; z-index: 1; }
-  .volume-fill { background: var(--primary); }
-  .knobless-range { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; z-index: 2; }
+  .mute-btn {
+    background: none;
+    border: none;
+    color: white;
+    opacity: 0.4;
+    cursor: pointer;
+    padding: 0.5rem;
+    display: flex;
+    align-items: center;
+    transition: all 0.2s;
+  }
+  .mute-btn:hover {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+
+  .modern-slider {
+    position: relative;
+    width: 100%;
+    height: 6px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 20px;
+    cursor: pointer;
+    transition: height 0.2s;
+  }
+  .modern-slider:hover {
+    height: 8px;
+  }
+
+  .slider-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: white;
+    border-radius: 20px;
+    z-index: 1;
+    transition: background 0.3s;
+  }
+  .volume-fill {
+    background: var(--primary);
+  }
+
+  .knobless-range {
+    position: absolute;
+    top: -10px;
+    bottom: -10px;
+    left: 0;
+    width: 100%;
+    opacity: 0;
+    cursor: pointer;
+    z-index: 100;
+    margin: 0;
+  }
+
+  .cover-wrapper-container {
+    width: auto;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    z-index: 3;
+  }
+
+  .cover-wrapper {
+    aspect-ratio: 1;
+    width: 100%;
+    border-radius: 24px;
+    overflow: hidden;
+    background: var(--surface-container-high);
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .player-island {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 2.5rem;
+  }
+
+  .track-meta {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .meta-texts {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .meta-texts h1 {
+    font-size: 2rem;
+    font-weight: 850;
+    letter-spacing: -1px;
+    margin: 0;
+    text-align: center;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+  }
+
+  .artist-name {
+    font-size: 1.1rem;
+    font-weight: 700;
+    opacity: 0.5;
+    text-align: center;
+    width: 100%;
+    margin: 0.4rem 0 0 0;
+  }
 
   /* Panels */
   .view-panel { 
@@ -629,273 +1184,205 @@
     to { opacity: 1; transform: translateY(0); } 
   }
 
-  .queue-list { display: flex; flex-direction: column; gap: 0.6rem; max-height: 400px; overflow-y: auto; padding-right: 0.5rem; }
-  .queue-item { display: flex; align-items: center; gap: 1rem; padding: 0.8rem; border-radius: 16px; background: rgba(255,255,255,0.03); }
-  .q-info { display: flex; flex-direction: column; min-width: 0; }
-  .q-title { font-weight: 700; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .q-artist { font-size: 0.8rem; opacity: 0.5; }
-
-  .lyrics-list { 
-    display: flex; 
-    flex-direction: column; 
-    gap: 1.2rem; 
+  .queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
     height: 100%;
-    max-height: 60vh; 
-    overflow-y: auto; 
-    scrollbar-width: none; 
-    position: relative;
-    padding: 10vh 0; /* Espacio para que la primera y última línea puedan centrarse */
-    mask-image: linear-gradient(to bottom, transparent, black 20%, black 80%, transparent);
+    overflow-y: auto;
+    padding: 1.5rem;
+    scrollbar-width: none;
   }
-  .lyric-line { font-size: 1.5rem; font-weight: 800; color: rgba(255,255,255,0.2); background: none; border: none; cursor: pointer; text-align: center; }
-  .lyric-line.active { color: white; transform: scale(1.05); }
-  .lyric-line:hover { color: rgba(255,255,255,0.6); transform: scale(1.02); }
+  .queue-list::-webkit-scrollbar { display: none; }
 
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .queue-item {
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+    padding: 1rem;
+    border-radius: 20px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid transparent;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+  }
+  .queue-item:hover {
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(255,255,255,0.1);
+    transform: translateX(4px) scale(1.01);
+  }
 
-  /* Cinema Mode Styles */
+  .q-index {
+    font-size: 0.8rem;
+    font-weight: 900;
+    opacity: 0.3;
+    width: 20px;
+    text-align: center;
+  }
+
+  .q-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .q-title {
+    font-weight: 800;
+    font-size: 1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .q-artist {
+    font-size: 0.85rem;
+    font-weight: 600;
+    opacity: 0.5;
+  }
+
+  .empty-queue {
+    text-align: center;
+    padding: 4rem;
+    opacity: 0.4;
+    font-weight: 700;
+    font-size: 0.9rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .lyrics-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    height: 100%;
+    width: 100%;
+    overflow-y: auto;
+    scrollbar-width: none;
+    position: relative;
+    padding: 30vh 2rem;
+    pointer-events: auto !important;
+    user-select: none;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+    z-index: 10;
+  }
+  .lyrics-list::-webkit-scrollbar { display: none; }
+
+  .lyric-line {
+    font-size: 2.2rem;
+    font-weight: 900;
+    color: rgba(255,255,255,0.15);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    line-height: 1.4;
+    letter-spacing: -1px;
+    padding: 1rem 0;
+    width: 100%;
+  }
+  .lyric-line.active {
+    color: white;
+    transform: scale(1.05);
+    filter: drop-shadow(0 0 20px rgba(255,255,255,0.3));
+  }
+  .lyric-line:hover {
+    color: rgba(255,255,255,0.6);
+  }
+
+  .no-lyrics {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+    gap: 1.5rem;
+    opacity: 0.15;
+    min-height: 50vh;
+  }
+  .no-lyrics p { font-size: 1.2rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+
+  .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(255,255,255,0.1);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Cinema Mode Polishing */
   .cinema-panel {
     position: fixed;
     inset: 0;
-    z-index: 5;
+    z-index: 9999;
     background: black;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    cursor: default;
-    transition: cursor 0.3s ease;
-  }
-  .cinema-panel.hide-cursor { cursor: none; }
-
-  .cinema-background {
-    position: absolute;
-    inset: -100px;
-    z-index: 1;
-    overflow: hidden;
   }
 
-  .bg-blur-layer {
-    position: absolute;
-    inset: -10%;
-    width: 120%;
-    height: 120%;
-    object-fit: cover;
-    filter: blur(100px) saturate(1.8) brightness(0.5);
-    opacity: 0.6;
-    mix-blend-mode: screen;
+  .cinema-title {
+    font-size: 5rem;
+    font-weight: 1000;
+    letter-spacing: -3px;
+    margin: 0;
+    line-height: 0.9;
+    background: linear-gradient(to bottom, #fff, #aaa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 30px 60px rgba(0,0,0,0.8);
   }
 
-  .layer-1 { animation: drift-slow 40s infinite alternate ease-in-out; }
-  .layer-2 { animation: drift-rotate 60s infinite linear; filter: blur(120px) saturate(2) brightness(0.4); opacity: 0.4; }
-  .layer-3 { animation: drift-fast 25s infinite alternate ease-in-out; filter: blur(80px) saturate(1.5) brightness(0.6); opacity: 0.3; }
-
-  @keyframes drift-slow {
-    from { transform: scale(1.1) translate(-5%, -5%); }
-    to { transform: scale(1.3) translate(5%, 5%); }
-  }
-  @keyframes drift-rotate {
-    from { transform: rotate(0deg) scale(1.5); }
-    to { transform: rotate(360deg) scale(1.5); }
-  }
-  @keyframes drift-fast {
-    from { transform: scale(1.4) translate(5%, -5%); }
-    to { transform: scale(1.1) translate(-5%, 5%); }
+  @media (max-width: 1400px) {
+    .cinema-title { font-size: 4rem; }
   }
 
-  .bg-vignette {
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(circle at center, transparent 0%, rgba(0,0,0,0.5) 100%),
-                linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 20%, transparent 80%, rgba(0,0,0,0.6) 100%);
-    z-index: 2;
-  }
-
-  .cinema-close-btn {
-    position: absolute;
-    top: 2rem;
-    right: 2rem;
-    z-index: 30;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.1);
-    color: white;
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    backdrop-filter: blur(20px);
-    opacity: 0;
-    transform: scale(0.8);
-    pointer-events: none;
-    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .cinema-close-btn.visible { opacity: 1; transform: scale(1); pointer-events: auto; }
-  .cinema-close-btn:hover { background: rgba(255,255,255,0.15); transform: scale(1.1); }
-
-  .cinema-content {
-    position: relative;
-    z-index: 10;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4rem;
-    width: 100%;
-    max-width: 1400px;
-    padding: 2rem;
-    pointer-events: none;
-  }
-
-  .cinema-lyrics-floating {
-    position: absolute;
-    top: 5vh;
-    left: 0;
-    right: 0;
-    text-align: center;
-    font-size: 3rem;
-    font-weight: 900;
-    color: white;
-    opacity: 0.15;
-    letter-spacing: -1.5px;
-    max-width: 80%;
-    margin: 0 auto;
-    filter: blur(1px);
-    transition: all 1s ease;
-    text-shadow: 0 0 20px rgba(255,255,255,0.2);
-  }
-
-  .cinema-artwork-box {
-    position: relative;
-    width: 45vh;
-    height: 45vh;
-    max-width: 500px;
-    max-height: 500px;
-    border-radius: 40px;
-    box-shadow: 0 60px 120px -30px rgba(0,0,0,0.9);
-    transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
-    pointer-events: auto;
-  }
-  .cinema-artwork-box:hover { transform: scale(1.05) translateY(-10px); }
-
-  .cinema-artwork { 
-    width: 100%; 
-    height: 100%; 
-    object-fit: cover; 
-    border-radius: 40px; 
-    position: relative; 
-    z-index: 5; 
-    border: 1px solid rgba(255,255,255,0.15); 
-  }
-  
-  .artwork-glare {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0) 50%);
-    z-index: 6;
-    border-radius: 40px;
-  }
-
-  .artwork-bloom {
-    position: absolute;
-    inset: -20px;
-    background-size: cover;
-    filter: blur(80px) saturate(2);
-    opacity: 0.5;
-    z-index: 1;
-    transform: translateY(30px) scale(0.9);
-    transition: all 0.8s ease;
-  }
-  .cinema-artwork-box:hover .artwork-bloom { opacity: 0.8; filter: blur(100px); transform: translateY(20px) scale(1.05); }
-
-  .cinema-meta { 
-    text-align: center; 
-    opacity: 0; 
-    transform: translateY(30px); 
-    transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .cinema-meta.visible { opacity: 1; transform: translateY(0); }
-
-  .cinema-title { font-size: 4rem; font-weight: 1000; letter-spacing: -2.5px; margin: 0; line-height: 1; text-shadow: 0 20px 40px rgba(0,0,0,0.6); }
-  .cinema-artist { font-size: 1.6rem; font-weight: 700; opacity: 0.5; margin: 1.2rem 0 0 0; letter-spacing: -0.5px; }
-
-  .cinema-controls {
-    width: 100%;
-    max-width: 900px;
-    display: flex;
-    flex-direction: column;
-    gap: 3rem;
-    margin-top: 2rem;
-    opacity: 0;
-    transform: translateY(30px);
-    transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
-    pointer-events: auto;
-  }
-  .cinema-controls.visible { opacity: 1; transform: translateY(0); }
-
-  .cinema-timeline { display: flex; align-items: center; gap: 2.5rem; width: 100%; }
-  .time-small { font-size: 0.9rem; font-weight: 900; opacity: 0.4; font-variant-numeric: tabular-nums; width: 60px; text-align: center; }
-  
-  .progress-slider-mini { flex: 1; height: 6px; background: rgba(255,255,255,0.08); border-radius: 12px; position: relative; }
-  .progress-slider-mini .slider-fill { height: 100%; background: white; border-radius: 12px; transition: width 0.1s linear; box-shadow: 0 0 15px rgba(255,255,255,0.3); }
-
-  .cinema-btns { display: flex; align-items: center; justify-content: center; gap: 5rem; }
-  .c-btn { background: none; border: none; color: white; opacity: 0.4; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center; }
-  .c-btn:hover { opacity: 1; transform: scale(1.1); }
-  
-  .play-c { background: rgba(255,255,255,0.1); width: 90px; height: 90px; border-radius: 50%; backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); opacity: 0.7; }
-  .play-c:hover { background: rgba(255,255,255,0.2); opacity: 1; }
-
-  .cinema-next-up {
-    position: absolute;
-    bottom: 5vh;
-    right: 5vw;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    opacity: 0.4;
-    text-align: right;
-    max-width: 300px;
-  }
-  .next-label { font-size: 0.7rem; font-weight: 900; letter-spacing: 2px; opacity: 0.6; }
-  .next-title { font-size: 1.2rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; }
-
-  @media (max-width: 768px) {
+  @media (max-width: 1024px) {
+    .desktop-split-layout { display: none; }
+    .mobile-stack-layout { display: flex; }
     .cinema-title { font-size: 2.5rem; }
     .cinema-artwork-box { width: 35vh; height: 35vh; }
-    .cinema-lyrics-floating { font-size: 1.8rem; }
-  }
-  .c-btn { background: none; border: none; color: white; opacity: 0.6; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; }
-  .c-btn:hover { opacity: 1; transform: scale(1.1); }
-  .play-c { background: rgba(255,255,255,0.1); width: 80px; height: 80px; border-radius: 50%; backdrop-filter: blur(10px); }
-  .play-c:hover { background: rgba(255,255,255,0.2); }
-
-  @media (max-width: 768px) {
-    .cinema-title { font-size: 2.2rem; }
-    .cinema-artwork-box { width: 30vh; height: 30vh; max-width: 80vw; max-height: 80vw; }
-    .cinema-content { gap: 2rem; }
-  }
-  @media (max-width: 480px) {
-    .view-content { padding-top: 4vh; }
-    .meta-texts h1 { font-size: 1.6rem; }
-    .artist-name { font-size: 0.95rem; }
-    .main-btns { gap: 0.2rem; }
-    .play-btn { width: 64px; height: 64px; }
-    .main-btn :global(svg) { width: 32px; height: 32px; }
-    .sub-btn :global(svg) { width: 18px; height: 18px; }
-    .player-island { gap: 1.5rem; }
-    .playback-controls { gap: 1.2rem; }
-    .cover-wrapper-container { max-width: 260px; }
+    .lyric-line { font-size: 1.4rem; text-align: center; }
+    .main-content-flow { padding-top: 5rem; }
   }
 
   @media (max-width: 400px) {
-    .player-header { gap: 0.5rem; }
-    .cover-wrapper-container { max-width: 220px; }
-    .meta-texts h1 { font-size: 1.4rem; }
-    .playback-controls { gap: 0.8rem; }
-    .player-island { gap: 1rem; }
-    .main-btns { padding: 0 0.5rem; }
-    .bottom-controls { margin-top: -0.5rem; }
+    .play-btn-prominent {
+      width: 64px;
+      height: 64px;
+    }
+    .main-btn :global(svg) {
+      width: 32px !important;
+      height: 32px !important;
+    }
+    .play-btn-prominent :global(svg) {
+      width: 32px !important;
+      height: 32px !important;
+    }
+    .sub-btn :global(svg) {
+      width: 18px !important;
+      height: 18px !important;
+    }
+    .main-btns {
+      padding: 0 0.5rem;
+    }
+    .player-header {
+      padding: 1rem 1rem 0 1rem;
+    }
+    .player-header .cover-wrapper {
+      max-width: 240px;
+    }
+  }
+
+  @media (max-height: 700px) {
+    .artwork-column { gap: 1.5rem; }
+    .cover-wrapper.main-artwork { height: 30vh; width: 30vh; }
+    .desktop-meta h1 { font-size: 2rem; }
   }
 </style>

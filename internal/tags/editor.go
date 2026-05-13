@@ -793,11 +793,26 @@ func (e *Editor) UpdateLyrics(trackID string, lyrics string) error {
 	err := e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
 	if err != nil || path == "" { return fmt.Errorf("track not found") }
 
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".mp3" {
+		tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
+		if err != nil { return err }
+		defer tag.Close()
+		
+		tag.AddUnsynchronisedLyricsFrame(id3v2.UnsynchronisedLyricsFrame{
+			Encoding:          id3v2.EncodingUTF8,
+			Language:          "eng",
+			ContentDescriptor: "",
+			Lyrics:            lyrics,
+		})
+		if err := tag.Save(); err != nil { return err }
+		slog.Info("✍️ Lyrics written physically to MP3 (USLT)", "path", path)
+		return nil
+	}
+
 	return SafeSave(path, func(tempPath string) error {
-		// FFmpeg puede insertar letras en el campo LYRICS (Vorbis) o USLT (ID3v2)
-		// Detectar formato
 		format := "mp3"
-		if strings.ToLower(filepath.Ext(path)) == ".flac" { format = "flac" }
+		if ext == ".flac" { format = "flac" }
 
 		args := []string{
 			"-i", path,
@@ -812,6 +827,7 @@ func (e *Editor) UpdateLyrics(trackID string, lyrics string) error {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("ffmpeg lyrics update failed: %v, output: %s", err, string(out))
 		}
+		slog.Info("✍️ Lyrics written physically to file", "path", path)
 		return nil
 	})
 }
@@ -819,14 +835,45 @@ func (e *Editor) UpdateLyrics(trackID string, lyrics string) error {
 func (e *Editor) ReadLyrics(trackID string) (string, error) {
 	var path string
 	e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+	slog.Debug("📂 Reading lyrics from file", "path", path)
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".mp3":
 		tag, _ := id3v2.Open(path, id3v2.Options{Parse: true})
 		if tag == nil { return "", nil }
 		defer tag.Close()
+
+		// 1. Prioridad: USLT (Unsynchronised lyrics/text transcription)
 		frames := tag.GetFrames(tag.CommonID("Unsynchronised lyrics/text transcription"))
-		for _, f := range frames { if lf, ok := f.(id3v2.UnsynchronisedLyricsFrame); ok { return lf.Lyrics, nil } }
+		for _, f := range frames {
+			if lf, ok := f.(id3v2.UnsynchronisedLyricsFrame); ok && lf.Lyrics != "" {
+				slog.Debug("✅ Found lyrics in USLT frame", "path", path)
+				return lf.Lyrics, nil
+			}
+		}
+
+		// 2. Fallback: TXXX (User defined text information) con descripción "lyrics" o "UNSYNCEDLYRICS"
+		txxxFrames := tag.GetFrames(tag.CommonID("User defined text information"))
+		for _, f := range txxxFrames {
+			if tf, ok := f.(id3v2.UserDefinedTextFrame); ok {
+				desc := strings.ToUpper(tf.Description)
+				if desc == "LYRICS" || desc == "UNSYNCEDLYRICS" || desc == "TEXT" {
+					if tf.Value != "" {
+						slog.Debug("✅ Found lyrics in TXXX frame", "desc", tf.Description, "path", path)
+						return tf.Value, nil
+					}
+				}
+			}
+		}
+
+		// 3. Fallback: Otros frames de texto comunes
+		for _, id := range []string{"LYRICS", "TEXT"} {
+			val := tag.GetTextFrame(id).Text
+			if val != "" {
+				slog.Debug("✅ Found lyrics in Text frame", "id", id, "path", path)
+				return val, nil
+			}
+		}
 	case ".flac":
 		f, _ := ParseFLAC(path)
 		if f == nil { return "", nil }
@@ -841,5 +888,6 @@ func (e *Editor) ReadLyrics(trackID string) (string, error) {
 		}
 	}
 
+	slog.Debug("🔍 No lyrics found in file tags", "path", path)
 	return "", nil
 }

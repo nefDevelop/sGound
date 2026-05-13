@@ -157,6 +157,7 @@
     min-width: 160px;
     box-shadow: 0 20px 50px rgba(0,0,0,0.5);
     z-index: 2000;
+    pointer-events: auto !important;
   }
 
   .menu-item {
@@ -168,17 +169,25 @@
     font-size: 0.95rem;
     color: var(--text-muted);
     width: 100%;
+    pointer-events: auto !important;
+    user-select: none;
   }
   .menu-item:hover { background: rgba(255,255,255,0.08); color: white; }
+  .menu-item:active { background: rgba(255,255,255,0.15); }
   .menu-item.active { background: var(--primary); color: white; }
 
-  @media (max-width: 768px) {
-    .anchor-bar { padding: 0 1rem; height: 90px; }
+  @media (max-width: 770px) {
+    .anchor-bar { 
+      padding: 0 1rem; 
+      height: 80px; 
+      padding-bottom: 8px; 
+    }
+    .view-toggle-btn { width: 48px; height: 48px; }
   }
 
   @media (max-width: 400px) {
-    .anchor-bar { padding: 0 0.5rem; height: 72px; }
-    .view-toggle-btn { width: 44px; height: 44px; }
+    .anchor-bar { padding: 0 0.5rem; height: 72px; padding-bottom: 4px; }
+    .view-toggle-btn { width: 42px; height: 42px; }
     .view-toggle-btn :global(svg) { width: 20px; height: 20px; }
     .quality-badge { font-size: 0.6rem; padding: 0.2rem 0.4rem; }
   }
