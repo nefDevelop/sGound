@@ -876,4 +876,26 @@
     .cinema-artwork-box { width: 30vh; height: 30vh; max-width: 80vw; max-height: 80vw; }
     .cinema-content { gap: 2rem; }
   }
+  @media (max-width: 480px) {
+    .view-content { padding-top: 4vh; }
+    .meta-texts h1 { font-size: 1.6rem; }
+    .artist-name { font-size: 0.95rem; }
+    .main-btns { gap: 0.2rem; }
+    .play-btn { width: 64px; height: 64px; }
+    .main-btn :global(svg) { width: 32px; height: 32px; }
+    .sub-btn :global(svg) { width: 18px; height: 18px; }
+    .player-island { gap: 1.5rem; }
+    .playback-controls { gap: 1.2rem; }
+    .cover-wrapper-container { max-width: 260px; }
+  }
+
+  @media (max-width: 400px) {
+    .player-header { gap: 0.5rem; }
+    .cover-wrapper-container { max-width: 220px; }
+    .meta-texts h1 { font-size: 1.4rem; }
+    .playback-controls { gap: 0.8rem; }
+    .player-island { gap: 1rem; }
+    .main-btns { padding: 0 0.5rem; }
+    .bottom-controls { margin-top: -0.5rem; }
+  }
 </style>

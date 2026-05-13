@@ -362,4 +362,14 @@
     h1 { font-size: 3.5rem; }
     .avatar { width: 180px; height: 180px; }
   }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 2.2rem; letter-spacing: -1px; }
+    .artist-header { padding: 2rem 1rem; border-radius: 24px; }
+    .avatar { width: 140px; height: 140px; }
+    .stats { font-size: 1rem; flex-wrap: wrap; justify-content: center; }
+    .title-row { flex-direction: column; gap: 1rem; }
+    .artist-tags { justify-content: center; flex-wrap: wrap; }
+    .attribution { right: 50%; transform: translateX(50%); bottom: 1rem; white-space: nowrap; }
+  }
 </style>

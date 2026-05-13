@@ -118,7 +118,7 @@
           <Artwork
             src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}"
             alt="Cover"
-            size="60px"
+            size={window.innerWidth < 400 ? "44px" : "54px"}
             borderRadius="12px"
           />
         {:else}
@@ -250,7 +250,7 @@
   .player-bg-clip {
     position: absolute;
     inset: 0;
-    border-radius: 28px;
+    border-radius: inherit;
     overflow: hidden;
     z-index: -1;
     pointer-events: none;
@@ -478,9 +478,9 @@
   @media (max-width: 768px) {
     .player {
       margin: 0;
-      padding: 0 1rem;
+      padding: 0 0.8rem;
       height: 72px;
-      border-radius: inherit;
+      border-radius: 20px;
       border-bottom: none;
     }
     .album-name {
@@ -488,19 +488,19 @@
     }
     .progress-bg {
       background: rgba(var(--primary-rgb), 0.25);
-      top: 1px;
-      bottom: 1px;
-      left: 1px;
+      top: 0;
+      bottom: 0;
+      left: 0;
     }
     .right-actions {
-      gap: 0.6rem;
-    }
-    .playback-btns {
       gap: 0.4rem;
     }
+    .playback-btns {
+      gap: 0.2rem;
+    }
     .main-play-btn {
-      width: 38px;
-      height: 38px;
+      width: 42px;
+      height: 42px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     }
     .track-title {
@@ -509,5 +509,18 @@
     .icon-btn {
       padding: 6px;
     }
+    .playback-btns .sub-btn {
+      display: none;
+    }
+    .extra-controls {
+      display: none; /* Ocultamos volumen y cola en miniplayer movil para ganar espacio */
+    }
+  }
+
+  @media (max-width: 400px) {
+    .player { padding: 0 0.5rem; }
+    .now-playing { gap: 0.8rem; }
+    .track-title { font-size: 0.85rem; }
+    .main-play-btn { width: 38px; height: 38px; }
   }
 </style>

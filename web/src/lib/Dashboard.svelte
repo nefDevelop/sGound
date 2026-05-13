@@ -276,7 +276,7 @@
 
 <style>
   .dashboard { 
-    padding: 2rem 0.5rem; 
+    padding: 2rem 0; 
     max-width: 100%;
     box-sizing: border-box;
     animation: fadeIn 0.5s ease;
@@ -583,6 +583,7 @@
     .welcome-tile { grid-column: span 2; }
   }
   @media (max-width: 768px) {
+    .dashboard { padding-top: 0.5rem; }
     .bento-grid { 
       grid-template-columns: 1fr; 
       grid-auto-rows: auto;
@@ -607,5 +608,13 @@
     .mosaic-grid { grid-template-columns: repeat(2, 1fr); }
     .mosaic-item.i0, .mosaic-item.i5 { grid-column: span 1; grid-row: span 1; }
     .gems-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  @media (max-width: 400px) {
+    .bento-item { padding: 1rem; }
+    .welcome-header { gap: 1rem; margin-bottom: 1.5rem; }
+    .welcome-header h1 { font-size: 1.5rem; }
+    .inbox-notification-badge { width: 44px; height: 44px; border-radius: 12px; }
+    .mosaic-grid, .gems-grid { gap: 0.4rem; }
   }
 </style>

@@ -593,7 +593,7 @@
     height: 70px;
     display: flex;
     align-items: center;
-    padding: 0 2rem;
+    padding: 0 1.5rem;
     gap: 2rem;
     background: var(--surface-05);
     backdrop-filter: blur(20px);
@@ -698,10 +698,14 @@
       grid-template-rows: 1fr auto auto;
     }
     .content {
-      margin: 0.5rem 0.5rem 0 0.5rem;
+      margin: 0.2rem 0.2rem 0 0.2rem;
+      border-radius: 20px;
+    }
+    .scroll-view {
+      padding: 1rem;
     }
     .player-area {
-      margin: 0.5rem;
+      margin: 0.2rem;
       border-radius: 20px;
     }
     .player-stack {
@@ -711,6 +715,11 @@
       padding: 0 1rem;
       gap: 1rem;
     }
+  }
+
+  @media (max-width: 400px) {
+    .top-bar { padding: 0 0.75rem; gap: 0.5rem; height: 60px; }
+    .scroll-view { padding: 0.75rem; }
   }
 
   .hidden {
