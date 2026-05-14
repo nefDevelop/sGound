@@ -31,6 +31,14 @@
   let userScrolling = $state(false);
   let scrollTimeout;
   let isPaused = $state(true);
+  let isDesktop = $state(true);
+
+  $effect(() => {
+    const check = () => isDesktop = window.innerWidth > 1024;
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  });
 
   $effect(() => {
     if (!audioRef) return;
@@ -274,46 +282,47 @@
   <div class="view-content">
     <div class="player-body" class:compact-mode={subView !== 'cover'}>
       <div class="main-content-flow">
-        <header class="player-header {subView !== 'cover' ? 'compact-mode' : ''}">
-          <div class="cover-wrapper-container">
-            <div class="cover-wrapper">
-               <Artwork 
-                 src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" 
-                 alt="Cover" 
-                 borderRadius={subView === 'cover' ? '24px' : '12px'}
-                 onclick={() => { if(subView !== 'cover') subView = 'cover'; }}
-               />
-            </div>
-          </div>
-          
-          {#if subView !== 'cover'}
-            <div class="compact-meta" in:fade>
-              <div class="meta-texts">
-                <h2>{currentPlaying.title}</h2>
-                <p>{currentPlaying.artist}</p>
+        {#if subView !== 'cover' || !isDesktop}
+          <header class="player-header {subView !== 'cover' ? 'compact-mode' : ''}">
+            <div class="header-inner">
+              <div class="cover-wrapper" style="border-radius: {subView === 'cover' ? '24px' : '12px'}">
+                 <Artwork 
+                   src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" 
+                   alt="Cover" 
+                   borderRadius={subView === 'cover' ? '22px' : '10px'}
+                   onclick={() => { if(subView !== 'cover') subView = 'cover'; }}
+                 />
               </div>
-
-              <div class="compact-controls">
-                <div class="mini-timeline">
-                  <span class="time-mini">{formatTime(currentTime)}</span>
-                  <div class="modern-slider progress-slider-mini">
-                    <input type="range" class="knobless-range" min="0" max="100" value={progress} oninput={handleSeek} />
-                    <div class="slider-fill" style="width: {progress}%"></div>
+            
+              {#if subView !== 'cover'}
+                <div class="compact-meta" in:fade>
+                  <div class="meta-texts">
+                    <h2>{currentPlaying.title}</h2>
+                    <p>{currentPlaying.artist}</p>
                   </div>
-                  <span class="time-mini">{formatTime(duration)}</span>
-                </div>
+                  <div class="compact-controls">
+                    <div class="mini-timeline">
+                      <span class="time-mini">{formatTime(currentTime)}</span>
+                      <div class="modern-slider progress-slider-mini">
+                        <input type="range" class="knobless-range" min="0" max="100" value={progress} oninput={handleSeek} />
+                        <div class="slider-fill" style="width: {progress}%"></div>
+                      </div>
+                      <span class="time-mini">{formatTime(duration)}</span>
+                    </div>
 
-                <div class="mini-btns">
-                  <button class="mini-btn" onclick={(e) => { e.stopPropagation(); onskipBack(); }}><Icon name="skipBack" size={20} /></button>
-                  <button class="mini-btn play" onclick={(e) => { e.stopPropagation(); isPaused ? audioRef?.play() : audioRef?.pause(); }}>
-                    <Icon name={isPaused ? 'play' : 'pause'} size={24} />
-                  </button>
-                  <button class="mini-btn" onclick={(e) => { e.stopPropagation(); onskipNext(); }}><Icon name="skipForward" size={20} /></button>
+                    <div class="mini-btns">
+                      <button class="mini-btn" onclick={(e) => { e.stopPropagation(); onskipBack(); }}><Icon name="skipBack" size={20} /></button>
+                      <button class="mini-btn play" onclick={(e) => { e.stopPropagation(); isPaused ? audioRef?.play() : audioRef?.pause(); }}>
+                        <Icon name={isPaused ? 'play' : 'pause'} size={24} />
+                      </button>
+                      <button class="mini-btn" onclick={(e) => { e.stopPropagation(); onskipNext(); }}><Icon name="skipForward" size={20} /></button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              {/if}
             </div>
-          {/if}
-        </header>
+          </header>
+        {/if}
         
         <div class="dynamic-area">
           {#if subView !== 'cinema'}
@@ -321,11 +330,11 @@
           <div class="desktop-split-layout" class:is-centered={subView === 'cover'} class:lyrics-mode={subView === 'lyrics'}>
             <div class="artwork-column">
               <div class="cover-wrapper-container">
-                <div class="cover-wrapper main-artwork">
+                <div class="cover-wrapper main-artwork" style="border-radius: {subView === 'cover' ? '24px' : '12px'}">
                    <Artwork 
                      src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" 
                      alt="Cover" 
-                     borderRadius="32px"
+                     borderRadius={subView === 'cover' ? '22px' : '10px'}
                      onclick={() => { if(subView !== 'cover') subView = 'cover'; }}
                    />
                 </div>
@@ -688,6 +697,7 @@
     height: 120%;
     background-size: cover;
     background-position: center;
+    background-repeat: no-repeat;
     filter: blur(80px) saturate(1.5) brightness(0.3);
     opacity: 0.5;
   }
@@ -721,7 +731,6 @@
     flex-direction: column;
     width: 100%;
     height: 100%;
-    overflow: hidden;
   }
 
   .player-body {
@@ -730,7 +739,6 @@
     flex-direction: column;
     width: 100%;
     height: 100%;
-    overflow: hidden;
   }
 
 
@@ -740,8 +748,8 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    transition: all 0.4s ease;
     position: relative;
+    justify-content: center;
   }
 
   .player-body.compact-mode .main-content-flow {
@@ -754,7 +762,6 @@
     display: flex;
     flex-direction: column;
     width: 100%;
-    overflow: hidden;
   }
 
   /* Responsive Layout Logic */
@@ -765,10 +772,9 @@
     min-height: 0;
     max-width: 1400px;
     margin: 0 auto;
-    padding: 2rem 2rem 4rem 2rem;
+    padding: 0rem 2rem 1rem 2rem;
     gap: 4rem;
     align-items: center;
-    overflow: hidden;
   }
   @media (min-width: 1025px) {
     .desktop-split-layout { display: flex; }
@@ -801,32 +807,53 @@
     z-index: 1000;
   }
 
-  .player-header.compact-mode {
-    flex-direction: row;
-    height: 80px;
-    padding: 0 2rem;
-    gap: 1.5rem;
-    justify-content: flex-start;
+  header.player-header.compact-mode {
+    height: 90px !important;
+    padding: 0 !important;
+    margin: 0 !important;
     max-width: none;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.03);
+    backdrop-filter: blur(25px) saturate(1.8);
+    -webkit-backdrop-filter: blur(25px) saturate(1.8);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 4px 30px rgba(0,0,0,0.1);
     position: absolute;
     top: 0;
     left: 0;
-    margin-top: 0;
-    background: rgba(0,0,0,0.3);
-    backdrop-filter: blur(10px);
+    width: 100%;
+    z-index: 1000;
+    display: block !important;
+  }
+
+  .header-inner {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    padding: 0 1.5rem;
+    gap: 1.2rem;
+    box-sizing: border-box;
+  }
+
+  @media (min-width: 1025px) {
+    /* Header is removed from DOM via Svelte logic in cover mode */
   }
 
   .player-header.compact-mode .cover-wrapper {
-    width: 44px;
-    height: 44px;
-    margin-bottom: 0;
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0 !important;
   }
 
   .player-header.compact-mode .cover-wrapper-container {
-    flex-direction: row;
-    gap: 1rem;
-    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 !important;
   }
 
   .compact-meta {
@@ -834,7 +861,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 2rem;
+    gap: 1.5rem;
     min-width: 0;
   }
 
@@ -884,12 +911,18 @@
   }
   .mini-btn:hover { opacity: 1; transform: scale(1.1); }
   .play-btn-prominent, .mini-btn.play, .play-c, .main-btn, .sub-btn, .c-btn {
-    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+
+  .play-btn-prominent:hover, .mini-btn.play:hover, .play-c:hover {
+    transform: scale(1.08);
+    filter: brightness(1.1);
   }
 
   .play-btn-prominent:active, .mini-btn.play:active, .play-c:active, .main-btn:active, .sub-btn:active, .c-btn:active {
-    transform: scale(0.85);
-    filter: brightness(1.2);
+    transform: scale(0.92);
+    filter: brightness(0.9);
+    transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .mini-btn.play { 
@@ -899,6 +932,9 @@
     border-radius: 50%; 
     padding: 0.6rem;
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .player-header .cover-wrapper {
@@ -971,18 +1007,20 @@
 
   .compact-meta h2 {
     font-size: 1rem;
+    font-weight: 600;
     margin: 0;
+    line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 250px;
-    font-weight: 800;
   }
 
   .compact-meta p {
     font-size: 0.85rem;
-    opacity: 0.6;
+    opacity: 0.7;
     margin: 0;
+    line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1120,14 +1158,9 @@
     justify-content: center;
     cursor: pointer;
     box-shadow: 0 10px 30px rgba(255,255,255,0.2);
-    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   }
   .play-btn-prominent:hover {
-    transform: scale(1.1);
     box-shadow: 0 15px 40px rgba(255,255,255,0.3);
-  }
-  .play-btn-prominent:active {
-    transform: scale(0.95);
   }
 
   .slider-glow {
@@ -1301,12 +1334,13 @@
     flex-direction: column;
     align-items: center;
     z-index: 3;
+    margin-top: 2rem;
   }
 
   .cover-wrapper {
     aspect-ratio: 1;
     width: 100%;
-    border-radius: 24px;
+    /* border-radius set via style binding in template */
     overflow: hidden;
     background: var(--surface-container-high);
     border: 1px solid rgba(255,255,255,0.1);
@@ -1316,7 +1350,7 @@
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 2.5rem;
+    gap: 1rem;
   }
 
   .track-meta {
@@ -1585,7 +1619,7 @@
 
   @media (max-width: 1024px) {
     .player-header.compact-mode {
-      height: 60px;
+      height: 60px !important;
       padding: 0 1rem;
       gap: 0.5rem;
     }

@@ -78,7 +78,7 @@
     cursor: pointer;
   }
   .artwork-container.interactive:hover {
-    transform: scale(1.05);
+    transform: scale(1.02);
     z-index: 10;
   }
 
