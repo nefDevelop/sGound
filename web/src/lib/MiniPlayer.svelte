@@ -268,20 +268,18 @@
   .now-playing {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 1.2rem;
     flex: 1;
     min-width: 0;
-    width: 0;
     overflow: hidden;
   }
 
   .info {
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: 0.15rem;
     flex: 1;
     min-width: 0;
-    width: 0;
     overflow: hidden;
   }
 

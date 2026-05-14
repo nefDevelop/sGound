@@ -359,8 +359,14 @@
 
   async function handleSidebarNavigation() {
     await tick();
-    if (get(currentView) === 'fullplayer') {
+    if (get(currentView) === "fullplayer") {
       syncViewWithRoute();
+    }
+  }
+
+  function handleGlobalClick(e) {
+    if (e.target.closest(".sidebar-container") || e.target.closest("a")) {
+      handleSidebarNavigation();
     }
   }
 
@@ -390,10 +396,12 @@
     bind:onSkipNext={skipNext}
     bind:onSkipBack={skipBack}
   />
-  <main class="app-layout" class:is-cinema={isFullPlayerActive && playerSubView === 'cinema'}>
-    <div onclick={handleSidebarNavigation} role="presentation">
-      <Sidebar {playlists} onLogout={handlers.handleLogout} />
-    </div>
+  <main
+    class="app-layout"
+    class:is-cinema={isFullPlayerActive && playerSubView === "cinema"}
+    onclick={handleGlobalClick}
+  >
+    <Sidebar {playlists} onLogout={handlers.handleLogout} />
 
     <section class="content" class:full-player-view={isFullPlayerActive}>
       {#if scanStatus.isPaused}
@@ -530,7 +538,7 @@
 
   .app-layout {
     display: grid;
-    grid-template-areas: 
+    grid-template-areas:
       "sidebar content"
       "sidebar player";
     grid-template-columns: 280px minmax(0, 1fr);
@@ -540,7 +548,6 @@
     color: var(--text-main);
     overflow: hidden;
     width: 100%;
-    isolation: isolate;
   }
 
   .content {
@@ -721,13 +728,14 @@
       gap: 0;
       padding: 0.5rem;
       background: var(--surface);
-      overflow: visible !important;
+      height: 100dvh;
+      overflow: hidden !important;
     }
     .content {
       margin: 0;
       border-radius: 28px 28px 0 0;
       border: none;
-      background: var(--surface-container-highest);
+      background: var(--surface-container);
       box-shadow: none;
     }
     .player-area {
@@ -748,6 +756,9 @@
     }
     .scroll-view {
       padding: 1rem;
+      padding-bottom: 4rem;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch;
     }
     .player-stack {
       height: 72px;

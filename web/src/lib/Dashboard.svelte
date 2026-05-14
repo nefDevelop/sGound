@@ -299,7 +299,8 @@
     transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
     display: flex;
     flex-direction: column;
-    overflow: visible; /* Cambiado de hidden para evitar cortes */
+    overflow: hidden;
+    min-width: 0;
     text-align: left;
     color: inherit;
     font-family: inherit;
@@ -402,7 +403,7 @@
   .top-item { background: transparent; border: none; display: flex; align-items: center; gap: 0.8rem; padding: 0.5rem; border-radius: 16px; cursor: pointer; transition: background 0.2s; text-align: left; width: 100%; color: inherit; }
   .top-item:hover { background: var(--surface-container-highest); }
   .top-item img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; }
-  .top-info { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .top-info { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
   .top-info .title { font-weight: 800; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main); }
   .top-info .artist { font-size: 0.7rem; color: var(--text-muted); font-weight: 700; }
   .play-count { font-size: 0.8rem; font-weight: 950; color: var(--secondary); text-align: right; line-height: 1.1; }
@@ -472,7 +473,7 @@
   }
   .mosaic-item:hover .album-overlay { opacity: 1; transform: translateY(0); }
   
-  .album-info { display: flex; flex-direction: column; overflow: hidden; margin-right: 1rem; }
+  .album-info { display: flex; flex-direction: column; overflow: hidden; min-width: 0; margin-right: 1rem; }
   .a-title { font-weight: 900; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.2px; }
   .a-artist { font-size: 0.75rem; opacity: 0.7; font-weight: 700; }
   
