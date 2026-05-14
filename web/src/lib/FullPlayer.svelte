@@ -26,7 +26,18 @@
   let lyrics = $state("");
   let parsedLyrics = $state([]);
   let currentLyricIndex = $state(-1);
-  let lyricContainer = $state(null);
+  let lyricContainerDesktop = $state(null);
+  let lyricContainerMobile = $state(null);
+  let userScrolling = $state(false);
+  let scrollTimeout;
+
+  function handleUserInteraction() {
+    userScrolling = true;
+    clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(() => {
+      userScrolling = false;
+    }, 3000);
+  }
 
   function toggleMute() {
     if ($volume > 0) {
@@ -199,14 +210,17 @@
   }
 
   function scrollToActive() {
-    if (!lyricContainer || !isOpen) return;
-    const activeLine = lyricContainer.querySelector('.active');
-    if (activeLine) {
-      activeLine.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center'
-      });
-    }
+    if (!isOpen || userScrolling) return;
+    [lyricContainerDesktop, lyricContainerMobile].forEach(container => {
+      if (!container) return;
+      const activeLine = container.querySelector('.active');
+      if (activeLine) {
+        activeLine.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+      }
+    });
   }
 
   function formatTime(secs) {
@@ -259,6 +273,25 @@
               <div class="meta-texts">
                 <h2>{currentPlaying.title}</h2>
                 <p>{currentPlaying.artist}</p>
+              </div>
+
+              <div class="compact-controls">
+                <div class="mini-timeline">
+                  <span class="time-mini">{formatTime(currentTime)}</span>
+                  <div class="modern-slider progress-slider-mini">
+                    <input type="range" class="knobless-range" min="0" max="100" value={progress} oninput={handleSeek} />
+                    <div class="slider-fill" style="width: {progress}%"></div>
+                  </div>
+                  <span class="time-mini">{formatTime(duration)}</span>
+                </div>
+
+                <div class="mini-btns">
+                  <button class="mini-btn" onclick={(e) => { e.stopPropagation(); onskipBack(); }}><Icon name="skipBack" size={20} /></button>
+                  <button class="mini-btn play" onclick={(e) => { e.stopPropagation(); audioRef?.paused ? audioRef.play() : audioRef?.pause(); }}>
+                    <Icon name={audioRef?.paused ? 'play' : 'pause'} size={24} />
+                  </button>
+                  <button class="mini-btn" onclick={(e) => { e.stopPropagation(); onskipNext(); }}><Icon name="skipForward" size={20} /></button>
+                </div>
               </div>
             </div>
           {/if}
@@ -340,7 +373,13 @@
                 {#if subView === 'lyrics'}
                   <div class="view-panel lyrics-panel" in:fade>
                     {#if parsedLyrics.length > 0}
-                      <div class="lyrics-list" bind:this={lyricContainer}>
+                      <div 
+                        class="lyrics-list" 
+                        bind:this={lyricContainerDesktop}
+                        onwheel={handleUserInteraction}
+                        onmousedown={handleUserInteraction}
+                        ontouchstart={handleUserInteraction}
+                      >
                         {#each parsedLyrics as line, i}
                           <button 
                             class="lyric-line" 
@@ -483,7 +522,13 @@
             {:else if subView === 'lyrics'}
               <div class="view-panel lyrics-panel" in:fade>
                 {#if parsedLyrics.length > 0}
-                  <div class="lyrics-list" bind:this={lyricContainer}>
+                  <div 
+                    class="lyrics-list" 
+                    bind:this={lyricContainerMobile}
+                    onwheel={handleUserInteraction}
+                    onmousedown={handleUserInteraction}
+                    ontouchstart={handleUserInteraction}
+                  >
                     {#each parsedLyrics as line, i}
                       <button 
                         class="lyric-line" 
@@ -683,6 +728,14 @@
     justify-content: flex-start;
   }
 
+  .dynamic-area {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+  }
+
   /* Responsive Layout Logic */
   .desktop-split-layout {
     display: none;
@@ -715,18 +768,95 @@
     width: 100%;
     max-width: 500px;
     margin: 0 auto;
-    padding: 1rem 1rem 0 1rem;
+    padding: 1rem 1rem 1rem 1rem;
     display: flex;
     flex-direction: column;
     align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(20px);
+    flex-shrink: 0;
   }
 
-  /* Hide header artwork in mobile when not in cover view */
-  @media (max-width: 1024px) {
-    .player-body.compact-mode .player-header {
-       display: none;
-    }
+  .player-header.compact-mode {
+    flex-direction: row;
+    height: 80px;
+    padding: 0 2rem;
+    gap: 1.5rem;
+    justify-content: flex-start;
+    max-width: none;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
   }
+
+  .player-header.compact-mode .cover-wrapper {
+    width: 44px;
+    height: 44px;
+    margin-bottom: 0;
+  }
+
+  .player-header.compact-mode .cover-wrapper-container {
+    flex-direction: row;
+    gap: 1rem;
+    flex-shrink: 0;
+  }
+
+  .compact-meta {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+    min-width: 0;
+  }
+
+  .compact-controls {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex: 1;
+    max-width: 600px;
+  }
+
+  .mini-timeline {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    flex: 1;
+  }
+
+  .time-mini {
+    font-size: 0.75rem;
+    font-weight: 700;
+    opacity: 0.5;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .progress-slider-mini {
+    flex: 1;
+    height: 4px !important;
+  }
+
+  .mini-btns {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .mini-btn {
+    background: none;
+    border: none;
+    color: white;
+    opacity: 0.6;
+    cursor: pointer;
+    padding: 0.4rem;
+    display: flex;
+    align-items: center;
+    transition: all 0.2s;
+  }
+  .mini-btn:hover { opacity: 1; transform: scale(1.1); }
+  .mini-btn.play { opacity: 1; background: white; color: black; border-radius: 50%; padding: 0.6rem; }
 
   .player-header .cover-wrapper {
     width: 70vw;
@@ -773,8 +903,8 @@
   .desktop-split-layout.lyrics-mode {
     flex-direction: column;
     justify-content: flex-start;
-    padding-top: 1rem;
-    gap: 1rem;
+    padding-top: 0;
+    gap: 0;
     max-width: none;
   }
 
@@ -784,26 +914,36 @@
   }
 
   .desktop-split-layout.lyrics-mode .artwork-column {
-    flex: none;
-    height: 80px;
-    width: 100%;
-    flex-direction: row;
-    justify-content: flex-start;
-    align-items: center;
-    padding: 0 1.5rem;
-    background: rgba(255,255,255,0.05);
-    border-radius: 20px;
-    backdrop-filter: blur(20px);
-    gap: 2rem;
-    margin: 0 auto;
-    max-width: 1400px;
-    border: 1px solid rgba(255,255,255,0.1);
+    display: none;
   }
 
-  .desktop-split-layout.lyrics-mode .cover-wrapper.main-artwork {
-    width: 44px;
-    height: 44px;
-    flex-shrink: 0;
+  .compact-meta .meta-texts {
+    min-width: 0;
+    flex: 0 1 auto;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .compact-meta h2 {
+    font-size: 1rem;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 250px;
+    font-weight: 800;
+  }
+
+  .compact-meta p {
+    font-size: 0.85rem;
+    opacity: 0.6;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 250px;
   }
 
   .desktop-split-layout.lyrics-mode .desktop-meta {
@@ -1177,6 +1317,23 @@
     flex-direction: column; 
     gap: 1.5rem; 
     animation: fadeInQuick 0.2s cubic-bezier(0,0,0.2,1); 
+    height: 100%;
+    min-height: 0;
+    flex: 1;
+  }
+
+  .lyrics-panel {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .panel-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
 
   @keyframes fadeInQuick { 
@@ -1257,7 +1414,7 @@
     overflow-y: auto;
     scrollbar-width: none;
     position: relative;
-    padding: 30vh 2rem;
+    padding: 50vh 2rem;
     pointer-events: auto !important;
     user-select: none;
     touch-action: pan-y;
@@ -1378,6 +1535,31 @@
     .player-header .cover-wrapper {
       max-width: 240px;
     }
+  }
+
+  @media (max-width: 1024px) {
+    .player-header.compact-mode {
+      height: 60px;
+      padding: 0 1rem;
+      gap: 0.5rem;
+    }
+    .player-header.compact-mode .cover-wrapper {
+      width: 40px;
+      height: 40px;
+    }
+    .compact-meta {
+      gap: 0.5rem;
+    }
+    .compact-controls {
+      gap: 0.5rem;
+    }
+    .mini-timeline {
+      display: flex;
+      gap: 0.4rem;
+    }
+    .time-mini { display: none; } /* Hide times on mobile to save space */
+    .compact-meta .meta-texts h2 { font-size: 0.85rem; max-width: 120px; }
+    .compact-meta .meta-texts p { font-size: 0.75rem; max-width: 120px; }
   }
 
   @media (max-height: 700px) {
