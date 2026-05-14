@@ -30,8 +30,26 @@
   let lyricContainerMobile = $state(null);
   let userScrolling = $state(false);
   let scrollTimeout;
+  let isPaused = $state(true);
 
-  function handleUserInteraction() {
+  $effect(() => {
+    if (!audioRef) return;
+    const updateStatus = () => isPaused = audioRef.paused;
+    audioRef.addEventListener('play', updateStatus);
+    audioRef.addEventListener('pause', updateStatus);
+    // Initial check
+    isPaused = audioRef.paused;
+    return () => {
+      audioRef.removeEventListener('play', updateStatus);
+      audioRef.removeEventListener('pause', updateStatus);
+    };
+  });
+
+  function handleUserInteraction(e) {
+    if (e.currentTarget) {
+      const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+      console.log(`Scroll Event: ${e.type} | Top: ${scrollTop} | Height: ${scrollHeight} | Client: ${clientHeight}`);
+    }
     userScrolling = true;
     clearTimeout(scrollTimeout);
     scrollTimeout = setTimeout(() => {
@@ -256,7 +274,7 @@
   <div class="view-content">
     <div class="player-body" class:compact-mode={subView !== 'cover'}>
       <div class="main-content-flow">
-        <header class="player-header">
+        <header class="player-header {subView !== 'cover' ? 'compact-mode' : ''}">
           <div class="cover-wrapper-container">
             <div class="cover-wrapper">
                <Artwork 
@@ -287,8 +305,8 @@
 
                 <div class="mini-btns">
                   <button class="mini-btn" onclick={(e) => { e.stopPropagation(); onskipBack(); }}><Icon name="skipBack" size={20} /></button>
-                  <button class="mini-btn play" onclick={(e) => { e.stopPropagation(); audioRef?.paused ? audioRef.play() : audioRef?.pause(); }}>
-                    <Icon name={audioRef?.paused ? 'play' : 'pause'} size={24} />
+                  <button class="mini-btn play" onclick={(e) => { e.stopPropagation(); isPaused ? audioRef?.play() : audioRef?.pause(); }}>
+                    <Icon name={isPaused ? 'play' : 'pause'} size={24} />
                   </button>
                   <button class="mini-btn" onclick={(e) => { e.stopPropagation(); onskipNext(); }}><Icon name="skipForward" size={20} /></button>
                 </div>
@@ -379,6 +397,8 @@
                         onwheel={handleUserInteraction}
                         onmousedown={handleUserInteraction}
                         ontouchstart={handleUserInteraction}
+                        role="region"
+                        aria-label="Letras de la canción"
                       >
                         {#each parsedLyrics as line, i}
                           <button 
@@ -465,8 +485,8 @@
                     <button class="main-btn" onclick={onskipBack} title="Anterior">
                       <Icon name="skipBack" size={38} />
                     </button>
-                    <button class="play-btn-prominent" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()} title={audioRef?.paused ? "Reproducir" : "Pausar"}>
-                      <Icon name={audioRef?.paused ? 'play' : 'pause'} size={38} color="var(--surface)" />
+                    <button class="play-btn-prominent" onclick={() => isPaused ? audioRef.play() : audioRef?.pause()} title={isPaused ? "Reproducir" : "Pausar"}>
+                      <Icon name={isPaused ? 'play' : 'pause'} size={38} color="var(--surface)" />
                     </button>
                     <button class="main-btn" onclick={onskipNext} title="Siguiente">
                       <Icon name="skipForward" size={38} />
@@ -528,6 +548,8 @@
                     onwheel={handleUserInteraction}
                     onmousedown={handleUserInteraction}
                     ontouchstart={handleUserInteraction}
+                    role="region"
+                    aria-label="Letras de la canción"
                   >
                     {#each parsedLyrics as line, i}
                       <button 
@@ -607,7 +629,7 @@
                   <div class="cinema-btns">
                     <button class="c-btn" onclick={(e) => { e.stopPropagation(); onskipBack(); }}><Icon name="skipBack" size={28} /></button>
                     <button class="c-btn play-c" onclick={(e) => { e.stopPropagation(); togglePlay(); }}>
-                      <Icon name={audioRef?.paused ? 'play' : 'pause'} size={44} />
+                      <Icon name={isPaused ? 'play' : 'pause'} size={44} />
                     </button>
                     <button class="c-btn" onclick={(e) => { e.stopPropagation(); onskipNext(); }}><Icon name="skipForward" size={28} /></button>
                   </div>
@@ -711,17 +733,15 @@
     overflow: hidden;
   }
 
-  .player-body.compact-mode .player-header {
-    display: none;
-  }
 
   .main-content-flow {
     width: 100%;
-    height: 100%;
+    flex: 1;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    min-height: 0;
     transition: all 0.4s ease;
+    position: relative;
   }
 
   .player-body.compact-mode .main-content-flow {
@@ -734,18 +754,21 @@
     display: flex;
     flex-direction: column;
     width: 100%;
+    overflow: hidden;
   }
 
   /* Responsive Layout Logic */
   .desktop-split-layout {
     display: none;
     width: 100%;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     max-width: 1400px;
     margin: 0 auto;
     padding: 2rem 2rem 4rem 2rem;
     gap: 4rem;
     align-items: center;
+    overflow: hidden;
   }
   @media (min-width: 1025px) {
     .desktop-split-layout { display: flex; }
@@ -772,12 +795,10 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    position: sticky;
-    top: 0;
-    z-index: 1000;
-    background: rgba(0,0,0,0.4);
-    backdrop-filter: blur(20px);
+    background: rgba(0,0,0,0.25);
+    backdrop-filter: blur(15px);
     flex-shrink: 0;
+    z-index: 1000;
   }
 
   .player-header.compact-mode {
@@ -788,6 +809,12 @@
     justify-content: flex-start;
     max-width: none;
     border-bottom: 1px solid rgba(255,255,255,0.1);
+    position: absolute;
+    top: 0;
+    left: 0;
+    margin-top: 0;
+    background: rgba(0,0,0,0.3);
+    backdrop-filter: blur(10px);
   }
 
   .player-header.compact-mode .cover-wrapper {
@@ -856,7 +883,23 @@
     transition: all 0.2s;
   }
   .mini-btn:hover { opacity: 1; transform: scale(1.1); }
-  .mini-btn.play { opacity: 1; background: white; color: black; border-radius: 50%; padding: 0.6rem; }
+  .play-btn-prominent, .mini-btn.play, .play-c, .main-btn, .sub-btn, .c-btn {
+    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+
+  .play-btn-prominent:active, .mini-btn.play:active, .play-c:active, .main-btn:active, .sub-btn:active, .c-btn:active {
+    transform: scale(0.85);
+    filter: brightness(1.2);
+  }
+
+  .mini-btn.play { 
+    opacity: 1; 
+    background: white; 
+    color: black; 
+    border-radius: 50%; 
+    padding: 0.6rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
 
   .player-header .cover-wrapper {
     width: 70vw;
@@ -867,7 +910,7 @@
   @media (min-width: 1025px) {
     .desktop-split-layout { display: flex; }
     .mobile-stack-layout { display: none; }
-    .player-header { display: none !important; }
+    /* .player-header is now used as a unified sticky bar, don't hide it */
   }
 
   .artwork-column {
@@ -1017,6 +1060,8 @@
     backdrop-filter: none;
     display: flex;
     padding: 0;
+    min-height: 0;
+    overflow: hidden;
   }
   .desktop-split-layout.is-centered .content-column {
     display: none;
@@ -1317,21 +1362,20 @@
     flex-direction: column; 
     gap: 1.5rem; 
     animation: fadeInQuick 0.2s cubic-bezier(0,0,0.2,1); 
-    height: 100%;
-    min-height: 0;
     flex: 1;
+    min-height: 0;
   }
 
   .lyrics-panel {
     flex: 1;
     min-height: 0;
+    overflow: hidden;
   }
 
   .panel-content {
     flex: 1;
     display: flex;
     flex-direction: column;
-    height: 100%;
     min-height: 0;
     overflow: hidden;
   }
@@ -1406,20 +1450,20 @@
   }
 
   .lyrics-list {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    height: 100%;
+    display: block;
+    flex: 1;
     width: 100%;
     overflow-y: auto;
     scrollbar-width: none;
     position: relative;
     padding: 50vh 2rem;
+    padding-top: 100px; /* Extra padding for the absolute header */
     pointer-events: auto !important;
     user-select: none;
     touch-action: pan-y;
     -webkit-overflow-scrolling: touch;
     z-index: 10;
+    min-height: 0;
   }
   .lyrics-list::-webkit-scrollbar { display: none; }
 
@@ -1436,6 +1480,8 @@
     letter-spacing: -1px;
     padding: 1rem 0;
     width: 100%;
+    margin-bottom: 1.5rem;
+    display: block;
   }
   .lyric-line.active {
     color: white;
@@ -1506,7 +1552,7 @@
     .cinema-title { font-size: 2.5rem; }
     .cinema-artwork-box { width: 35vh; height: 35vh; }
     .lyric-line { font-size: 1.4rem; text-align: center; }
-    .main-content-flow { padding-top: 5rem; }
+    .main-content-flow { padding-top: 0; }
   }
 
   @media (max-width: 400px) {
@@ -1530,7 +1576,7 @@
       padding: 0 0.5rem;
     }
     .player-header {
-      padding: 1rem 1rem 0 1rem;
+      padding: 0 1rem;
     }
     .player-header .cover-wrapper {
       max-width: 240px;
