@@ -36,13 +36,23 @@ func (e *ExternalMetadata) GetArtistInfo(artistName string) (*ArtistInfo, error)
 	slog.Info("🌐 Fetching external metadata for artist", "artist", artistName)
 	info := &ArtistInfo{}
 
-	// 1. Deezer como fuente prioritaria y de alta calidad para imágenes
+	// Intentamos con el nombre completo
 	e.enrichWithDeezer(artistName, info)
+	
+	// Si falla Deezer y es un nombre combinado (A & B), probamos con el primer artista
+	if info.Image == "" && (strings.Contains(artistName, " & ") || strings.Contains(artistName, " and ")) {
+		primary := artistName
+		if idx := strings.Index(artistName, " & "); idx != -1 {
+			primary = artistName[:idx]
+		} else if idx := strings.Index(artistName, " and "); idx != -1 {
+			primary = artistName[:idx]
+		}
+		slog.Info("🔍 Combined name detected, trying primary artist", "primary", primary)
+		e.enrichWithDeezer(primary, info)
+	}
 
 	// 2. Wikipedia para Bio y como respaldo de imagen
 	wikiTitle := strings.ReplaceAll(artistName, " ", "_")
-	
-	// Idioma configurado
 	primaryLang := e.Config.Language
 
 	if info.Image == "" || info.Biography == "" {
@@ -57,13 +67,19 @@ func (e *ExternalMetadata) GetArtistInfo(artistName string) (*ArtistInfo, error)
 		if wInfo != nil {
 			if info.Image == "" { info.Image = wInfo.Image }
 			if info.Biography == "" { info.Biography = wInfo.Biography }
+			if info.Source == "" { info.Source = wInfo.Source }
 		}
 	}
 
 	// 3. Last.fm para Similares, Tags y último recurso de imagen
 	e.enrichWithLastFM(artistName, info)
 
-	if info.Biography == "" { info.Biography = "No details found." }
+	if info.Biography == "" { 
+		info.Biography = "No details found." 
+		slog.Warn("⚠️ No biography found for artist", "artist", artistName)
+	} else {
+		slog.Info("✅ Successfully enriched metadata", "artist", artistName, "hasImage", info.Image != "", "bioLen", len(info.Biography))
+	}
 
 	return info, nil
 }

@@ -256,4 +256,35 @@
     background: var(--surface-container-highest-hover);
     transform: scale(1.05);
   }
+  @media (max-width: 768px) {
+    .album-header {
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 2rem;
+      margin-bottom: 2rem;
+    }
+    .cover-art {
+      width: 220px;
+      height: 220px;
+    }
+    h1 {
+      font-size: 2rem;
+    }
+    .title-row {
+      justify-content: center;
+    }
+    .artist-row {
+      justify-content: center;
+      font-size: 1rem;
+      flex-wrap: wrap;
+    }
+    .actions {
+      justify-content: center;
+    }
+    .play-btn {
+      padding: 0.8rem 1.8rem;
+      font-size: 1rem;
+    }
+  }
 </style>

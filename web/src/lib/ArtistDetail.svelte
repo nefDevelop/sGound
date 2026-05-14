@@ -24,16 +24,36 @@
   }
 
   onMount(async () => {
+    await fetchArtist();
+  });
+
+  async function fetchArtist() {
     loading = true;
     try {
       const res = await fetch(`/api/artists/${artistId}`);
-      if (res.ok) artist = await res.json();
+      if (res.ok) {
+        artist = await res.json();
+        
+        // Si la bio está vacía, es probable que se esté enriqueciendo en background.
+        // Reintentamos una vez tras 3 segundos.
+        if (!artist.biography || artist.biography === "No details found.") {
+          setTimeout(async () => {
+            const retryRes = await fetch(`/api/artists/${artistId}`);
+            if (retryRes.ok) {
+              const newArtist = await retryRes.json();
+              if (newArtist.biography && newArtist.biography !== "No details found.") {
+                artist = newArtist;
+              }
+            }
+          }, 3000);
+        }
+      }
     } catch (e) {
       console.error(e);
     } finally {
       loading = false;
     }
-  });
+  }
 
   function getAvatarUrl(id) {
     return `/api/artists/${encodeURIComponent(id)}/image?v=${$coverRefreshTrigger}`;
@@ -141,10 +161,6 @@
 
         <div class="info-card">
           <h3>Detalles de la biblioteca</h3>
-          <div class="info-item">
-            <span class="label">ID de Artista</span>
-            <span class="value">{artist.id}</span>
-          </div>
           <div class="info-item">
             <span class="label">Tracks totales</span>
             <span class="value">{artist.trackCount}</span>
@@ -345,5 +361,15 @@
     .hero { flex-direction: column; gap: 2rem; }
     h1 { font-size: 3.5rem; }
     .avatar { width: 180px; height: 180px; }
+  }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 2.2rem; letter-spacing: -1px; }
+    .artist-header { padding: 2rem 1rem; border-radius: 24px; }
+    .avatar { width: 140px; height: 140px; }
+    .stats { font-size: 1rem; flex-wrap: wrap; justify-content: center; }
+    .title-row { flex-direction: column; gap: 1rem; }
+    .artist-tags { justify-content: center; flex-wrap: wrap; }
+    .attribution { right: 50%; transform: translateX(50%); bottom: 1rem; white-space: nowrap; }
   }
 </style>

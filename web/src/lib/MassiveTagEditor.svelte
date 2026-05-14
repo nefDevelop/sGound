@@ -46,7 +46,11 @@
     genre: '',
     year: '',
     composer: '',
-    trackTotal: ''
+    trackTotal: '',
+    discTotal: '',
+    comment: '',
+    instrumental: false,
+    useInstrumental: false // Flag para saber si aplicar el checkbox
   });
 
   let dragOverIdx = $state(-1);
@@ -159,7 +163,7 @@
             winner = val;
           }
         });
-        return winner || selectedTracks[0][field] || '';
+        return winner || (selectedTracks[0][field] || '').toString();
       };
       
       bulkData = {
@@ -169,7 +173,11 @@
         genre: getMostFrequent('genre'),
         year: getMostFrequent('year') || '',
         composer: getMostFrequent('composer'),
-        trackTotal: getMostFrequent('trackTotal') || ''
+        trackTotal: getMostFrequent('trackTotal') || '',
+        discTotal: getMostFrequent('discTotal') || '',
+        comment: getMostFrequent('comment'),
+        instrumental: selectedTracks.every(t => t.instrumental),
+        useInstrumental: false
       };
 
       // Normalizar trackNums si faltan (sin disparar el effect infinitamente)
@@ -235,6 +243,9 @@
         if (bulkData.year) payload.year = parseInt(bulkData.year);
         if (bulkData.composer) payload.composer = bulkData.composer;
         if (bulkData.trackTotal) payload.trackTotal = parseInt(bulkData.trackTotal);
+        if (bulkData.discTotal) payload.discTotal = parseInt(bulkData.discTotal);
+        if (bulkData.comment) payload.comment = bulkData.comment;
+        if (bulkData.useInstrumental) payload.instrumental = bulkData.instrumental;
         
         // El trackNum ya viene establecido por la posición en el grid/slots
         // payload.trackNum = track.trackNum; // No hace falta cambiarlo, ya viene en track
@@ -564,6 +575,25 @@
 
           <label><span>Year</span><input type="number" bind:value={bulkData.year} /></label>
           <label><span>Tracks (Total)</span><input type="number" bind:value={bulkData.trackTotal} placeholder="e.g. 12" /></label>
+          <label><span>Discs (Total)</span><input type="number" bind:value={bulkData.discTotal} placeholder="e.g. 1" /></label>
+          
+          <label class="col-span-2">
+            <span>Comment</span>
+            <input type="text" bind:value={bulkData.comment} placeholder="Bulk comment..." />
+          </label>
+
+          <div class="toggle-group">
+            <label class="checkbox-label">
+              <input type="checkbox" bind:checked={bulkData.useInstrumental} />
+              <span>Override Instrumental status</span>
+            </label>
+            {#if bulkData.useInstrumental}
+              <label class="checkbox-label sub-check">
+                <input type="checkbox" bind:checked={bulkData.instrumental} />
+                <span>Is Instrumental</span>
+              </label>
+            {/if}
+          </div>
           
           <div class="bulk-actions">
             <button class="tool-btn highlight" onclick={() => searchAlbumMetadata(false)} title="Search full album metadata">
@@ -815,7 +845,15 @@
     }
   }
 
-  .bulk-layout { display: grid; grid-template-columns: 340px 1fr; gap: 0; flex: 1; overflow: hidden; position: relative; }
+  .bulk-layout { 
+    display: grid; 
+    grid-template-columns: 340px 1fr; 
+    gap: 0; 
+    flex: 1; 
+    min-height: 0; 
+    overflow: hidden; 
+    position: relative; 
+  }
 
   .bulk-sidebar { 
     display: flex; 
@@ -1029,5 +1067,20 @@
   input[type=number] {
     -moz-appearance: textfield;
     appearance: textfield;
+  }
+
+  .toggle-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    background: rgba(0,0,0,0.1);
+    padding: 1rem;
+    border-radius: 14px;
+    border: 1px solid var(--border-color);
+  }
+  .sub-check {
+    margin-left: 1.5rem;
+    padding-left: 1rem;
+    border-left: 2px solid var(--primary);
   }
 </style>

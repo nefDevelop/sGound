@@ -1,5 +1,5 @@
 <script>
-  import { onMount, setContext } from "svelte";
+  import { onMount, setContext, tick } from "svelte";
   import { fade } from "svelte/transition";
   import { page } from "$app/stores";
   import { onNavigate, goto } from "$app/navigation";
@@ -320,30 +320,55 @@
   });
 
   // Route mapping for SvelteKit compatibility
-  const viewMap = {
-    '/': 'dashboard',
-    '/library': 'library',
-    '/inbox': 'inbox',
-    '/albums': 'albums',
-    '/artists': 'artists',
-    '/settings': 'settings',
-    '/maintenance': 'maintenance'
-  };
-
   function syncViewWithRoute() {
     const path = $page.url.pathname;
+    const viewMap = {
+      '/': 'dashboard',
+      '/library': 'library',
+      '/inbox': 'inbox',
+      '/albums': 'albums',
+      '/artists': 'artists',
+      '/playlists': 'playlists',
+      '/settings': 'settings',
+      '/maintenance': 'maintenance'
+    };
+
     if (viewMap[path]) {
       currentView.set(viewMap[path]);
     } else if (path.startsWith('/album/')) {
       currentView.set('album');
     } else if (path.startsWith('/artist/')) {
       currentView.set('artist-detail');
+    } else if (path.startsWith('/playlist/')) {
+      currentView.set('playlist');
+    } else {
+      currentView.set('dashboard');
     }
   }
 
   $effect(() => {
     syncViewWithRoute();
   });
+
+  import { afterNavigate } from '$app/navigation';
+  afterNavigate(() => {
+    if (get(currentView) === 'fullplayer') {
+      syncViewWithRoute();
+    }
+  });
+
+  async function handleSidebarNavigation() {
+    await tick();
+    if (get(currentView) === "fullplayer") {
+      syncViewWithRoute();
+    }
+  }
+
+  function handleGlobalClick(e) {
+    if (e.target.closest(".sidebar-container") || e.target.closest("a")) {
+      handleSidebarNavigation();
+    }
+  }
 
   let isFullPlayerActive = $derived($currentView === 'fullplayer');
 </script>
@@ -371,7 +396,11 @@
     bind:onSkipNext={skipNext}
     bind:onSkipBack={skipBack}
   />
-  <main class="app-layout" class:is-cinema={isFullPlayerActive && playerSubView === 'cinema'}>
+  <main
+    class="app-layout"
+    class:is-cinema={isFullPlayerActive && playerSubView === "cinema"}
+    onclick={handleGlobalClick}
+  >
     <Sidebar {playlists} onLogout={handlers.handleLogout} />
 
     <section class="content" class:full-player-view={isFullPlayerActive}>
@@ -509,7 +538,7 @@
 
   .app-layout {
     display: grid;
-    grid-template-areas: 
+    grid-template-areas:
       "sidebar content"
       "sidebar player";
     grid-template-columns: 280px minmax(0, 1fr);
@@ -519,7 +548,6 @@
     color: var(--text-main);
     overflow: hidden;
     width: 100%;
-    isolation: isolate;
   }
 
   .content {
@@ -564,7 +592,8 @@
     flex-direction: column;
     background: var(--surface-container-highest);
     border: 1px solid var(--border-color);
-    z-index: 1; /* Explicitly low z-index */
+    z-index: 1000;
+    overflow: visible;
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
@@ -593,7 +622,7 @@
     height: 70px;
     display: flex;
     align-items: center;
-    padding: 0 2rem;
+    padding: 0 1.5rem;
     gap: 2rem;
     background: var(--surface-05);
     backdrop-filter: blur(20px);
@@ -696,13 +725,40 @@
       grid-template-areas: "content" "player" "sidebar";
       grid-template-columns: minmax(0, 1fr);
       grid-template-rows: 1fr auto auto;
+      gap: 0;
+      padding: 0.5rem;
+      background: var(--surface);
+      height: 100dvh;
+      overflow: hidden !important;
     }
     .content {
-      margin: 0.5rem 0.5rem 0 0.5rem;
+      margin: 0;
+      border-radius: 28px 28px 0 0;
+      border: none;
+      background: var(--surface-container);
+      box-shadow: none;
     }
     .player-area {
-      margin: 0.5rem;
-      border-radius: 20px;
+      margin: 0;
+      border-radius: 0;
+      border: none;
+      background: var(--surface-container-highest);
+      box-shadow: none;
+      overflow: visible !important;
+      z-index: 2000 !important;
+    }
+    :global(.sidebar) {
+      margin: 0;
+      border-radius: 0 0 28px 28px !important;
+      border: none !important;
+      background: var(--surface-container-highest) !important;
+      box-shadow: none !important;
+    }
+    .scroll-view {
+      padding: 1rem;
+      padding-bottom: 4rem;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch;
     }
     .player-stack {
       height: 72px;
@@ -711,6 +767,11 @@
       padding: 0 1rem;
       gap: 1rem;
     }
+  }
+
+  @media (max-width: 400px) {
+    .top-bar { padding: 0 0.75rem; gap: 0.5rem; height: 60px; }
+    .scroll-view { padding: 0.75rem; }
   }
 
   .hidden {

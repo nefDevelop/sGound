@@ -793,11 +793,49 @@ func (e *Editor) UpdateLyrics(trackID string, lyrics string) error {
 	err := e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
 	if err != nil || path == "" { return fmt.Errorf("track not found") }
 
+	ext := strings.ToLower(filepath.Ext(path))
+	
 	return SafeSave(path, func(tempPath string) error {
-		// FFmpeg puede insertar letras en el campo LYRICS (Vorbis) o USLT (ID3v2)
-		// Detectar formato
-		format := "mp3"
-		if strings.ToLower(filepath.Ext(path)) == ".flac" { format = "flac" }
+		if ext == ".mp3" {
+			// Para MP3 usamos id3v2 directamente sobre el temporal
+			// 1. Copiar original al temporal (ya lo hace SafeSave indirectamente si lo hacemos nosotros)
+			// Pero SafeSave espera que escribamos el temporal desde cero o lo manipulemos.
+			
+			// Primero copiamos el original al temporal para no perder el audio
+			src, err := os.Open(path)
+			if err != nil { return err }
+			defer src.Close()
+			dst, err := os.Create(tempPath)
+			if err != nil { return err }
+			defer dst.Close()
+			if _, err := io.Copy(dst, src); err != nil { return err }
+			dst.Close() // Cerrar antes de reabrir con id3v2
+
+			tag, err := id3v2.Open(tempPath, id3v2.Options{Parse: true})
+			if err != nil { return err }
+			defer tag.Close()
+
+			// IMPORTANTE: Borrar frames USLT existentes para no duplicar
+			tag.DeleteFrames(tag.CommonID("Unsynchronised lyrics/text transcription"))
+			
+			if lyrics != "" {
+				tag.AddUnsynchronisedLyricsFrame(id3v2.UnsynchronisedLyricsFrame{
+					Encoding:          id3v2.EncodingUTF8,
+					Language:          "eng",
+					ContentDescriptor: "",
+					Lyrics:            lyrics,
+				})
+			}
+			
+			if err := tag.Save(); err != nil { return err }
+			slog.Info("✍️ Lyrics written physically to MP3 (USLT)", "path", path)
+			return nil
+		}
+
+		// Otros formatos (FLAC, M4A, etc) vía FFmpeg
+		format := strings.TrimPrefix(ext, ".")
+		if format == "m4a" { format = "ipod" } // FFmpeg usa 'ipod' para m4a/aac
+		if format == "ogg" || format == "opus" { format = "ogg" }
 
 		args := []string{
 			"-i", path,
@@ -808,10 +846,13 @@ func (e *Editor) UpdateLyrics(trackID string, lyrics string) error {
 			"-f", format,
 			"-y", tempPath,
 		}
+		
 		cmd := exec.Command("ffmpeg", args...)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("ffmpeg lyrics update failed: %v, output: %s", err, string(out))
+			slog.Error("FFmpeg lyrics update failed", "error", err, "output", string(out))
+			return fmt.Errorf("ffmpeg lyrics update failed: %v", err)
 		}
+		slog.Info("✍️ Lyrics written physically to file via FFmpeg", "path", path, "format", format)
 		return nil
 	})
 }
@@ -819,17 +860,52 @@ func (e *Editor) UpdateLyrics(trackID string, lyrics string) error {
 func (e *Editor) ReadLyrics(trackID string) (string, error) {
 	var path string
 	e.DB.Conn.QueryRow("SELECT path FROM tracks WHERE id = ?", trackID).Scan(&path)
+	if path == "" { return "", nil }
+
+	slog.Debug("📂 Reading lyrics from file", "path", path)
+
+	// 0. Prioridad absoluta: Archivo .lrc lateral (sidecar)
+	lrcPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".lrc"
+	if _, err := os.Stat(lrcPath); err == nil {
+		data, err := os.ReadFile(lrcPath)
+		if err == nil && len(data) > 0 {
+			slog.Debug("✅ Found lyrics in sidecar .lrc file", "path", lrcPath)
+			return string(data), nil
+		}
+	}
+
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".mp3":
 		tag, _ := id3v2.Open(path, id3v2.Options{Parse: true})
-		if tag == nil { return "", nil }
+		if tag == nil { break }
 		defer tag.Close()
+
+		// 1. USLT (Unsynchronised lyrics/text transcription)
 		frames := tag.GetFrames(tag.CommonID("Unsynchronised lyrics/text transcription"))
-		for _, f := range frames { if lf, ok := f.(id3v2.UnsynchronisedLyricsFrame); ok { return lf.Lyrics, nil } }
+		for _, f := range frames {
+			if lf, ok := f.(id3v2.UnsynchronisedLyricsFrame); ok && lf.Lyrics != "" {
+				slog.Debug("✅ Found lyrics in USLT frame", "path", path)
+				return lf.Lyrics, nil
+			}
+		}
+
+		// 2. Fallback: TXXX
+		txxxFrames := tag.GetFrames(tag.CommonID("User defined text information"))
+		for _, f := range txxxFrames {
+			if tf, ok := f.(id3v2.UserDefinedTextFrame); ok {
+				desc := strings.ToUpper(tf.Description)
+				if desc == "LYRICS" || desc == "UNSYNCEDLYRICS" {
+					if tf.Value != "" {
+						return tf.Value, nil
+					}
+				}
+			}
+		}
+
 	case ".flac":
 		f, _ := ParseFLAC(path)
-		if f == nil { return "", nil }
+		if f == nil { break }
 		for _, block := range f.Meta {
 			if block.Type == flac.VorbisComment {
 				cm, _ := flacvorbis.ParseFromMetaDataBlock(*block)
@@ -841,5 +917,23 @@ func (e *Editor) ReadLyrics(trackID string) (string, error) {
 		}
 	}
 
+	// 3. Fallback universal: FFmpeg/ffprobe para cualquier formato (m4a, ogg, etc)
+	args := []string{
+		"-v", "error",
+		"-show_entries", "format_tags=lyrics,unsyncedlyrics,LYRICS,UNSYNCEDLYRICS",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		path,
+	}
+	cmd := exec.Command("ffprobe", args...)
+	out, err := cmd.Output()
+	if err == nil && len(out) > 0 {
+		lyrics := strings.TrimSpace(string(out))
+		if lyrics != "" {
+			slog.Debug("✅ Found lyrics via ffprobe", "path", path)
+			return lyrics, nil
+		}
+	}
+
+	slog.Debug("🔍 No lyrics found in file tags", "path", path)
 	return "", nil
 }

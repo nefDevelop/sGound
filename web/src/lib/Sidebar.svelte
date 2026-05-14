@@ -314,4 +314,9 @@
     .brand, .nav-label, .nav-divider, .playlists-scroll, .logout-btn { display: none !important; }
     .nav-item { margin: 0; width: 50px; height: 50px; }
   }
+
+  @media (max-width: 400px) {
+    .sidebar { height: 55px !important; }
+    .nav-item { width: 42px; height: 42px; border-radius: 12px; }
+  }
 </style>

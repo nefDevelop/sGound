@@ -31,26 +31,27 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 		args = append(args, pathArgs...)
 	}
 
-	// AUTO-SYNC (Síncrono para evitar errores de carga de imagen inmediata)
+	// AUTO-SYNC (Moved to background to avoid blocking initial list load)
 	dbase := s.getDB(r)
-	// Buscamos nombres de artistas en tracks que no estén en la tabla artists
-	repairQuery := `
-		SELECT DISTINCT artist 
-		FROM tracks 
-		WHERE artist IS NOT NULL AND artist != '' AND artist != 'Unknown'
-		  AND artist NOT IN (SELECT name FROM artists)`
-	rows, err := dbase.Conn.Query(repairQuery)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var name string
-			if err := rows.Scan(&name); err == nil {
-				artistID := utils.GenerateID(utils.NormalizeArtist(name))
-				_, _ = dbase.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, name)
-				slog.Info("🔧 Synchronously repaired missing artist entry", "name", name)
+	go func(db *db.MasterDatabase) {
+		repairQuery := `
+			SELECT DISTINCT artist 
+			FROM tracks 
+			WHERE artist IS NOT NULL AND artist != '' AND artist != 'Unknown'
+			  AND artist NOT IN (SELECT name FROM artists)`
+		rows, err := db.Conn.Query(repairQuery)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var name string
+				if err := rows.Scan(&name); err == nil {
+					artistID := utils.GenerateID(utils.NormalizeArtist(name))
+					_, _ = db.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, name)
+					slog.Info("🔧 Background repaired missing artist entry", "name", name)
+				}
 			}
 		}
-	}
+	}(dbase)
 
 	// Pagination
 	limitStr := r.URL.Query().Get("limit")
@@ -68,7 +69,6 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Consulta ultra-robusta: lista todos los artistas y cuenta sus álbumes/canciones de forma independiente
 	query := `
 		SELECT 
 			ar.id, 
@@ -90,7 +90,7 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
 	}
 
-	rows, err = s.getDB(r).Conn.Query(query, args...)
+	rows, err := s.getDB(r).Conn.Query(query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -162,24 +162,23 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 
 	isDisambiguation := strings.Contains(biography, "puede referirse a") || strings.Contains(biography, "may refer to")
 	if biography == "" || externalImage == "" || len(tags) == 0 || isDisambiguation || imageSource == "" {
-		ext, _ := s.externalMeta.GetArtistInfo(name)
-		if ext != nil {
-			biography = ext.Biography
-			externalImage = ext.Image
-			imageSource = ext.Source
-			tags = ext.Tags
-			similar = ext.Similar
-			tagsStr := strings.Join(tags, ",")
-			similarStr := strings.Join(similar, ",")
-			_, _ = s.getDB(r).Conn.Exec("UPDATE artists SET bio = ?, image_url = ?, image_source = ?, tags = ?, similar = ? WHERE id = ?",
-				biography, externalImage, imageSource, tagsStr, similarStr, artistID)
-		}
+		// Launch enrichment in background to avoid blocking the UI
+		go func(id, n string, db *db.MasterDatabase) {
+			ext, _ := s.externalMeta.GetArtistInfo(n)
+			if ext != nil {
+				tagsStr := strings.Join(ext.Tags, ",")
+				similarStr := strings.Join(ext.Similar, ",")
+				_, _ = db.Conn.Exec("UPDATE artists SET bio = ?, image_url = ?, image_source = ?, tags = ?, similar = ? WHERE id = ?",
+					ext.Biography, ext.Image, ext.Source, tagsStr, similarStr, id)
+				slog.Info("✨ Artist metadata enriched in background", "name", n)
+			}
+		}(artistID, name, s.getDB(r))
 	}
 
 	var trackCount int
 	_ = s.getDB(r).Conn.QueryRow("SELECT COUNT(DISTINCT t.id) FROM tracks t JOIN albums a ON t.album_id = a.id WHERE a.artist_id = ? AND t.status = 'active'", artistID).Scan(&trackCount)
 
-	// 3. GET ALBUMS (Deduplicated)
+	// 3. GET ALBUM COUNT (Optimized: Count distinct normalized titles)
 	whereClause := "WHERE al.artist_id = ? AND t.status = 'active'"
 	args := []interface{}{artistID}
 	pathFilter, pathArgs := s.getPathFilter(user)
@@ -188,28 +187,13 @@ func (s *Server) handleGetArtist(artistID string, w http.ResponseWriter, r *http
 		args = append(args, pathArgs...)
 	}
 
-	query := fmt.Sprintf(`
-		SELECT DISTINCT al.title, COALESCE(al.year, 0)
+	var albumCount int
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT LOWER(TRIM(al.title)))
 		FROM albums al
 		JOIN tracks t ON al.id = t.album_id
 		%s`, whereClause)
-
-	rows, err := s.getDB(r).Conn.Query(query, args...)
-	albumCount := 0
-	if err == nil {
-		type albumGroup struct{ exists bool }
-		groups := make(map[string]*albumGroup)
-		for rows.Next() {
-			var title string
-			var year int
-			if err := rows.Scan(&title, &year); err == nil {
-				normTitle := s.normalizeAlbumTitle(title, name)
-				groups[normTitle] = &albumGroup{exists: true}
-			}
-		}
-		albumCount = len(groups)
-		rows.Close()
-	}
+	_ = s.getDB(r).Conn.QueryRow(countQuery, args...).Scan(&albumCount)
 
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{

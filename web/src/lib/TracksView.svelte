@@ -721,6 +721,14 @@
     .tracks-table td { padding: 0.6rem 1rem; }
   }
 
+  @media (max-width: 400px) {
+    .tracks-table td, .tracks-table th { padding: 0.5rem 0.6rem; }
+    .checkbox-cell { width: 44px; }
+    .num-col { width: 30px; }
+    .dur-col { width: 70px; padding-right: 0.8rem !important; }
+    .flex-align { gap: 0.6rem; }
+  }
+
 
 
   .actions-col { width: 50px; text-align: center; }
