@@ -28,6 +28,7 @@
   let currentLyricIndex = $state(-1);
   let lyricContainerDesktop = $state(null);
   let lyricContainerMobile = $state(null);
+  let lyricContainerCinema = $state(null);
   let userScrolling = $state(false);
   let scrollTimeout;
   let isPaused = $state(true);
@@ -103,6 +104,8 @@
 
   let showControls = $state(true);
   let controlsTimeout;
+  let tiltX = $state(0);
+  let tiltY = $state(0);
 
   function resetControlsTimeout() {
     if (subView !== 'cinema') {
@@ -114,6 +117,40 @@
     controlsTimeout = setTimeout(() => {
         if (subView === 'cinema') showControls = false;
     }, 3000);
+  }
+
+  function handleCinemaMouseMove(e) {
+    if (subView === 'cinema') {
+      const { clientX, clientY } = e;
+      const { innerWidth, innerHeight } = window;
+      tiltX = (clientX / innerWidth - 0.5) * 15;
+      tiltY = (clientY / innerHeight - 0.5) * -15;
+    }
+    resetControlsTimeout();
+  }
+
+  let isFullscreen = $state(false);
+  let cinemaContainer = $state();
+
+  $effect(() => {
+    const handler = () => {
+      isFullscreen = !!document.fullscreenElement;
+    };
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  });
+
+  function toggleFullscreen(e) {
+    if (e) e.stopPropagation();
+    if (!document.fullscreenElement) {
+      if (cinemaContainer) {
+        cinemaContainer.requestFullscreen().catch(err => {
+          console.error(`Error: ${err.message}`);
+        });
+      }
+    } else {
+      if (document.exitFullscreen) document.exitFullscreen();
+    }
   }
 
   function togglePlay() {
@@ -237,7 +274,7 @@
 
   function scrollToActive() {
     if (!isOpen || userScrolling) return;
-    [lyricContainerDesktop, lyricContainerMobile].forEach(container => {
+    [lyricContainerDesktop, lyricContainerMobile, lyricContainerCinema].forEach(container => {
       if (!container) return;
       const activeLine = container.querySelector('.active');
       if (activeLine) {
@@ -282,8 +319,8 @@
   <div class="view-content">
     <div class="player-body" class:compact-mode={subView !== 'cover'}>
       <div class="main-content-flow">
-        {#if subView !== 'cover' || !isDesktop}
-          <header class="player-header {subView !== 'cover' ? 'compact-mode' : ''}">
+        {#if (subView !== 'cover' && subView !== 'queue') || !isDesktop}
+          <header class="player-header {(subView !== 'cover') ? 'compact-mode' : ''}">
             <div class="header-inner">
               <div class="cover-wrapper" style="border-radius: {subView === 'cover' ? '24px' : '12px'}">
                  <Artwork 
@@ -400,6 +437,7 @@
                 {#if subView === 'lyrics'}
                   <div class="view-panel lyrics-panel" in:fade>
                     {#if parsedLyrics.length > 0}
+                      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                       <div 
                         class="lyrics-list" 
                         bind:this={lyricContainerDesktop}
@@ -435,6 +473,7 @@
                           class="queue-item" 
                           in:fly={{ y: 20, delay: i * 50, duration: 400 }}
                           onclick={() => currentIndex.set($currentIndex + 1 + i)}
+                          onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); currentIndex.set($currentIndex + 1 + i); }}}
                           role="button"
                           tabindex="0"
                         >
@@ -527,6 +566,7 @@
                       class="queue-item" 
                       in:fly={{ y: 20, delay: i * 40, duration: 400 }}
                       onclick={() => currentIndex.set($currentIndex + 1 + i)}
+                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); currentIndex.set($currentIndex + 1 + i); }}}
                       role="button"
                       tabindex="0"
                     >
@@ -551,6 +591,7 @@
             {:else if subView === 'lyrics'}
               <div class="view-panel lyrics-panel" in:fade>
                 {#if parsedLyrics.length > 0}
+                  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                   <div 
                     class="lyrics-list" 
                     bind:this={lyricContainerMobile}
@@ -588,69 +629,118 @@
           {:else if subView === 'cinema'}
             <div 
                 role="presentation"
-                class="view-panel cinema-panel" 
-                class:hide-cursor={!showControls}
-                in:fade 
-                onmousemove={resetControlsTimeout}
+                class="cinema-view-container" 
+                class:hide-ui={!showControls}
+                bind:this={cinemaContainer}
+                in:fade={{ duration: 800 }}
+                onmousemove={handleCinemaMouseMove}
                 onclick={togglePlay}
             >
-              <!-- Liquid Background -->
-              <div class="cinema-background">
-                <img src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" alt="" class="bg-blur-layer layer-1" />
-                <img src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" alt="" class="bg-blur-layer layer-2" />
-                <img src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" alt="" class="bg-blur-layer layer-3" />
-                <div class="bg-vignette"></div>
+              <!-- Liquid Ambient Background -->
+              <div class="cinema-ambient-scene">
+                <div class="ambient-blob blob-1" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
+                <div class="ambient-blob blob-2" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
+                <div class="ambient-blob blob-3" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
+                <div class="ambient-noise"></div>
+                <div class="ambient-vignette"></div>
               </div>
 
-              <button class="cinema-close-btn" class:visible={showControls} onclick={(e) => { e.stopPropagation(); subView = 'cover'; }}>
-                <Icon name="x" size={32} />
-              </button>
-
-              <div class="cinema-content">
-                <!-- Floating Lyrics -->
-                {#if currentLyricIndex !== -1 && parsedLyrics[currentLyricIndex]}
-                  <div class="cinema-lyrics-floating" in:fade={{duration: 1000}} out:fade>
-                    {parsedLyrics[currentLyricIndex].text}
-                  </div>
-                {/if}
-
-                <div class="cinema-artwork-box">
-                   <div class="artwork-glare"></div>
-                   <div class="artwork-bloom" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
-                   <img src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" alt="" class="cinema-artwork" />
+              <!-- Top UI: Actions -->
+              <div class="cinema-top-ui" class:visible={showControls}>
+                <div class="cinema-top-btns">
+                  <button class="cinema-action-btn" title="Pantalla Completa" onclick={toggleFullscreen}>
+                    <Icon name={isFullscreen ? "minimize" : "maximize"} size={20} />
+                  </button>
+                  <button class="cinema-exit-btn" onclick={(e) => { e.stopPropagation(); subView = 'cover'; }}>
+                    <Icon name="x" size={20} />
+                    <span>Salir</span>
+                  </button>
                 </div>
-                
-                <div class="cinema-meta" class:visible={showControls}>
-                  <h1 class="cinema-title">{currentPlaying.title}</h1>
-                  <p class="cinema-artist">{currentPlaying.artist}</p>
-                </div>
+              </div>
 
-                <div class="cinema-controls" class:visible={showControls}>
-                  <div class="cinema-timeline">
-                    <span class="time-small">{formatTime(currentTime)}</span>
-                    <div class="modern-slider progress-slider-mini">
-                      <input type="range" class="knobless-range" min="0" max="100" value={progress} oninput={handleSeek} />
-                      <div class="slider-fill" style="width: {progress}%"></div>
+              <div class="cinema-main-layout">
+                <!-- Left: 3D Artwork & Dynamic Meta -->
+                <div class="cinema-artwork-pane">
+                  <div class="artwork-3d-container">
+                    <div class="artwork-card-wrapper" style="transform: rotateX({tiltY}deg) rotateY({tiltX}deg)">
+                       <img src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" alt="" class="artwork-main-img" />
+                       <div class="artwork-reflection"></div>
                     </div>
-                    <span class="time-small">{formatTime(duration)}</span>
+                    <div class="artwork-shadow-glow" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
                   </div>
                   
-                  <div class="cinema-btns">
-                    <button class="c-btn" onclick={(e) => { e.stopPropagation(); onskipBack(); }}><Icon name="skipBack" size={28} /></button>
-                    <button class="c-btn play-c" onclick={(e) => { e.stopPropagation(); togglePlay(); }}>
-                      <Icon name={isPaused ? 'play' : 'pause'} size={44} />
-                    </button>
-                    <button class="c-btn" onclick={(e) => { e.stopPropagation(); onskipNext(); }}><Icon name="skipForward" size={28} /></button>
+                  <div class="cinema-track-info" class:visible={showControls}>
+                    <h1 class="cinema-title-text">{currentPlaying.title}</h1>
+                    <div class="cinema-artist-row">
+                       <span class="cinema-artist-text">{currentPlaying.artist}</span>
+                       {#if currentPlaying.album}
+                         <span class="cinema-separator">•</span>
+                         <span class="cinema-album-text">{currentPlaying.album}</span>
+                       {/if}
+                    </div>
                   </div>
                 </div>
 
-                <!-- Next Up Hint -->
-                {#if progress > 90 && $queue[$currentIndex + 1]}
-                  <div class="cinema-next-up" in:fly={{y: 20, duration: 800}}>
-                    <span class="next-label">A CONTINUACIÓN</span>
-                    <span class="next-title">{$queue[$currentIndex + 1].title}</span>
+                <!-- Right: Immersive Lyrics -->
+                <div class="cinema-lyrics-pane">
+                  {#if parsedLyrics.length > 0}
+                    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                    <div class="cinema-lyrics-scroller" 
+                         bind:this={lyricContainerCinema}
+                         onwheel={handleUserInteraction}
+                         onmousedown={handleUserInteraction}
+                         ontouchstart={handleUserInteraction}
+                         role="region"
+                         aria-label="Letras inmersivas"
+                    >
+                      {#each parsedLyrics as line, i}
+                        <button class="cinema-lyric-item" 
+                             class:active={i === currentLyricIndex}
+                             class:nearby={Math.abs(i - currentLyricIndex) <= 2 && i !== currentLyricIndex}
+                             class:distant={Math.abs(i - currentLyricIndex) > 2}
+                             onclick={(e) => { e.stopPropagation(); if(audioRef) audioRef.currentTime = line.time; }}>
+                          {line.text}
+                        </button>
+                      {/each}
+                    </div>
+                  {:else if lyrics === "Loading..."}
+                     <div class="cinema-empty-state">
+                        <div class="loading-pulse"></div>
+                        <p>Sincronizando letras...</p>
+                     </div>
+                  {:else}
+                    <div class="cinema-empty-state">
+                      <div style="opacity: 0.2">
+                        <Icon name="music" size={64} />
+                      </div>
+                      <p>Solo música, sin palabras</p>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- Bottom UI: Glass Capsule Controls -->
+              <div class="cinema-bottom-ui" class:visible={showControls} onclick={(e) => e.stopPropagation()} role="presentation">
+                <div class="glass-capsule">
+                  <div class="capsule-progress-bar">
+                    <input type="range" class="capsule-range" min="0" max="100" value={progress} oninput={handleSeek} />
+                    <div class="capsule-fill" style="width: {progress}%"></div>
                   </div>
-                {/if}
+                  
+                  <div class="capsule-main-row">
+                    <div class="capsule-time">{formatTime(currentTime)}</div>
+                    
+                    <div class="capsule-btns">
+                      <button class="capsule-btn" onclick={(e) => { e.stopPropagation(); onskipBack(); }}><Icon name="skipBack" size={24} /></button>
+                      <button class="capsule-btn-play" onclick={(e) => { e.stopPropagation(); togglePlay(); }}>
+                        <Icon name={isPaused ? 'play' : 'pause'} size={32} />
+                      </button>
+                      <button class="capsule-btn" onclick={(e) => { e.stopPropagation(); onskipNext(); }}><Icon name="skipForward" size={24} /></button>
+                    </div>
+
+                    <div class="capsule-time">{formatTime(duration)}</div>
+                  </div>
+                </div>
               </div>
             </div>
           {/if}
@@ -738,7 +828,6 @@
     display: flex;
     flex-direction: column;
     width: 100%;
-    height: 100%;
   }
 
 
@@ -842,6 +931,9 @@
   .player-header.compact-mode .cover-wrapper {
     width: 48px;
     height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+    max-width: none !important;
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -849,12 +941,7 @@
     margin-bottom: 0 !important;
   }
 
-  .player-header.compact-mode .cover-wrapper-container {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0 !important;
-  }
+  /* Removed unused selector .player-header.compact-mode .cover-wrapper-container */
 
   .compact-meta {
     flex: 1;
@@ -910,16 +997,16 @@
     transition: all 0.2s;
   }
   .mini-btn:hover { opacity: 1; transform: scale(1.1); }
-  .play-btn-prominent, .mini-btn.play, .play-c, .main-btn, .sub-btn, .c-btn {
+  .play-btn-prominent, .mini-btn.play, .main-btn, .sub-btn {
     transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   }
 
-  .play-btn-prominent:hover, .mini-btn.play:hover, .play-c:hover {
+  .play-btn-prominent:hover, .mini-btn.play:hover {
     transform: scale(1.08);
     filter: brightness(1.1);
   }
 
-  .play-btn-prominent:active, .mini-btn.play:active, .play-c:active, .main-btn:active, .sub-btn:active, .c-btn:active {
+  .play-btn-prominent:active, .mini-btn.play:active, .main-btn:active, .sub-btn:active {
     transform: scale(0.92);
     filter: brightness(0.9);
     transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
@@ -956,7 +1043,9 @@
     justify-content: center;
     align-items: center;
     gap: 2rem;
-    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    max-height: 100%;
   }
 
   .content-column {
@@ -1107,12 +1196,13 @@
 
   .artwork-column {
     flex: 1;
-    overflow: hidden;
+    min-width: 0;
   }
 
   .desktop-meta {
     text-align: center;
     width: 100%;
+    min-width: 0;
   }
 
   .desktop-meta h1 {
@@ -1121,6 +1211,11 @@
     letter-spacing: -1.5px;
     margin: 0;
     line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    padding: 0 1rem;
   }
 
   .desktop-meta .artist-name {
@@ -1137,8 +1232,9 @@
   /* Common UI Elements */
   .cover-wrapper.main-artwork {
     width: 40vh;
-    height: 40vh;
-    max-width: 450px;
+    height: auto;
+    aspect-ratio: 1;
+    max-width: min(100%, 450px);
     max-height: 450px;
     box-shadow: 0 50px 100px -20px rgba(0,0,0,0.8);
     transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
@@ -1328,18 +1424,23 @@
   }
 
   .cover-wrapper-container {
-    width: auto;
-    max-width: 100%;
     display: flex;
-    flex-direction: column;
+    justify-content: center;
     align-items: center;
     z-index: 3;
-    margin-top: 2rem;
+    margin: 0;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
   }
 
   .cover-wrapper {
     aspect-ratio: 1;
     width: 100%;
+    max-width: min(100%, 70vh);
+    margin: 0 auto;
+    flex-shrink: 1;
+    min-height: 0;
     /* border-radius set via style binding in template */
     overflow: hidden;
     background: var(--surface-container-high);
@@ -1404,6 +1505,14 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .dynamic-area {
+    position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 
   .panel-content {
@@ -1551,42 +1660,585 @@
     to { transform: rotate(360deg); }
   }
 
-  /* Cinema Mode Polishing */
-  .cinema-panel {
-    position: fixed;
+  /* --- CINEMA MODE REDESIGN (FROM SCRATCH) --- */
+  .cinema-view-container {
+    position: absolute;
     inset: 0;
     z-index: 9999;
-    background: black;
+    background: #000;
+    color: #fff;
+    font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    cursor: default;
+    min-height: 100%;
+  }
+
+  .cinema-view-container:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    position: fixed;
+  }
+
+  .cinema-view-container:-webkit-full-screen {
+    width: 100vw;
+    height: 100vh;
+  }
+
+  .cinema-view-container.hide-ui {
+    cursor: none;
+  }
+
+  /* Liquid Ambient Background */
+  .cinema-ambient-scene {
+    position: absolute;
+    inset: -10%;
+    z-index: 1;
+    pointer-events: none;
+    overflow: hidden;
+    filter: blur(120px) saturate(1.8) brightness(0.4);
+  }
+
+  .ambient-blob {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center;
+    border-radius: 50%;
+    opacity: 0.6;
+  }
+
+  .blob-1 {
+    width: 120%;
+    height: 120%;
+    top: -10%;
+    left: -10%;
+    animation: liquid-move-1 40s infinite alternate ease-in-out;
+  }
+  .blob-2 {
+    width: 100%;
+    height: 100%;
+    bottom: -10%;
+    right: -10%;
+    animation: liquid-move-2 30s infinite alternate-reverse ease-in-out;
+    opacity: 0.4;
+  }
+  .blob-3 {
+    width: 80%;
+    height: 80%;
+    top: 20%;
+    left: 20%;
+    animation: liquid-move-3 25s infinite alternate ease-in-out;
+    opacity: 0.3;
+  }
+
+  @keyframes liquid-move-1 {
+    0% { transform: translate(0, 0) scale(1) rotate(0deg); }
+    100% { transform: translate(10%, 5%) scale(1.1) rotate(10deg); }
+  }
+  @keyframes liquid-move-2 {
+    0% { transform: translate(0, 0) scale(1.1) rotate(0deg); }
+    100% { transform: translate(-8%, -10%) scale(1) rotate(-8deg); }
+  }
+  @keyframes liquid-move-3 {
+    0% { transform: translate(0, 0) scale(0.9); }
+    100% { transform: translate(15%, -15%) scale(1.2); }
+  }
+
+  .ambient-noise {
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    opacity: 0.05;
+    mix-blend-mode: overlay;
+    z-index: 4;
+  }
+
+  .ambient-vignette {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at center, transparent 0%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0.8) 100%);
+    z-index: 5;
+  }
+
+  /* Top UI */
+  .cinema-top-ui {
+    position: absolute;
+    top: 3rem;
+    left: 4rem;
+    right: 4rem;
+    display: flex;
+    justify-content: flex-end;
+    z-index: 100;
+    opacity: 0;
+    transform: translateY(-20px);
+    transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+  }
+
+  .cinema-top-ui.visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .cinema-top-btns {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 0.5rem;
+    border-radius: 100px;
+  }
+
+  .cinema-action-btn, .cinema-exit-btn {
+    background: transparent;
+    border: none;
+    color: #fff;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .cinema-action-btn {
+    width: 42px;
+    border-radius: 50%;
+  }
+
+  .cinema-exit-btn {
+    padding: 0 1.2rem;
+    border-radius: 100px;
+    gap: 0.5rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .cinema-action-btn:hover, .cinema-exit-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+  }
+
+  .cinema-exit-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    transform: scale(1.05);
+  }
+
+  /* Main Layout */
+  .cinema-main-layout {
+    flex: 1;
+    display: flex;
+    width: 100%;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: clamp(2rem, 5vh, 6rem) 4rem;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(2rem, 5vw, 6rem);
+    z-index: 10;
+    position: relative;
+    box-sizing: border-box;
+  }
+
+  /* Left Pane: Artwork */
+  .cinema-artwork-pane {
+    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    max-width: 600px;
+  }
+
+  .artwork-3d-container {
+    position: relative;
+    width: 100%;
+    max-width: clamp(180px, 35vh, 450px);
+    aspect-ratio: 1;
+    perspective: 1200px;
+    margin-bottom: 1.5rem;
+  }
+
+  .artwork-card-wrapper {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    z-index: 2;
+    border-radius: 24px;
+    overflow: hidden;
+    box-shadow: 0 30px 60px rgba(0,0,0,0.8);
+    transform: rotateX(2deg) rotateY(-5deg);
+    transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: artwork-float 12s infinite alternate ease-in-out;
+  }
+
+  @keyframes artwork-float {
+    0% { transform: rotateX(2deg) rotateY(-5deg) translateY(0); }
+    100% { transform: rotateX(4deg) rotateY(3deg) translateY(-20px); }
+  }
+
+  .artwork-main-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .artwork-reflection {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 40%, rgba(255,255,255,0.05) 100%);
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .artwork-shadow-glow {
+    position: absolute;
+    inset: -5%;
+    background-size: cover;
+    background-position: center;
+    filter: blur(50px) saturate(2);
+    opacity: 0.5;
+    z-index: 1;
+    border-radius: 40px;
+    transform: translateY(20px) scale(0.95);
+  }
+
+  .cinema-track-info {
+    text-align: center;
+    width: 100%;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s;
+  }
+
+  .cinema-track-info.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .cinema-title-text {
+    font-size: clamp(2rem, 5vh, 3.5rem);
+    font-weight: 900;
+    letter-spacing: -2px;
+    margin: 0 0 0.5rem 0;
+    line-height: 1.1;
+    text-shadow: 0 10px 30px rgba(0,0,0,0.6);
+  }
+
+  .cinema-artist-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.8rem;
+    font-size: clamp(1rem, 2.5vh, 1.6rem);
+    font-weight: 600;
+    opacity: 0.7;
+  }
+
+  .cinema-separator {
+    opacity: 0.3;
+  }
+
+  /* Right Pane: Lyrics */
+  .cinema-lyrics-pane {
+    flex: 1.2;
+    height: 100%;
+    max-height: 60vh;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .cinema-lyrics-scroller {
+    height: 100%;
+    overflow-y: auto;
+    scrollbar-width: none;
+    padding: 30vh 0;
+    scroll-behavior: smooth;
+    mask-image: linear-gradient(to bottom, transparent, black 25%, black 75%, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 25%, black 75%, transparent);
+  }
+
+  .cinema-lyrics-scroller::-webkit-scrollbar { display: none; }
+
+  .cinema-lyric-item {
+    font-size: 3.2rem;
+    font-weight: 800;
+    line-height: 1.25;
+    padding: 1.2rem 0;
+    margin: 0;
+    color: rgba(255,255,255,0.25);
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    width: 100%;
+    transition: all 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    transform-origin: left center;
+    letter-spacing: -1.5px;
+    display: block;
+    filter: blur(2px);
+    transform: scale(0.95);
+  }
+
+  .cinema-lyric-item:hover {
+    color: rgba(255,255,255,0.6);
+    filter: blur(0);
+  }
+
+  .cinema-lyric-item.active {
+    color: #fff;
+    transform: scale(1.05) translateX(20px);
+    filter: blur(0);
+    text-shadow: 0 0 40px rgba(255,255,255,0.4), 0 10px 20px rgba(0,0,0,0.5);
+    padding: 2.5rem 0;
+  }
+
+  .cinema-lyric-item.nearby {
+    color: rgba(255,255,255,0.5);
+    filter: blur(0.5px);
+    transform: scale(0.98);
+  }
+
+  .cinema-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 2rem;
+    color: rgba(255,255,255,0.4);
+  }
+
+  .cinema-empty-state p {
+    font-size: 1.8rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .loading-pulse {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: #fff;
+    opacity: 0.1;
+    animation: pulse 2s infinite ease-in-out;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.8); opacity: 0.1; }
+    50% { transform: scale(1.2); opacity: 0.3; }
+    100% { transform: scale(0.8); opacity: 0.1; }
+  }
+
+  /* Bottom UI: Capsule */
+  .cinema-bottom-ui {
+    position: absolute;
+    bottom: 3rem;
+    left: 0;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    z-index: 200;
+    opacity: 0;
+    transform: translateY(30px);
+    transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+  }
+
+  .cinema-bottom-ui.visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .glass-capsule {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(30px) saturate(2);
+    -webkit-backdrop-filter: blur(30px) saturate(2);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 1.2rem 2rem;
+    border-radius: 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+    width: auto;
+    min-width: 500px;
+    box-shadow: 0 25px 60px rgba(0,0,0,0.6);
+  }
+
+  .capsule-progress-bar {
+    position: relative;
+    width: calc(100% - 1rem);
+    margin: 0 auto;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
     overflow: hidden;
   }
 
-  .cinema-title {
-    font-size: 5rem;
-    font-weight: 1000;
-    letter-spacing: -3px;
-    margin: 0;
-    line-height: 0.9;
-    background: linear-gradient(to bottom, #fff, #aaa);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    text-shadow: 0 30px 60px rgba(0,0,0,0.8);
+  .capsule-fill {
+    position: absolute;
+    height: 100%;
+    background: #fff;
+    box-shadow: 0 0 15px rgba(255,255,255,0.8);
+    transition: width 0.1s linear;
   }
 
+  .capsule-range {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    z-index: 10;
+  }
+
+  .capsule-main-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+  }
+
+  .capsule-time {
+    font-size: 0.85rem;
+    font-weight: 700;
+    opacity: 0.5;
+    font-variant-numeric: tabular-nums;
+    min-width: 60px;
+    text-align: center;
+  }
+
+  .capsule-btns {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .capsule-btn {
+    background: none;
+    border: none;
+    color: #fff;
+    opacity: 0.6;
+    cursor: pointer;
+    transition: all 0.3s;
+    padding: 0.5rem;
+    display: flex;
+    align-items: center;
+  }
+
+  .capsule-btn:hover {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+
+  .capsule-btn-play {
+    background: #fff;
+    color: #000;
+    border: none;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+  }
+
+  .capsule-btn-play:hover {
+    transform: scale(1.1);
+    box-shadow: 0 15px 30px rgba(255,255,255,0.2);
+  }
+
+  /* Responsive Adjustments */
   @media (max-width: 1400px) {
-    .cinema-title { font-size: 4rem; }
+    .cinema-title-text { font-size: 2.8rem; }
+    .cinema-lyric-item { font-size: 2.6rem; }
+    .cinema-main-layout { gap: 4rem; }
   }
 
   @media (max-width: 1024px) {
-    .desktop-split-layout { display: none; }
-    .mobile-stack-layout { display: flex; }
-    .cinema-title { font-size: 2.5rem; }
-    .cinema-artwork-box { width: 35vh; height: 35vh; }
-    .lyric-line { font-size: 1.4rem; text-align: center; }
-    .main-content-flow { padding-top: 0; }
+    .cinema-main-layout {
+      flex-direction: column;
+      padding: 5rem 2rem 10rem 2rem;
+      gap: 2rem;
+      justify-content: flex-start;
+      overflow-y: auto;
+    }
+
+    .cinema-artwork-pane {
+      max-width: none;
+      flex: none;
+    }
+
+    .artwork-3d-container {
+      max-width: 300px;
+      margin-bottom: 2rem;
+    }
+
+    .cinema-title-text { font-size: 2.2rem; }
+    .cinema-artist-row { font-size: 1.2rem; }
+
+    .cinema-lyrics-pane {
+      width: 100%;
+      height: auto;
+      flex: none;
+    }
+
+    .cinema-lyrics-scroller {
+      padding: 0;
+      mask-image: none;
+      -webkit-mask-image: none;
+      height: auto;
+    }
+
+    .cinema-lyric-item {
+      font-size: 1.8rem;
+      text-align: center;
+      padding: 1rem 0;
+    }
+    
+    .cinema-lyric-item.active {
+      transform: scale(1.05) translateX(0);
+      padding: 1.5rem 0;
+    }
+
+    .glass-capsule {
+      min-width: 0;
+      width: 92vw;
+      padding: 0.8rem 1.2rem;
+    }
+    .capsule-main-row {
+      gap: 0.5rem;
+    }
+
+    .cinema-top-ui {
+      top: 2rem;
+      left: 1rem;
+      right: 1rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .cinema-title-text { font-size: 1.8rem; }
+    .cinema-lyric-item { font-size: 1.5rem; }
+    .capsule-time { display: none; }
+    .glass-capsule { padding: 1rem; }
+    .cinema-bottom-ui { bottom: 1.5rem; }
   }
 
   @media (max-width: 400px) {
@@ -1626,6 +2278,9 @@
     .player-header.compact-mode .cover-wrapper {
       width: 40px;
       height: 40px;
+      min-width: 40px;
+      min-height: 40px;
+      max-width: none !important;
     }
     .compact-meta {
       gap: 0.5rem;
@@ -1644,7 +2299,7 @@
 
   @media (max-height: 700px) {
     .artwork-column { gap: 1.5rem; }
-    .cover-wrapper.main-artwork { height: 30vh; width: 30vh; }
+    .cover-wrapper.main-artwork { width: 30vh; }
     .desktop-meta h1 { font-size: 2rem; }
   }
 </style>
