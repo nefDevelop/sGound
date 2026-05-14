@@ -268,16 +268,21 @@
   .now-playing {
     display: flex;
     align-items: center;
-    gap: 1.2rem;
-    min-width: 0; /* Essential for text trimming */
+    gap: 1rem;
     flex: 1;
+    min-width: 0;
+    width: 0;
+    overflow: hidden;
   }
 
   .info {
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
+    gap: 0.1rem;
+    flex: 1;
     min-width: 0;
+    width: 0;
+    overflow: hidden;
   }
 
   .album-name {
@@ -295,17 +300,21 @@
   .track-meta {
     display: flex;
     align-items: center;
-    gap: 0.8rem;
+    gap: 0.5rem;
     min-width: 0;
+    width: 100%;
+    overflow: hidden;
   }
 
   .track-title {
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     font-weight: 700;
     color: white;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex: 0 1 auto;
+    min-width: 0;
   }
 
   .quality-chip {
@@ -324,6 +333,7 @@
     display: flex;
     align-items: center;
     gap: 2rem;
+    flex-shrink: 0;
   }
 
   .playback-btns {

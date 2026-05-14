@@ -1,5 +1,5 @@
 <script>
-  import { onMount, setContext } from "svelte";
+  import { onMount, setContext, tick } from "svelte";
   import { fade } from "svelte/transition";
   import { page } from "$app/stores";
   import { onNavigate, goto } from "$app/navigation";
@@ -320,30 +320,49 @@
   });
 
   // Route mapping for SvelteKit compatibility
-  const viewMap = {
-    '/': 'dashboard',
-    '/library': 'library',
-    '/inbox': 'inbox',
-    '/albums': 'albums',
-    '/artists': 'artists',
-    '/settings': 'settings',
-    '/maintenance': 'maintenance'
-  };
-
   function syncViewWithRoute() {
     const path = $page.url.pathname;
+    const viewMap = {
+      '/': 'dashboard',
+      '/library': 'library',
+      '/inbox': 'inbox',
+      '/albums': 'albums',
+      '/artists': 'artists',
+      '/playlists': 'playlists',
+      '/settings': 'settings',
+      '/maintenance': 'maintenance'
+    };
+
     if (viewMap[path]) {
       currentView.set(viewMap[path]);
     } else if (path.startsWith('/album/')) {
       currentView.set('album');
     } else if (path.startsWith('/artist/')) {
       currentView.set('artist-detail');
+    } else if (path.startsWith('/playlist/')) {
+      currentView.set('playlist');
+    } else {
+      currentView.set('dashboard');
     }
   }
 
   $effect(() => {
     syncViewWithRoute();
   });
+
+  import { afterNavigate } from '$app/navigation';
+  afterNavigate(() => {
+    if (get(currentView) === 'fullplayer') {
+      syncViewWithRoute();
+    }
+  });
+
+  async function handleSidebarNavigation() {
+    await tick();
+    if (get(currentView) === 'fullplayer') {
+      syncViewWithRoute();
+    }
+  }
 
   let isFullPlayerActive = $derived($currentView === 'fullplayer');
 </script>
@@ -372,7 +391,9 @@
     bind:onSkipBack={skipBack}
   />
   <main class="app-layout" class:is-cinema={isFullPlayerActive && playerSubView === 'cinema'}>
-    <Sidebar {playlists} onLogout={handlers.handleLogout} />
+    <div onclick={handleSidebarNavigation} role="presentation">
+      <Sidebar {playlists} onLogout={handlers.handleLogout} />
+    </div>
 
     <section class="content" class:full-player-view={isFullPlayerActive}>
       {#if scanStatus.isPaused}
