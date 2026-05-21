@@ -221,6 +221,36 @@ func updateFLAC(path string, _ string, data map[string]interface{}) error {
 		return nil
 	})
 }
+
+func updateFFmpeg(path string, ext string, data map[string]interface{}) error {
+	return SafeSave(path, func(tempPath string) error {
+		format := strings.TrimPrefix(ext, ".")
+		if format == "m4a" {
+			format = "ipod" // FFmpeg usa el muxer 'ipod' para contenedores m4a
+		}
+
+		args := []string{"-i", path}
+
+		// Tags universales (mapeados por FFmpeg al contenedor destino)
+		if title := getString(data, "title"); title != "" { args = append(args, "-metadata", "title="+title) }
+		if artist := getString(data, "artist"); artist != "" { args = append(args, "-metadata", "artist="+artist) }
+		if album := getString(data, "album"); album != "" { args = append(args, "-metadata", "album="+album) }
+		if genre := getString(data, "genre"); genre != "" { args = append(args, "-metadata", "genre="+genre) }
+		if year := getString(data, "year"); year != "" { args = append(args, "-metadata", "date="+year) }
+		if aa := getString(data, "albumArtist"); aa != "" { args = append(args, "-metadata", "album_artist="+aa) }
+		if trackNum := getString(data, "trackNum"); trackNum != "" { args = append(args, "-metadata", "track="+trackNum) }
+
+		args = append(args, "-codec", "copy", "-map_metadata", "0", "-f", format, "-y", tempPath)
+
+		slog.Debug("Executing FFmpeg (Generic tag update)", "args", args, "format", format)
+		cmd := exec.Command("ffmpeg", args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			slog.Error("FFmpeg generic update failed", "error", err, "output", string(out))
+			return fmt.Errorf("ffmpeg update failed (%v): %s", err, string(out))
+		}
+		return nil
+	})
+}
 // ReadTagsFromFile lee todos los metadatos soportados de un archivo
 func ReadTagsFromFile(path string) (map[string]string, error) {
 	tags := make(map[string]string)
@@ -319,6 +349,38 @@ func ReadTagsFromFile(path string) (map[string]string, error) {
 				tags["instrumental"] = get("INSTRUMENTAL")
 			}
 		}
+	} else {
+		// Fallback para otros formatos usando ffprobe
+		args := []string{
+			"-v", "error",
+			"-show_entries", "format_tags:stream_tags",
+			"-of", "default=noprint_wrappers=1:nokey=0",
+			path,
+		}
+		cmd := exec.Command("ffprobe", args...)
+		out, err := cmd.Output()
+		if err == nil {
+			lines := strings.Split(string(out), "\n")
+			for _, line := range lines {
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					key := strings.ToLower(parts[0])
+					// Quitar prefijo TAG: si existe (ffprobe lo pone a veces)
+					key = strings.TrimPrefix(key, "tag:")
+					
+					val := parts[1]
+					switch key {
+					case "title": tags["title"] = val
+					case "artist": tags["artist"] = val
+					case "album": tags["album"] = val
+					case "genre": tags["genre"] = val
+					case "date": tags["year"] = val
+					case "album_artist": tags["albumArtist"] = val
+					case "track": tags["trackNum"] = val
+					}
+				}
+			}
+		}
 	}
 	return tags, nil
 }
@@ -381,6 +443,10 @@ func (e *Editor) UpdateTags(trackID string, data map[string]interface{}) ([]TagC
 	case ".flac":
 		if err := updateFLAC(path, trackID, data); err != nil {
 			return nil, fmt.Errorf("failed to rewrite flac tags: %w", err)
+		}
+	case ".m4a", ".ogg", ".opus", ".wav":
+		if err := updateFFmpeg(path, ext, data); err != nil {
+			return nil, fmt.Errorf("failed to rewrite %s tags: %w", ext, err)
 		}
 	default:
 		fmt.Printf("Physical tag editing not yet supported for format %s, only DB will be updated\n", ext)

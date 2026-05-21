@@ -126,10 +126,10 @@
         {/if}
       </div>
       <div class="info">
-        <div class="album-name">{currentPlaying?.album || "Sgound Player"}</div>
+        <div class="album-name">{currentPlaying ? (currentPlaying.artist || "Unknown Artist") : "Sgound Player"}</div>
         <div class="track-meta">
           <span class="track-title"
-            >{currentPlaying?.title || "No track playing"}</span
+            >{currentPlaying ? (currentPlaying.title || "Unknown Title") : "No track playing"}</span
           >
           {#if currentPlaying?.format}
             <span class="quality-chip"
@@ -245,6 +245,7 @@
     position: relative;
     overflow: visible;
     cursor: pointer;
+    min-width: 0;
   }
 
   .player-bg-clip {
@@ -410,6 +411,74 @@
   .sub-btn:active {
     transform: scale(0.85);
     transition: all 0.1s;
+  }
+
+  .extra-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .volume-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .volume-popover {
+    position: absolute;
+    bottom: 120%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface-container-highest, #1a1a1a);
+    border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+    padding: 1rem 0.5rem;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    z-index: 100;
+  }
+
+  .vol-slider-wrap {
+    height: 100px;
+    width: 24px;
+    position: relative;
+    display: flex;
+    justify-content: center;
+  }
+
+  .vol-slider-vertical {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    transform: rotate(-90deg);
+    transform-origin: center;
+    position: absolute;
+    top: 48px;
+    margin: 0;
+    cursor: pointer;
+    z-index: 2;
+  }
+
+  .vol-slider-vertical::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 0 5px rgba(0,0,0,0.5);
+  }
+
+  .v-fill {
+    position: absolute;
+    bottom: 0;
+    width: 4px;
+    background: var(--primary);
+    border-radius: 2px;
+    pointer-events: none;
+    z-index: 1;
   }
 
   @media (max-width: 768px) {

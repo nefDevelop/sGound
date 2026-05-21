@@ -2,7 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { showToast } from './stores.js';
+  import { showToast, queue, currentIndex, isPlaying } from './stores.js';
+  import { get } from 'svelte/store';
   import { fade, slide } from 'svelte/transition';
   import LogViewer from './LogViewer.svelte';
   import CoverSearcher from './CoverSearcher.svelte';
@@ -174,6 +175,29 @@
             }
             fetchHealth();
             showToast("Asset deleted successfully", "success");
+            
+            queue.update(q => {
+              const cIdx = get(currentIndex);
+              const deletedIdx = q.findIndex(t => t.id === track.id);
+              
+              if (deletedIdx !== -1) {
+                const newQ = q.filter(t => t.id !== track.id);
+                
+                if (deletedIdx === cIdx) {
+                  if (newQ.length === 0) {
+                    isPlaying.set(false);
+                    currentIndex.set(-1);
+                  } else {
+                    currentIndex.set(Math.min(cIdx, newQ.length - 1));
+                    isPlaying.set(true);
+                  }
+                } else if (deletedIdx < cIdx) {
+                  currentIndex.set(cIdx - 1);
+                }
+                return newQ;
+              }
+              return q;
+            });
           }
         } catch (e) {
           showToast("Deletion failed", "error");

@@ -119,11 +119,22 @@
 
   // Effect to handle track changes (when triggered from outside, e.g. clicking an album)
   $effect(() => {
-    if (currentPlaying && audioRef && audioRef.src.indexOf(currentPlaying.id) === -1 && !preloadedId) {
-      const quality = get(effectiveQuality);
-      const url = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
-      audioRef.src = url;
-      audioRef.play().catch(() => {});
+    if (currentPlaying && audioRef) {
+      if (audioRef.src.indexOf(currentPlaying.id) === -1) {
+        if (preloadedId === currentPlaying.id) {
+           switchAudio();
+        } else {
+           const quality = get(effectiveQuality);
+           const url = `/api/stream/${currentPlaying.id}` + (quality !== "original" ? `?bitrate=${quality}` : "");
+           audioRef.src = url;
+           audioRef.play().catch(() => {});
+           preloadedId = null;
+        }
+      }
+    } else if (!currentPlaying && audioRef) {
+      audioRef.pause();
+      audioRef.removeAttribute('src');
+      audioRef.load();
     }
   });
 
