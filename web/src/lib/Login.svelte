@@ -72,7 +72,7 @@
         </div>
       </div>
       <h1>Sgound</h1>
-      <p class="subtitle">Personal Music Cloud</p>
+      <p class="subtitle">Personal Music Collection</p>
     </div>
 
     <form onsubmit={(e) => { e.preventDefault(); handleLogin(); }}>
@@ -116,7 +116,7 @@
     <div class="footer">
       <span>SGOUND</span>
       <div class="dots"></div>
-      <span>V1.0</span>
+      <span>V0.1</span>
     </div>
   </div>
 </div>
