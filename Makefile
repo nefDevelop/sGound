@@ -20,7 +20,7 @@ build:
 	@echo "=> Construyendo compilado SPA (Vite/Svelte)..."
 	cd web && npm install && npm run build
 	@echo "=> Empaquetando SPA dentro del binario Go con //go:embed..."
-	go build -o $(BINARY_NAME) ./cmd/sgound
+	go build -ldflags="-w -s" -o $(BINARY_NAME) ./cmd/sgound
 	@echo "=> Exito! Ejecutable '$(BINARY_NAME)' listo en la raiz."
 
 test:

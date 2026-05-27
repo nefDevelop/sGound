@@ -7,7 +7,7 @@
 - **Arquitectura Zero-CGO:** Binario estático y portátil gracias al uso de SQLite en Go puro.
 - **UI Moderna:** Interfaz fluida con Svelte 5, Runes y diseño inspirado en Material Design 3 (Expressive).
 - **Transcodificación al Vuelo:** Streaming adaptativo usando FFmpeg (MP3/Opus) para ahorrar datos en móviles.
-- **Gestión Completa de Tags:** Editor de metadatos integrado para MP3, FLAC, OGG y Opus.
+- **Gestión Completa de Tags:** Editor de metadatos integrado con soporte de escritura física para MP3, FLAC, M4A, OGG, Opus y WAV (vía FFmpeg).
 - **Letras Sincronizadas:** Soporte para archivos `.lrc` y búsqueda automática en proveedores externos (LRCLib).
 - **Playlists Inteligentes:** Colecciones automáticas por década, género, calidad (Hi-Res) y actividad reciente.
 - **Personalización Total:** Motor de temas dinámico basado en una semilla de color.

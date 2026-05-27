@@ -26,8 +26,8 @@ type Params struct {
 }
 
 var DefaultParams = Params{
-	Memory:      64 * 1024,
-	Iterations:  3,
+	Memory:      16 * 1024,
+	Iterations:  2,
 	Parallelism: 2,
 	SaltLength:  16,
 	KeyLength:   32,

@@ -180,7 +180,35 @@
         type: "danger", confirmLabel: "Delete", icon: 'trash',
         onconfirm: async () => {
           const res = await apiFetch(`/api/tracks/${track.id}`, { method: 'DELETE' });
-          if (res.ok) { showToast("Deleted", "success"); fetchTracks(); callback?.(); }
+          if (res.ok) { 
+            showToast("Deleted", "success"); 
+            fetchTracks(); 
+            
+            queue.update(q => {
+              const cIdx = get(currentIndex);
+              const deletedIdx = q.findIndex(t => t.id === track.id);
+              
+              if (deletedIdx !== -1) {
+                const newQ = q.filter(t => t.id !== track.id);
+                
+                if (deletedIdx === cIdx) {
+                  if (newQ.length === 0) {
+                    isPlaying.set(false);
+                    currentIndex.set(-1);
+                  } else {
+                    currentIndex.set(Math.min(cIdx, newQ.length - 1));
+                    isPlaying.set(true);
+                  }
+                } else if (deletedIdx < cIdx) {
+                  currentIndex.set(cIdx - 1);
+                }
+                return newQ;
+              }
+              return q;
+            });
+            
+            callback?.(); 
+          }
         },
         oncancel: () => { confirmState.isOpen = false; }
       };
@@ -502,7 +530,20 @@
   </main>
 
   <QueuePanel bind:isOpen={isQueueOpen} />
-  <TagEditor bind:isOpen={isTagEditorOpen} bind:track={trackToEdit} onclose={() => fetchTracks(false)} />
+  <TagEditor bind:isOpen={isTagEditorOpen} bind:track={trackToEdit} onclose={() => {
+    fetchTracks(false);
+    if (trackToEdit && trackToEdit.id) {
+      queue.update(q => {
+        const idx = q.findIndex(t => t.id === trackToEdit.id);
+        if (idx !== -1) {
+          const newQ = [...q];
+          newQ[idx] = { ...newQ[idx], ...trackToEdit };
+          return newQ;
+        }
+        return q;
+      });
+    }
+  }} />
   <MassiveTagEditor bind:isOpen={isMassiveEditorOpen} {selectedTracks} onclose={() => fetchTracks(false)} />
   <Toast />
   <ConfirmModal bind:isOpen={confirmState.isOpen} {...confirmState} onconfirm={confirmState.onconfirm} />
@@ -616,6 +657,7 @@
     grid-column: 1;
     grid-row: 1;
     height: 100px;
+    min-width: 0;
   }
 
   .top-bar {

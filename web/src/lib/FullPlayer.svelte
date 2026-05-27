@@ -334,8 +334,8 @@
               {#if subView !== 'cover'}
                 <div class="compact-meta" in:fade>
                   <div class="meta-texts">
-                    <h2>{currentPlaying.title}</h2>
-                    <p>{currentPlaying.artist}</p>
+                    <h2>{currentPlaying?.title || 'Unknown Title'}</h2>
+                    <p>{currentPlaying?.artist || 'Unknown Artist'}</p>
                   </div>
                   <div class="compact-controls">
                     <div class="mini-timeline">
@@ -379,7 +379,7 @@
               
               <div class="desktop-meta">
                 <div class="meta-texts" oncontextmenu={showContextMenu} role="button" tabindex="0">
-                  <h1>{currentPlaying.title}</h1>
+                  <h1>{currentPlaying?.title || 'Unknown Title'}</h1>
                   <p class="artist-name">{currentPlaying?.artist || 'Unknown Artist'}</p>
                 </div>
               </div>
@@ -507,7 +507,7 @@
                 <div class="track-meta" oncontextmenu={showContextMenu} role="button" tabindex="0">
                   <div class="meta-texts">
                     <div class="title-row">
-                      <h1>{currentPlaying.title}</h1>
+                      <h1>{currentPlaying?.title || 'Unknown Title'}</h1>
                     </div>
                     <p class="artist-name">{currentPlaying?.artist || 'Unknown Artist'}</p>
                   </div>
@@ -670,10 +670,10 @@
                   </div>
                   
                   <div class="cinema-track-info" class:visible={showControls}>
-                    <h1 class="cinema-title-text">{currentPlaying.title}</h1>
+                    <h1 class="cinema-title-text">{currentPlaying?.title || 'Unknown Title'}</h1>
                     <div class="cinema-artist-row">
-                       <span class="cinema-artist-text">{currentPlaying.artist}</span>
-                       {#if currentPlaying.album}
+                       <span class="cinema-artist-text">{currentPlaying?.artist || 'Unknown Artist'}</span>
+                       {#if currentPlaying?.album}
                          <span class="cinema-separator">•</span>
                          <span class="cinema-album-text">{currentPlaying.album}</span>
                        {/if}

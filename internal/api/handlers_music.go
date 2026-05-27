@@ -524,7 +524,8 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 	if minimal {
 		selectFields = `t.id, t.title, COALESCE(t.track_num, 0), COALESCE(t.duration, 0), COALESCE(t.genre, ''), 
 		       COALESCE(t.artist, a.name, 'Artist Desconocido') as artist, COALESCE(al.title, 'Álbum Desconocido') as album, COALESCE(al.year, 0) as year,
-		       COALESCE(t.format, ''), COALESCE(ut.rating, 0) as rating, COALESCE(t.instrumental, 0)`
+		       COALESCE(t.format, ''), COALESCE(ut.rating, 0) as rating, COALESCE(t.instrumental, 0),
+		       COALESCE(t.bit_rate, 0), COALESCE(t.sample_rate, 0)`
 	}
 
 	query := fmt.Sprintf(`
@@ -565,14 +566,15 @@ func (s *Server) handleGetTracks(w http.ResponseWriter, r *http.Request) {
 
 		if minimal {
 			var id, title, genre, artist, album, format string
-			var trackNum, year, rating, instrumental int
+			var trackNum, year, rating, instrumental, bitRate, sampleRate int
 			var duration float64
-			if err := rows.Scan(&id, &title, &trackNum, &duration, &genre, &artist, &album, &year, &format, &rating, &instrumental); err != nil {
+			if err := rows.Scan(&id, &title, &trackNum, &duration, &genre, &artist, &album, &year, &format, &rating, &instrumental, &bitRate, &sampleRate); err != nil {
 				continue
 			}
 			enc.Encode(map[string]interface{}{
 				"id": id, "title": title, "trackNum": trackNum, "duration": duration, "genre": genre,
 				"artist": artist, "album": album, "year": year, "format": format, "rating": rating, "instrumental": instrumental == 1,
+				"bit_rate": bitRate, "sample_rate": sampleRate,
 			})
 		} else {
 			var id, title, genre, artist, album, format, composer, comment, tStatus string
