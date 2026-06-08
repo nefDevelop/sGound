@@ -16,7 +16,7 @@ services:
       - GODEBUG=madvdontneed=1
     volumes:
       - sgound_data:/app/data:z
-      - ${SGOUND_MUSIC_PATH_HOST:-~/Música}:/music:rw,z
+      - ${SGOUND_MUSIC_PATH_HOST:-/media/clare/sGound}:/music:rw,z
     deploy:
       resources:
         limits:
