@@ -402,7 +402,13 @@
 </script>
 
 <svelte:head>
-  <title>{$isLoggedIn ? `${$currentView} | Sgound` : "Login | Sgound"}</title>
+  <title>
+    {$isLoggedIn 
+      ? (currentPlaying 
+          ? `${currentPlaying.title} - ${currentPlaying.artist || 'Unknown Artist'} | Sgound` 
+          : `${$currentView.charAt(0).toUpperCase() + $currentView.slice(1)} | Sgound`) 
+      : "Login | Sgound"}
+  </title>
 </svelte:head>
 
 {#if $setupRequired}

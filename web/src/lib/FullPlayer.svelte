@@ -7,6 +7,11 @@
   import ContextMenu from './ContextMenu.svelte';
   import StarRating from './StarRating.svelte';
   import Artwork from './Artwork.svelte';
+  import CinemaMode from './player/CinemaMode.svelte';
+  import LyricsView from './player/LyricsView.svelte';
+  import PlayerControls from './player/PlayerControls.svelte';
+  import VolumeControl from './player/VolumeControl.svelte';
+  import Timeline from './player/Timeline.svelte';
 
   let { 
     currentPlaying = null, 
@@ -386,48 +391,9 @@
 
               <div class="desktop-controls">
                 <div class="playback-controls">
-                  <div class="timeline-container">
-                    <div class="modern-slider progress-slider">
-                       <input type="range" class="knobless-range" min="0" max="100" value={progress} oninput={handleSeek} />
-                       <div class="slider-fill" style="width: {progress}%"></div>
-                       <div class="slider-glow" style="width: {progress}%"></div>
-                    </div>
-                    <div class="time-row">
-                      <span class="time">{formatTime(currentTime)}</span>
-                      <span class="time">{formatTime(duration)}</span>
-                    </div>
-                  </div>
-
-                  <div class="main-btns">
-                    <button class="sub-btn" class:active={$isShuffle} onclick={() => isShuffle.update(s => !s)} title="Aleatorio">
-                      <Icon name="shuffle" size={24} />
-                    </button>
-                    <button class="main-btn" onclick={onskipBack} title="Anterior">
-                      <Icon name="skipBack" size={42} />
-                    </button>
-                    <button class="play-btn-prominent" onclick={() => audioRef?.paused ? audioRef.play() : audioRef?.pause()} title={audioRef?.paused ? "Reproducir" : "Pausar"}>
-                      <Icon name={audioRef?.paused ? 'play' : 'pause'} size={42} color="var(--surface)" />
-                    </button>
-                    <button class="main-btn" onclick={onskipNext} title="Siguiente">
-                      <Icon name="skipForward" size={42} />
-                    </button>
-                    <button class="sub-btn" class:active={$repeatMode !== 'none'} onclick={toggleRepeat} title="Repetición">
-                      <Icon name="repeat" size={24} />
-                      {#if $repeatMode === 'one'}<span class="repeat-one-badge">1</span>{/if}
-                    </button>
-                  </div>
-
-                  <div class="bottom-controls">
-                    <div class="volume-slider-modern">
-                       <button class="mute-btn" onclick={toggleMute} title={$volume === 0 ? "Activar sonido" : "Silenciar"}>
-                          <Icon name={$volume === 0 ? 'volumeX' : ($volume < 0.5 ? 'volume1' : 'volume2')} size={22} />
-                       </button>
-                       <div class="modern-slider v-slider-large">
-                         <input type="range" class="knobless-range" min="0" max="1" step="0.01" value={$volume} oninput={handleVolume} />
-                         <div class="slider-fill volume-fill" style="width: {$volume * 100}%"></div>
-                       </div>
-                    </div>
-                  </div>
+                  <Timeline {audioRef} {progress} {duration} {currentTime} />
+                  <PlayerControls {audioRef} {isPaused} {onskipBack} {onskipNext} onPlayToggle={togglePlay} />
+                  <VolumeControl {audioRef} />
                 </div>
               </div>
             </div>
@@ -435,36 +401,7 @@
             <div class="content-column">
               <div class="panel-content">
                 {#if subView === 'lyrics'}
-                  <div class="view-panel lyrics-panel" in:fade>
-                    {#if parsedLyrics.length > 0}
-                      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                      <div 
-                        class="lyrics-list" 
-                        bind:this={lyricContainerDesktop}
-                        onwheel={handleUserInteraction}
-                        onmousedown={handleUserInteraction}
-                        ontouchstart={handleUserInteraction}
-                        role="region"
-                        aria-label="Letras de la canción"
-                      >
-                        {#each parsedLyrics as line, i}
-                          <button 
-                            class="lyric-line" 
-                            class:active={i === currentLyricIndex}
-                            onclick={(e) => { e.stopPropagation(); if(audioRef) audioRef.currentTime = line.time; }}
-                            in:fade={{ delay: Math.min(i * 30, 1000), duration: 600 }}
-                          >
-                            {line.text}
-                          </button>
-                        {/each}
-                      </div>
-                    {:else}
-                      <div class="no-lyrics">
-                          <Icon name="music" size={64} />
-                          <p>Instrumental</p>
-                      </div>
-                    {/if}
-                  </div>
+                  <LyricsView {audioRef} {currentTime} {parsedLyrics} {lyrics} {currentLyricIndex} onUserInteraction={handleUserInteraction} />
                 {:else if subView === 'queue'}
                   <div class="view-panel queue-panel" in:fade>
                     <div class="queue-list">
@@ -514,48 +451,9 @@
                 </div>
 
                 <div class="playback-controls">
-                  <div class="timeline-container">
-                    <div class="modern-slider progress-slider">
-                       <input type="range" class="knobless-range" min="0" max="100" value={progress} oninput={handleSeek} />
-                       <div class="slider-fill" style="width: {progress}%"></div>
-                       <div class="slider-glow" style="width: {progress}%"></div>
-                    </div>
-                    <div class="time-row">
-                      <span class="time">{formatTime(currentTime)}</span>
-                      <span class="time">{formatTime(duration)}</span>
-                    </div>
-                  </div>
-
-                  <div class="main-btns">
-                    <button class="sub-btn" class:active={$isShuffle} onclick={() => isShuffle.update(s => !s)} title="Aleatorio">
-                      <Icon name="shuffle" size={22} />
-                    </button>
-                    <button class="main-btn" onclick={onskipBack} title="Anterior">
-                      <Icon name="skipBack" size={38} />
-                    </button>
-                    <button class="play-btn-prominent" onclick={() => isPaused ? audioRef.play() : audioRef?.pause()} title={isPaused ? "Reproducir" : "Pausar"}>
-                      <Icon name={isPaused ? 'play' : 'pause'} size={38} color="var(--surface)" />
-                    </button>
-                    <button class="main-btn" onclick={onskipNext} title="Siguiente">
-                      <Icon name="skipForward" size={38} />
-                    </button>
-                    <button class="sub-btn" class:active={$repeatMode !== 'none'} onclick={toggleRepeat} title="Repetición">
-                      <Icon name="repeat" size={22} />
-                      {#if $repeatMode === 'one'}<span class="repeat-one-badge">1</span>{/if}
-                    </button>
-                  </div>
-
-                  <div class="bottom-controls">
-                    <div class="volume-slider-modern">
-                       <button class="mute-btn" onclick={toggleMute} title={$volume === 0 ? "Activar sonido" : "Silenciar"}>
-                          <Icon name={$volume === 0 ? 'volumeX' : ($volume < 0.5 ? 'volume1' : 'volume2')} size={20} />
-                       </button>
-                       <div class="modern-slider v-slider-large">
-                         <input type="range" class="knobless-range" min="0" max="1" step="0.01" value={$volume} oninput={handleVolume} />
-                         <div class="slider-fill volume-fill" style="width: {$volume * 100}%"></div>
-                       </div>
-                    </div>
-                  </div>
+                  <Timeline {audioRef} {progress} {duration} {currentTime} />
+                  <PlayerControls {audioRef} {isPaused} {onskipBack} {onskipNext} onPlayToggle={togglePlay} />
+                  <VolumeControl {audioRef} />
                 </div>
               </div>
             {:else if subView === 'queue'}
@@ -589,160 +487,28 @@
                 </div>
               </div>
             {:else if subView === 'lyrics'}
-              <div class="view-panel lyrics-panel" in:fade>
-                {#if parsedLyrics.length > 0}
-                  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                  <div 
-                    class="lyrics-list" 
-                    bind:this={lyricContainerMobile}
-                    onwheel={handleUserInteraction}
-                    onmousedown={handleUserInteraction}
-                    ontouchstart={handleUserInteraction}
-                    role="region"
-                    aria-label="Letras de la canción"
-                  >
-                    {#each parsedLyrics as line, i}
-                      <button 
-                        class="lyric-line" 
-                        class:active={i === currentLyricIndex}
-                        onclick={(e) => { e.stopPropagation(); if(audioRef) audioRef.currentTime = line.time; }}
-                        in:fade={{ delay: Math.min(i * 20, 800), duration: 500 }}
-                      >
-                        {line.text}
-                      </button>
-                    {/each}
-                  </div>
-                {:else if lyrics === "Loading..."}
-                   <div class="no-lyrics loading-state">
-                      <div class="loading-spinner"></div>
-                      <p>Buscando letra...</p>
-                   </div>
-                {:else}
-                  <div class="no-lyrics">
-                      <Icon name="music" size={64} />
-                      <p>Instrumental</p>
-                  </div>
-                {/if}
-              </div>
+              <LyricsView {audioRef} {currentTime} {parsedLyrics} {lyrics} {currentLyricIndex} onUserInteraction={handleUserInteraction} />
             {/if}
           </div>
           {:else if subView === 'cinema'}
-            <div 
-                role="presentation"
-                class="cinema-view-container" 
-                class:hide-ui={!showControls}
-                bind:this={cinemaContainer}
-                in:fade={{ duration: 800 }}
-                onmousemove={handleCinemaMouseMove}
-                onclick={togglePlay}
-            >
-              <!-- Liquid Ambient Background -->
-              <div class="cinema-ambient-scene">
-                <div class="ambient-blob blob-1" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
-                <div class="ambient-blob blob-2" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
-                <div class="ambient-blob blob-3" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
-                <div class="ambient-noise"></div>
-                <div class="ambient-vignette"></div>
-              </div>
-
-              <!-- Top UI: Actions -->
-              <div class="cinema-top-ui" class:visible={showControls}>
-                <div class="cinema-top-btns">
-                  <button class="cinema-action-btn" title="Pantalla Completa" onclick={toggleFullscreen}>
-                    <Icon name={isFullscreen ? "minimize" : "maximize"} size={20} />
-                  </button>
-                  <button class="cinema-exit-btn" onclick={(e) => { e.stopPropagation(); subView = 'cover'; }}>
-                    <Icon name="x" size={20} />
-                    <span>Salir</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="cinema-main-layout">
-                <!-- Left: 3D Artwork & Dynamic Meta -->
-                <div class="cinema-artwork-pane">
-                  <div class="artwork-3d-container">
-                    <div class="artwork-card-wrapper" style="transform: rotateX({tiltY}deg) rotateY({tiltX}deg)">
-                       <img src="/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}" alt="" class="artwork-main-img" />
-                       <div class="artwork-reflection"></div>
-                    </div>
-                    <div class="artwork-shadow-glow" style="background-image: url('/api/cover/{currentPlaying.id}?v={$coverRefreshTrigger}')"></div>
-                  </div>
-                  
-                  <div class="cinema-track-info" class:visible={showControls}>
-                    <h1 class="cinema-title-text">{currentPlaying?.title || 'Unknown Title'}</h1>
-                    <div class="cinema-artist-row">
-                       <span class="cinema-artist-text">{currentPlaying?.artist || 'Unknown Artist'}</span>
-                       {#if currentPlaying?.album}
-                         <span class="cinema-separator">•</span>
-                         <span class="cinema-album-text">{currentPlaying.album}</span>
-                       {/if}
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Right: Immersive Lyrics -->
-                <div class="cinema-lyrics-pane">
-                  {#if parsedLyrics.length > 0}
-                    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                    <div class="cinema-lyrics-scroller" 
-                         bind:this={lyricContainerCinema}
-                         onwheel={handleUserInteraction}
-                         onmousedown={handleUserInteraction}
-                         ontouchstart={handleUserInteraction}
-                         role="region"
-                         aria-label="Letras inmersivas"
-                    >
-                      {#each parsedLyrics as line, i}
-                        <button class="cinema-lyric-item" 
-                             class:active={i === currentLyricIndex}
-                             class:nearby={Math.abs(i - currentLyricIndex) <= 2 && i !== currentLyricIndex}
-                             class:distant={Math.abs(i - currentLyricIndex) > 2}
-                             onclick={(e) => { e.stopPropagation(); if(audioRef) audioRef.currentTime = line.time; }}>
-                          {line.text}
-                        </button>
-                      {/each}
-                    </div>
-                  {:else if lyrics === "Loading..."}
-                     <div class="cinema-empty-state">
-                        <div class="loading-pulse"></div>
-                        <p>Sincronizando letras...</p>
-                     </div>
-                  {:else}
-                    <div class="cinema-empty-state">
-                      <div style="opacity: 0.2">
-                        <Icon name="music" size={64} />
-                      </div>
-                      <p>Solo música, sin palabras</p>
-                    </div>
-                  {/if}
-                </div>
-              </div>
-
-              <!-- Bottom UI: Glass Capsule Controls -->
-              <div class="cinema-bottom-ui" class:visible={showControls} onclick={(e) => e.stopPropagation()} role="presentation">
-                <div class="glass-capsule">
-                  <div class="capsule-progress-bar">
-                    <input type="range" class="capsule-range" min="0" max="100" value={progress} oninput={handleSeek} />
-                    <div class="capsule-fill" style="width: {progress}%"></div>
-                  </div>
-                  
-                  <div class="capsule-main-row">
-                    <div class="capsule-time">{formatTime(currentTime)}</div>
-                    
-                    <div class="capsule-btns">
-                      <button class="capsule-btn" onclick={(e) => { e.stopPropagation(); onskipBack(); }}><Icon name="skipBack" size={24} /></button>
-                      <button class="capsule-btn-play" onclick={(e) => { e.stopPropagation(); togglePlay(); }}>
-                        <Icon name={isPaused ? 'play' : 'pause'} size={32} />
-                      </button>
-                      <button class="capsule-btn" onclick={(e) => { e.stopPropagation(); onskipNext(); }}><Icon name="skipForward" size={24} /></button>
-                    </div>
-
-                    <div class="capsule-time">{formatTime(duration)}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <CinemaMode 
+              {currentPlaying}
+              {audioRef}
+              {progress}
+              {duration}
+              {currentTime}
+              {parsedLyrics}
+              {lyrics}
+              {currentLyricIndex}
+              {coverRefreshTrigger}
+              bind:showControls={showControls}
+              onClose={() => subView = 'cover'}
+              onPlayToggle={togglePlay}
+              onSkipBack={onskipBack}
+              onSkipNext={onskipNext}
+              onSeek={handleSeek}
+              onUserInteraction={handleUserInteraction}
+            />
           {/if}
         </div>
       </div>
@@ -1501,11 +1267,7 @@
     min-height: 0;
   }
 
-  .lyrics-panel {
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-  }
+
 
   .dynamic-area {
     position: relative;
@@ -1592,88 +1354,18 @@
     text-transform: uppercase;
   }
 
-  .lyrics-list {
-    display: block;
-    flex: 1;
-    width: 100%;
-    overflow-y: auto;
-    scrollbar-width: none;
-    position: relative;
-    padding: 50vh 2rem;
-    padding-top: 100px; /* Extra padding for the absolute header */
-    pointer-events: auto !important;
-    user-select: none;
-    touch-action: pan-y;
-    -webkit-overflow-scrolling: touch;
-    z-index: 10;
-    min-height: 0;
-  }
-  .lyrics-list::-webkit-scrollbar { display: none; }
 
-  .lyric-line {
-    font-size: 2.2rem;
-    font-weight: 900;
-    color: rgba(255,255,255,0.15);
-    background: none;
-    border: none;
-    cursor: pointer;
-    text-align: center;
-    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-    line-height: 1.4;
-    letter-spacing: -1px;
-    padding: 1rem 0;
-    width: 100%;
-    margin-bottom: 1.5rem;
-    display: block;
-  }
-  .lyric-line.active {
-    color: white;
-    transform: scale(1.05);
-    filter: drop-shadow(0 0 20px rgba(255,255,255,0.3));
-  }
-  .lyric-line:hover {
-    color: rgba(255,255,255,0.6);
-  }
 
-  .no-lyrics {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    width: 100%;
-    gap: 1.5rem;
-    opacity: 0.15;
-    min-height: 50vh;
-  }
-  .no-lyrics p { font-size: 1.2rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
 
-  .loading-spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid rgba(255,255,255,0.1);
-    border-top-color: white;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
 
-  /* --- CINEMA MODE REDESIGN (FROM SCRATCH) --- */
-  .cinema-view-container {
-    position: absolute;
-    inset: 0;
-    z-index: 9999;
-    background: #000;
-    color: #fff;
-    font-family: 'Outfit', 'Inter', system-ui, sans-serif;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    cursor: default;
-    min-height: 100%;
-  }
+
+
+
+
+
+
+
+
 
   .cinema-view-container:fullscreen {
     width: 100vw;

@@ -55,6 +55,7 @@
   }
 
   let wasScanning = $state(false);
+  let currentUsername = $state("User");
 
   export async function refresh() {
     try {
@@ -84,6 +85,7 @@
 
   onMount(() => {
     refresh();
+    currentUsername = localStorage.getItem('username') || "User";
   });
 </script>
 
@@ -92,7 +94,7 @@
     <!-- Welcome Tile -->
     <section class="bento-item welcome-tile">
       <div class="welcome-header">
-        <h1>Welcome back, <span>User</span></h1>
+        <h1>Welcome back, <span>{currentUsername}</span></h1>
         {#if ($inboxCount + $rawCount) > 0}
           <button class="inbox-notification-badge" onclick={onselectInbox} title="View pending tracks">
             <Icon name="inbox" size={24} />
