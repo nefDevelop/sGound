@@ -23,6 +23,9 @@ yarn-error.log*
 *.sqlite
 sgound.db
 
+# Directorio de datos persistente
+data/
+
 # Configuración de entorno y logs
 .env
 .env.local
