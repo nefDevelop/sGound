@@ -18,6 +18,9 @@ type Config struct {
 	Language          string `json:"language"`
 	CachePath         string
 	AllowedUsers      map[string]string `json:"-"` // username -> permissions (r/rw)
+	// CookieSecure activa Secure en la cookie de sesión. Solo tras proxy TLS
+	// (con http interno debe ser false o el navegador la rechaza).
+	CookieSecure bool
 }
 
 func LoadConfig() *Config {
@@ -55,6 +58,8 @@ func LoadConfig() *Config {
 
 	replayGain := os.Getenv("SGOUND_REPLAYGAIN") == "true"
 
+	cookieSecure := os.Getenv("COOKIE_SECURE") == "1"
+
 	allowedUsersRaw := os.Getenv("SGOUND_USERS")
 	allowedUsers := make(map[string]string)
 	if allowedUsersRaw != "" {
@@ -88,5 +93,6 @@ func LoadConfig() *Config {
 		ReplayGainEnabled: replayGain,
 		CachePath:         cachePath,
 		AllowedUsers:      allowedUsers,
+		CookieSecure:      cookieSecure,
 	}
 }

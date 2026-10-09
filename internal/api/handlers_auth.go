@@ -47,7 +47,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // Set to true if using HTTPS
+		Secure:   s.Config.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   86400,
 	})
@@ -134,7 +134,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 			Value:    token,
 			Path:     "/",
 			HttpOnly: true,
-			Secure:   false,
+			Secure:   s.Config.CookieSecure,
 			SameSite: http.SameSiteLaxMode,
 			MaxAge:   86400 * 30,
 		})

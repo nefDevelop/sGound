@@ -3,6 +3,8 @@ services:
     build: .
     container_name: sgound
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "${SGOUND_PORT_HOST:-8088}:8088"
     environment:
@@ -15,8 +17,10 @@ services:
       - GOMEMLIMIT=180MiB
       - GODEBUG=madvdontneed=1
     volumes:
-      - ./data:/app/data:z
-      - ${SGOUND_MUSIC_PATH_HOST:-/media/clare/sGound}:/music:rw,z
+      - ./data:/app/data
+      # Sin default: la ruta va en .env (SGOUND_MUSIC_PATH_HOST). Compose falla
+      # si está vacía, mejor que montar la carpeta de otra máquina por error.
+      - ${SGOUND_MUSIC_PATH_HOST}:/music:rw
     deploy:
       resources:
         limits:
