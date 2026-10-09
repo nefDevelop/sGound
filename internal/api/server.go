@@ -16,6 +16,7 @@ import (
 	"sgound/internal/auth"
 	"sgound/internal/config"
 	"sgound/internal/db"
+	"sgound/internal/gateway"
 	"sgound/internal/metadata"
 	"sgound/internal/scanner"
 	"sgound/internal/watcher"
@@ -167,6 +168,9 @@ func (s *Server) SetupRoutes() http.Handler {
 
 	// 2.5 API Key Management (Self-service)
 	mux.HandleFunc("/api/auth/apikeys", s.authMiddleware(s.handleAPIKeys))
+
+	// 2.6 OpenSubsonic gateway (de momento solo ping; ver internal/gateway)
+	gateway.NewSubsonicGateway(s.MasterDB).RegisterRoutes(mux)
 
 	// 3. Frontend SPA handler Embedded
 	if frontendFS, err := web.GetFrontendAssets(); err == nil {

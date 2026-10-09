@@ -22,6 +22,7 @@
 - **Dashboard y Logs:** Estadísticas de la biblioteca con colecciones rápidas (joyas olvidadas, más escuchadas) y visor de logs en tiempo real (SSE).
 - **Watcher en Tiempo Real:** Altas y bajas de archivos detectadas con `fsnotify` sin necesidad de reescaneo manual.
 - **Documentación de API:** Swagger UI en `/api/docs` generada desde `openapi.yaml`.
+- **OpenSubsonic (parcial):** responde a `/rest/ping.view`; el resto de la compatibilidad está en desarrollo (`internal/gateway`).
 
 ## Inicio rápido
 

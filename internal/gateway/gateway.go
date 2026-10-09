@@ -17,7 +17,8 @@ func NewSubsonicGateway(database *db.MasterDatabase) *SubsonicGateway {
 	return &SubsonicGateway{DB: database}
 }
 
-// RegisterRoutes monta los endpoints "fake" legacy en el multiplexor principal
+// RegisterRoutes monta los endpoints OpenSubsonic en el multiplexor principal.
+// De momento solo ping; el resto se añade aquí a medida que se implementa.
 func (g *SubsonicGateway) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/rest/ping.view", g.handlePing)
 	// Múltiples adiciones en el futuro:
