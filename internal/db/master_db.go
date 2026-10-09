@@ -55,9 +55,14 @@ func ConnectMaster(dbPath string) (*MasterDatabase, error) {
 		return nil, err
 	}
 
-	// Permitir múltiples conexiones para aprovechar el modo WAL (lecturas concurrentes)
-	conn.SetMaxOpenConns(20)
-	conn.SetMaxIdleConns(5)
+	// Permitir múltiples conexiones para aprovechar el modo WAL (lecturas concurrentes).
+	// EXCEPTO en :memory:: cada conexión del pool tendría su propia BD vacía.
+	if dbPath == ":memory:" {
+		conn.SetMaxOpenConns(1)
+	} else {
+		conn.SetMaxOpenConns(20)
+		conn.SetMaxIdleConns(5)
+	}
 	conn.SetConnMaxLifetime(time.Hour)
 
 	mdb := &MasterDatabase{Conn: conn}
@@ -183,13 +188,11 @@ func (db *MasterDatabase) initSchema() error {
 
 	-- Tabla Virtual FTS5 para Búsquedas Instantáneas
 	CREATE VIRTUAL TABLE IF NOT EXISTS search_idx USING fts5(
-		id UNINDEXED, 
-		title, 
-		artist, 
-		album, 
-		genre,
-		content='tracks', 
-		content_rowid='id'
+		id UNINDEXED,
+		title,
+		artist,
+		album,
+		genre
 	);
 
 	-- Trigger para mantener sincronizado el índice de búsqueda
@@ -199,14 +202,12 @@ func (db *MasterDatabase) initSchema() error {
 	END;
 
 	CREATE TRIGGER IF NOT EXISTS trg_tracks_ad AFTER DELETE ON tracks BEGIN
-		INSERT INTO search_idx(search_idx, id, title, artist, album, genre) 
-		VALUES('delete', old.id, old.title, old.artist, (SELECT title FROM albums WHERE id=old.album_id), old.genre);
+		DELETE FROM search_idx WHERE id = old.id;
 	END;
 
 	CREATE TRIGGER IF NOT EXISTS trg_tracks_au AFTER UPDATE ON tracks BEGIN
-		INSERT INTO search_idx(search_idx, id, title, artist, album, genre) 
-		VALUES('delete', old.id, old.title, old.artist, (SELECT title FROM albums WHERE id=old.album_id), old.genre);
-		INSERT INTO search_idx(id, title, artist, album, genre) 
+		DELETE FROM search_idx WHERE id = old.id;
+		INSERT INTO search_idx(id, title, artist, album, genre)
 		VALUES (new.id, new.title, new.artist, (SELECT title FROM albums WHERE id=new.album_id), new.genre);
 	END;
 	`
@@ -233,6 +234,7 @@ func (db *MasterDatabase) initSchema() error {
 	db.addColumnIfNotExists("albums", "cover_size", "INTEGER")
 	db.addColumnIfNotExists("albums", "cover_format", "TEXT")
 	db.addColumnIfNotExists("user_tracks", "starred", "INTEGER DEFAULT 0")
+	db.migrateSearchIdx()
 	
 	// Índices para optimización de rendimiento
 	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(path)")
@@ -563,4 +565,47 @@ func (db *MasterDatabase) addColumnIfNotExists(table, column, definition string)
 			slog.Info("Migration: Added missing column", "table", table, "column", column)
 		}
 	}
+}
+
+// migrateSearchIdx reconstruye el índice FTS5 si aún usa la definición rota
+// (content='tracks' con content_rowid='id' TEXT y columna album inexistente),
+// que hacía fallar el rebuild y la búsqueda. Pasa a FTS simple con triggers.
+func (db *MasterDatabase) migrateSearchIdx() {
+	var sqlDef string
+	if err := db.Conn.QueryRow(
+		"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'search_idx'").Scan(&sqlDef); err != nil {
+		return
+	}
+	if !strings.Contains(sqlDef, "content=") {
+		return
+	}
+	stmts := []string{
+		"DROP TRIGGER IF EXISTS trg_tracks_ai",
+		"DROP TRIGGER IF EXISTS trg_tracks_ad",
+		"DROP TRIGGER IF EXISTS trg_tracks_au",
+		"DROP TABLE search_idx",
+		`CREATE VIRTUAL TABLE search_idx USING fts5(id UNINDEXED, title, artist, album, genre)`,
+		`CREATE TRIGGER trg_tracks_ai AFTER INSERT ON tracks BEGIN
+			INSERT INTO search_idx(id, title, artist, album, genre)
+			VALUES (new.id, new.title, new.artist, (SELECT title FROM albums WHERE id=new.album_id), new.genre);
+		END`,
+		`CREATE TRIGGER trg_tracks_ad AFTER DELETE ON tracks BEGIN
+			DELETE FROM search_idx WHERE id = old.id;
+		END`,
+		`CREATE TRIGGER trg_tracks_au AFTER UPDATE ON tracks BEGIN
+			DELETE FROM search_idx WHERE id = old.id;
+			INSERT INTO search_idx(id, title, artist, album, genre)
+			VALUES (new.id, new.title, new.artist, (SELECT title FROM albums WHERE id=new.album_id), new.genre);
+		END`,
+		`INSERT INTO search_idx(id, title, artist, album, genre)
+			SELECT t.id, t.title, t.artist, COALESCE(al.title, ''), COALESCE(t.genre, '')
+			FROM tracks t LEFT JOIN albums al ON al.id = t.album_id`,
+	}
+	for _, s := range stmts {
+		if _, err := db.Conn.Exec(s); err != nil {
+			slog.Error("Migration: search_idx rebuild failed", "error", err)
+			return
+		}
+	}
+	slog.Info("Migration: search_idx rebuilt as plain FTS5")
 }

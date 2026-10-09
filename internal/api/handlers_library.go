@@ -238,9 +238,9 @@ func (s *Server) internalApproveBatch(ids []string) {
 	for _, oldID := range ids {
 		var path, albumID, artistName, title, albumTitle string
 		err := dbase.Conn.QueryRow(`
-			SELECT t.path, t.album_id, t.artist, t.title, al.title 
-			FROM tracks t 
-			JOIN albums al ON t.album_id = al.id 
+			SELECT t.path, t.album_id, COALESCE(t.artist, ''), t.title, COALESCE(al.title, '')
+			FROM tracks t
+			LEFT JOIN albums al ON t.album_id = al.id
 			WHERE t.id = ?`, oldID).Scan(&path, &albumID, &artistName, &title, &albumTitle)
 		if err != nil {
 			slog.Error("Failed to fetch track for approval", "id", oldID, "error", err)
@@ -723,23 +723,28 @@ func (s *Server) handleLibraryResyncIndex(w http.ResponseWriter, r *http.Request
 	// 1. REPARACIÓN PROFUNDA DE ARTISTAS (Limpieza de corrupción y re-vinculación)
 	slog.Info("🛠️ Starting Deep Artist Metadata Repair...")
 	rows, err := dbase.Conn.Query("SELECT id, artist FROM tracks")
+	type rawTrack struct{ id, artist string }
+	var pending []rawTrack
 	if err == nil {
-		defer rows.Close()
-		count := 0
 		for rows.Next() {
-			var trackID, rawArtist string
-			if err := rows.Scan(&trackID, &rawArtist); err == nil {
-				// Limpiar nombre y generar ID normalizado
-				cleanArtist := utils.SanitizeString(rawArtist)
-				artistID := utils.GenerateID(utils.NormalizeArtist(cleanArtist))
-				
-				// Asegurar que existe el artista con el nombre limpio
-				_, _ = dbase.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, cleanArtist)
-				
-				// Actualizar la canción para que apunte al ID correcto y tenga el nombre limpio
-				_, _ = dbase.Conn.Exec("UPDATE tracks SET artist = ? WHERE id = ?", cleanArtist, trackID)
-				count++
+			var t rawTrack
+			if err := rows.Scan(&t.id, &t.artist); err == nil {
+				pending = append(pending, t)
 			}
+		}
+		rows.Close()
+		count := 0
+		for _, t := range pending {
+			// Limpiar nombre y generar ID normalizado
+			cleanArtist := utils.SanitizeString(t.artist)
+			artistID := utils.GenerateID(utils.NormalizeArtist(cleanArtist))
+
+			// Asegurar que existe el artista con el nombre limpio
+			_, _ = dbase.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, cleanArtist)
+
+			// Actualizar la canción para que apunte al ID correcto y tenga el nombre limpio
+			_, _ = dbase.Conn.Exec("UPDATE tracks SET artist = ? WHERE id = ?", cleanArtist, t.id)
+			count++
 		}
 		slog.Info("✅ Deep Artist Repair completed", "processed_tracks", count)
 	}

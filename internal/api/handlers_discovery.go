@@ -18,17 +18,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	searchTerm := query + "*" 
+	searchTerm := query + "*"
+	likeTerm := query + "%"
 	results := make(map[string]interface{})
 
 	rows, err := s.getDB(r).Conn.Query(`
-		SELECT id, title, artist, album 
-		FROM search_idx 
-		WHERE search_idx MATCH ? 
-		ORDER BY rank 
+		SELECT id, title, artist, album
+		FROM search_idx
+		WHERE search_idx MATCH ?
+		ORDER BY rank
 		LIMIT 50`, searchTerm)
 
-	var tracks []map[string]interface{}
+	tracks := []map[string]interface{}{}
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -42,13 +43,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	results["albums"] = []string{}
 
 	genreRows, err := s.getDB(r).Conn.Query(`
-		SELECT DISTINCT genre 
-		FROM tracks 
+		SELECT DISTINCT genre
+		FROM tracks
 		WHERE genre LIKE ? AND status = 'active'
 		LIMIT 10
-	`, searchTerm)
+	`, likeTerm)
 
-	var genres []string
+	genres := []string{}
 	if err == nil {
 		defer genreRows.Close()
 		for genreRows.Next() {
@@ -60,13 +61,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	results["genres"] = genres
 
 	playlistRows, err := s.getDB(r).Conn.Query(`
-		SELECT id, name 
-		FROM playlists 
+		SELECT id, name
+		FROM playlists
 		WHERE name LIKE ?
 		LIMIT 10
-	`, searchTerm)
+	`, likeTerm)
 
-	var playlists []map[string]interface{}
+	playlists := []map[string]interface{}{}
 	if err == nil {
 		defer playlistRows.Close()
 		for playlistRows.Next() {

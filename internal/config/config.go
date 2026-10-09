@@ -8,19 +8,19 @@ import (
 )
 
 type Config struct {
-	DBPath        string
-	MusicPath     string
-	Port          string
-	AutoRename        bool
-	RenamePattern     string
-	ThemeColor        string
-	ReplayGainEnabled bool
-	Language          string `json:"language"`
-	CachePath         string
+	DBPath            string            `json:"dbPath"`
+	MusicPath         string            `json:"musicPath"`
+	Port              string            `json:"port"`
+	AutoRename        bool              `json:"autoRename"`
+	RenamePattern     string            `json:"renamePattern"`
+	ThemeColor        string            `json:"themeColor"`
+	ReplayGainEnabled bool              `json:"replayGainEnabled"`
+	Language          string            `json:"language"`
+	CachePath         string            `json:"cachePath"`
 	AllowedUsers      map[string]string `json:"-"` // username -> permissions (r/rw)
 	// CookieSecure activa Secure en la cookie de sesión. Solo tras proxy TLS
 	// (con http interno debe ser false o el navegador la rechaza).
-	CookieSecure bool
+	CookieSecure bool `json:"-"`
 }
 
 func LoadConfig() *Config {

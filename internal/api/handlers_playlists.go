@@ -115,10 +115,10 @@ func (s *Server) handleSmartPlaylists(w http.ResponseWriter, r *http.Request) {
 	typeStr := s.extractID(r, "/api/smart-playlists/")
 
 	baseQuery := `
-		SELECT t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''),
+		SELECT t.id, t.title, COALESCE(t.track_num, 0), COALESCE(t.disc_num, 0), COALESCE(t.duration, 0), COALESCE(t.genre, ''),
 		       a.name as artist, al.title as album, COALESCE(al.year, 0) as year,
-		       t.size, t.format, t.bit_rate, t.sample_rate,
-		       t.composer, t.comment, t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0)
+		       COALESCE(t.size, 0), COALESCE(t.format, ''), COALESCE(t.bit_rate, 0), COALESCE(t.sample_rate, 0),
+		       COALESCE(t.composer, ''), COALESCE(t.comment, ''), COALESCE(t.instrumental, 0), COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0)
 		FROM tracks t
 		JOIN albums al ON t.album_id = al.id
 		JOIN artists a ON al.artist_id = a.id`
@@ -230,14 +230,14 @@ func (s *Server) handleGetPlaylistTracks(w http.ResponseWriter, r *http.Request)
 
 	var isSmart int
 	var ruleSQL string
-	err := s.getDB(r).Conn.QueryRow("SELECT is_smart, rule_sql FROM playlists WHERE id = ? AND username = ?", id, user.Username).Scan(&isSmart, &ruleSQL)
+	err := s.getDB(r).Conn.QueryRow("SELECT is_smart, COALESCE(rule_sql, '') FROM playlists WHERE id = ? AND username = ?", id, user.Username).Scan(&isSmart, &ruleSQL)
 	if err != nil {
 		http.Error(w, "Playlist not found", http.StatusNotFound)
 		return
 	}
 
 	var rows *sql.Rows
-	fields := "t.id, t.title, t.track_num, t.disc_num, t.duration, COALESCE(t.genre, ''), a.name, al.title, COALESCE(al.year, 0), COALESCE(ut.rating, 0), t.composer, t.comment, t.instrumental, COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0)"
+	fields := "t.id, t.title, COALESCE(t.track_num, 0), COALESCE(t.disc_num, 0), COALESCE(t.duration, 0), COALESCE(t.genre, ''), a.name, al.title, COALESCE(al.year, 0), COALESCE(ut.rating, 0), COALESCE(t.composer, ''), COALESCE(t.comment, ''), COALESCE(t.instrumental, 0), COALESCE(t.track_total, 0), COALESCE(t.disc_total, 0)"
 
 	if isSmart == 1 && ruleSQL != "" {
 		rows, err = s.getDB(r).Conn.Query(`

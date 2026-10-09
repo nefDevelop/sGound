@@ -35,21 +35,26 @@ func (s *Server) handleGetArtists(w http.ResponseWriter, r *http.Request) {
 	dbase := s.getDB(r)
 	go func(db *db.MasterDatabase) {
 		repairQuery := `
-			SELECT DISTINCT artist 
-			FROM tracks 
+			SELECT DISTINCT artist
+			FROM tracks
 			WHERE artist IS NOT NULL AND artist != '' AND artist != 'Unknown'
 			  AND artist NOT IN (SELECT name FROM artists)`
 		rows, err := db.Conn.Query(repairQuery)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var name string
-				if err := rows.Scan(&name); err == nil {
-					artistID := utils.GenerateID(utils.NormalizeArtist(name))
-					_, _ = db.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, name)
-					slog.Info("🔧 Background repaired missing artist entry", "name", name)
-				}
+		if err != nil {
+			return
+		}
+		var missing []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err == nil {
+				missing = append(missing, name)
 			}
+		}
+		rows.Close()
+		for _, name := range missing {
+			artistID := utils.GenerateID(utils.NormalizeArtist(name))
+			_, _ = db.Conn.Exec("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", artistID, name)
+			slog.Info("🔧 Background repaired missing artist entry", "name", name)
 		}
 	}(dbase)
 
@@ -663,8 +668,9 @@ func (s *Server) normalizeAlbumTitle(title, artist string) string {
 			}
 		}
 
-		// 2. Quitar nombre del artista al final
-		if strings.HasSuffix(norm, artistLower) {
+		// 2. Quitar nombre del artista al final (con artista vacío
+		// HasSuffix siempre es true y el bucle no termina).
+		if artistLower != "" && strings.HasSuffix(norm, artistLower) {
 			norm = strings.TrimSpace(strings.TrimSuffix(norm, artistLower))
 			changed = true
 		}

@@ -43,7 +43,19 @@ func TestConnectAndInitSchema(t *testing.T) {
 }
 
 func TestConnectMaster_WALMode(t *testing.T) {
-	database := setupTestDB(t)
+	// WAL solo aplica a ficheros: :memory: siempre devuelve "memory".
+	f, err := os.CreateTemp("", "sgound-test-*.db")
+	if err != nil {
+		t.Fatalf("Temp file: %v", err)
+	}
+	path := f.Name()
+	f.Close()
+	t.Cleanup(func() { os.Remove(path) })
+	database, err := ConnectMaster(path)
+	if err != nil {
+		t.Fatalf("ConnectMaster: %v", err)
+	}
+	t.Cleanup(func() { database.Conn.Close() })
 	var mode string
 	database.Conn.QueryRow("PRAGMA journal_mode").Scan(&mode)
 	if mode != "wal" {
@@ -186,11 +198,11 @@ func TestCreateAPIKey_Success(t *testing.T) {
 func TestGetAPIKeys(t *testing.T) {
 	database := setupTestDB(t)
 	database.CreateUser("alice", "hash", "r", "", "*")
-	database.CreateKey := func(key, label string) {
+	createKey := func(key, label string) {
 		database.CreateAPIKey(key, "alice", "r", label)
 	}
-	database.CreateKey("k1", "Label1")
-	database.CreateKey("k2", "Label2")
+	createKey("k1", "Label1")
+	createKey("k2", "Label2")
 
 	keys, err := database.GetAPIKeys("alice")
 	if err != nil {

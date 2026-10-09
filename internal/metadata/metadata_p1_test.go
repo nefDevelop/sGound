@@ -10,7 +10,7 @@ import (
 	"sgound/internal/config"
 )
 
-func TestGetArtistInfo_EmptyName(t *testing.T) {
+func TestGetArtistInfo_EmptyName_P1(t *testing.T) {
 	cfg := &config.Config{Language: "en"}
 	em := NewExternalMetadata(cfg)
 
@@ -84,7 +84,7 @@ func TestSearchBestTitle_WikipediaMock(t *testing.T) {
 	}
 }
 
-func TestFetchSummary_Mock(t *testing.T) {
+func TestFetchSummary_Mock_P1(t *testing.T) {
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{

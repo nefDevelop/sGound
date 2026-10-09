@@ -29,6 +29,13 @@ func NormalizeArtist(name string) string {
 			name = name[:idx]
 		}
 	}
+	// Prefijo al inicio ("feat. Someone"): no hay artista principal,
+	// solo invitado -> cadena vacía.
+	for _, pre := range []string{"feat.", "feat ", "ft.", "ft ", "with "} {
+		if strings.HasPrefix(name, pre) {
+			return ""
+		}
+	}
 	return strings.TrimSpace(name)
 }
 

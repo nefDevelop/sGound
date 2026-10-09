@@ -49,9 +49,6 @@ func TestEnrichWithDeezer_Mock(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	cfg := &config.Config{Language: "en"}
-	em := &ExternalMetadata{Config: cfg}
-
 	info := &ArtistInfo{}
 	// We can't easily mock the Deezer URL without modifying the source,
 	// but we can test the structure
@@ -118,8 +115,6 @@ func TestFetchSummary_Mock(t *testing.T) {
 		} `json:"originalimage"`
 	}
 
-	json.NewDecoder(mockServer.Client().Get(mockServer.URL)).Decode(&result)
-
 	// Note: Can't directly test fetchSummary without mocking the URL
 	// But we verify the mock server returns expected data
 	resp, err := mockServer.Client().Get(mockServer.URL)
@@ -127,6 +122,13 @@ func TestFetchSummary_Mock(t *testing.T) {
 		t.Fatalf("Mock server request failed: %v", err)
 	}
 	defer resp.Body.Close()
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+	if result.Extract == "" {
+		t.Error("Expected non-empty extract")
+	}
 
 	if resp.StatusCode != 200 {
 		t.Errorf("Expected 200, got %d", resp.StatusCode)

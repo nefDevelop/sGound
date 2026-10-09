@@ -252,6 +252,9 @@ func TestIsMuted_CleanExpired(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// After expiry, isMuted should return false AND clean up the entry
+	if w.isMuted("/test/file.mp3") {
+		t.Error("Expired muted path should not be muted")
+	}
 	w.muMuted.Lock()
 	_, exists := w.mutedPaths["/test/file.mp3"]
 	w.muMuted.Unlock()

@@ -156,14 +156,16 @@ func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetLyrics(trackID string, w http.ResponseWriter, r *http.Request) {
 	var title, artist string
 	err := s.getDB(r).Conn.QueryRow(`
-		SELECT t.title, a.name 
-		FROM tracks t 
-		JOIN albums al ON t.album_id = al.id 
-		JOIN artists a ON al.artist_id = a.id 
+		SELECT t.title, a.name
+		FROM tracks t
+		JOIN albums al ON t.album_id = al.id
+		JOIN artists a ON al.artist_id = a.id
 		WHERE t.id = ?`, trackID).Scan(&title, &artist)
 
 	if err != nil {
-		http.Error(w, "Track not found", http.StatusNotFound)
+		// Sin letra y sin track: 200 con vacío (la UI muestra "No lyrics available").
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"lyrics": ""})
 		return
 	}
 

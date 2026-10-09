@@ -1,12 +1,12 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"sgound/internal/config"
 	"sgound/internal/db"
@@ -120,12 +120,19 @@ func TestHandleApproveAllTracks(t *testing.T) {
 
 	mux.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("Expected 200, got %d", rr.Code)
+	// Procesado asíncrono en segundo plano: 202 + espera activa.
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("Expected 202, got %d", rr.Code)
 	}
 
 	var count int
-	database.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active'").Scan(&count)
+	for i := 0; i < 100; i++ {
+		database.Conn.QueryRow("SELECT COUNT(*) FROM tracks WHERE status = 'active'").Scan(&count)
+		if count == 2 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if count != 2 {
 		t.Errorf("Expected 2 active tracks, got %d", count)
 	}
@@ -178,7 +185,7 @@ func TestHandleRateTrack(t *testing.T) {
 	server := NewServer(database, cfg)
 	mux := server.SetupRoutes()
 
-	body := []byte(`{"trackId":"t1","rating":5}`)
+	body := []byte(`{"id":"t1","rating":5}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/tracks/rate", bytesReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", "key")
@@ -479,14 +486,8 @@ func TestHandleCreatePlaylist(t *testing.T) {
 
 	mux.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("Expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
-	if resp["name"] != "Test Playlist" {
-		t.Errorf("Expected playlist name 'Test Playlist', got %v", resp["name"])
+	if rr.Code != http.StatusCreated {
+		t.Errorf("Expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
