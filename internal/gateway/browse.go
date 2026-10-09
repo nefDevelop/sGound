@@ -359,30 +359,34 @@ func (g *SubsonicGateway) handleSearch3(w http.ResponseWriter, r *http.Request) 
 		SELECT ar.id, ar.name,
 			(SELECT COUNT(*) FROM albums WHERE artist_id = ar.id)
 		FROM artists ar WHERE ar.name LIKE ? ORDER BY ar.name LIMIT ?`, like, artistCount)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var a artistPayload
-			if err := rows.Scan(&a.ID, &a.Name, &a.AlbumCount); err == nil {
-				p.Artists = append(p.Artists, a)
-			}
+	if err != nil {
+		writeErr(w, r, errGeneric, "Error de base de datos.")
+		return
+	}
+	for rows.Next() {
+		var a artistPayload
+		if err := rows.Scan(&a.ID, &a.Name, &a.AlbumCount); err == nil {
+			p.Artists = append(p.Artists, a)
 		}
 	}
+	rows.Close()
 	arows, err := g.DB.Conn.Query(`
 		SELECT al.id, al.title, COALESCE(ar.name, ''), al.artist_id,
 			COALESCE(al.year, 0)
 		FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_id
 		WHERE al.title LIKE ? ORDER BY al.title LIMIT ?`, like, albumCount)
-	if err == nil {
-		defer arows.Close()
-		for arows.Next() {
-			var a albumPayload
-			if err := arows.Scan(&a.ID, &a.Name, &a.Artist, &a.ArtistID, &a.Year); err == nil {
-				a.CoverArt = a.ID
-				p.Albums = append(p.Albums, a)
-			}
+	if err != nil {
+		writeErr(w, r, errGeneric, "Error de base de datos.")
+		return
+	}
+	for arows.Next() {
+		var a albumPayload
+		if err := arows.Scan(&a.ID, &a.Name, &a.Artist, &a.ArtistID, &a.Year); err == nil {
+			a.CoverArt = a.ID
+			p.Albums = append(p.Albums, a)
 		}
 	}
+	arows.Close()
 	songs, err := g.querySongs("WHERE (t.title LIKE ? OR t.artist LIKE ?) AND t.status = 'active'",
 		"ORDER BY t.title LIMIT ?", like, like, songCount)
 	if err == nil {

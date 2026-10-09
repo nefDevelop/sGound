@@ -232,6 +232,7 @@ func (db *MasterDatabase) initSchema() error {
 	db.addColumnIfNotExists("albums", "cover_height", "INTEGER")
 	db.addColumnIfNotExists("albums", "cover_size", "INTEGER")
 	db.addColumnIfNotExists("albums", "cover_format", "TEXT")
+	db.addColumnIfNotExists("user_tracks", "starred", "INTEGER DEFAULT 0")
 	
 	// Índices para optimización de rendimiento
 	db.Conn.Exec("CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(path)")

@@ -33,6 +33,16 @@ func (g *SubsonicGateway) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/rest/stream.view", g.handleStream)
 	mux.HandleFunc("/rest/download.view", g.handleDownload)
 	mux.HandleFunc("/rest/getCoverArt.view", g.handleGetCoverArt)
+	mux.HandleFunc("/rest/getPlaylists.view", g.handleGetPlaylists)
+	mux.HandleFunc("/rest/getPlaylist.view", g.handleGetPlaylist)
+	mux.HandleFunc("/rest/createPlaylist.view", g.handleCreatePlaylist)
+	mux.HandleFunc("/rest/updatePlaylist.view", g.handleUpdatePlaylist)
+	mux.HandleFunc("/rest/deletePlaylist.view", g.handleDeletePlaylist)
+	mux.HandleFunc("/rest/star.view", g.handleStar)
+	mux.HandleFunc("/rest/unstar.view", g.handleUnstar)
+	mux.HandleFunc("/rest/getStarred.view", g.handleGetStarred)
+	mux.HandleFunc("/rest/setRating.view", g.handleSetRating)
+	mux.HandleFunc("/rest/scrobble.view", g.handleScrobble)
 }
 
 // SubsonicResponseWrapper forma la estructura ridícula que exigen los clientes Subsonic

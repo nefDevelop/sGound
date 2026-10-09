@@ -250,3 +250,57 @@ func TestGetArtists_JSON(t *testing.T) {
 		t.Errorf("Respuesta inesperada: %v", resp)
 	}
 }
+
+func TestPlaylist_CRUD(t *testing.T) {
+	gw := setupAuthGateway(t)
+	mux := http.NewServeMux()
+	gw.RegisterRoutes(mux)
+	base := "/rest/createPlaylist.view?v=1.16.1&c=test&u=tester&p=secret123&name=Mix"
+
+	req := httptest.NewRequest(http.MethodGet, base, nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if !strings.Contains(rr.Body.String(), `status="ok"`) {
+		t.Fatalf("create: %s", rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/rest/getPlaylists.view?v=1.16.1&c=test&f=json&u=tester&p=secret123", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	var resp map[string]map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	pls, _ := resp["subsonic-response"]["playlists"].(map[string]any)["playlist"].([]any)
+	if len(pls) != 1 {
+		t.Fatalf("Se esperaba 1 playlist: %v", resp)
+	}
+	id, _ := pls[0].(map[string]any)["id"].(string)
+
+	req = httptest.NewRequest(http.MethodGet, "/rest/deletePlaylist.view?v=1.16.1&c=test&u=tester&p=secret123&id="+id, nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if !strings.Contains(rr.Body.String(), `status="ok"`) {
+		t.Fatalf("delete: %s", rr.Body.String())
+	}
+}
+
+func TestStar_Scrobble_NeedTrack(t *testing.T) {
+	gw := setupAuthGateway(t)
+	mux := http.NewServeMux()
+	gw.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/rest/star.view?v=1.16.1&c=test&u=tester&p=secret123&id=inexistente", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if !strings.Contains(rr.Body.String(), `code="70"`) {
+		t.Errorf("star inexistente debería dar 70: %s", rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/rest/scrobble.view?v=1.16.1&c=test&u=tester&p=secret123", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if !strings.Contains(rr.Body.String(), `code="10"`) {
+		t.Errorf("scrobble sin id debería dar 10: %s", rr.Body.String())
+	}
+}
