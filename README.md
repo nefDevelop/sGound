@@ -22,7 +22,7 @@
 - **Dashboard y Logs:** Estadísticas de la biblioteca con colecciones rápidas (joyas olvidadas, más escuchadas) y visor de logs en tiempo real (SSE).
 - **Watcher en Tiempo Real:** Altas y bajas de archivos detectadas con `fsnotify` sin necesidad de reescaneo manual.
 - **Documentación de API:** Swagger UI en `/api/docs` generada desde `openapi.yaml`.
-- **OpenSubsonic (parcial):** responde a `/rest/ping.view`; el resto de la compatibilidad está en desarrollo (`internal/gateway`).
+- **OpenSubsonic:** navegación (`getArtists/getArtist/getAlbum/getSong/search3`), streaming, descarga y portadas; auth por API key o contraseña (token `t/s` no soportado contra hashes argon2, devuelve error 41). Playlists y scrobble, pendientes (`internal/gateway`).
 
 ## Inicio rápido
 

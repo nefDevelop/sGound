@@ -169,8 +169,8 @@ func (s *Server) SetupRoutes() http.Handler {
 	// 2.5 API Key Management (Self-service)
 	mux.HandleFunc("/api/auth/apikeys", s.authMiddleware(s.handleAPIKeys))
 
-	// 2.6 OpenSubsonic gateway (de momento solo ping; ver internal/gateway)
-	gateway.NewSubsonicGateway(s.MasterDB).RegisterRoutes(mux)
+	// 2.6 OpenSubsonic gateway (navegación, búsqueda, stream y portadas)
+	gateway.NewSubsonicGateway(s.MasterDB, s.Config.MusicPath, s.Config.CachePath).RegisterRoutes(mux)
 
 	// 3. Frontend SPA handler Embedded
 	if frontendFS, err := web.GetFrontendAssets(); err == nil {
